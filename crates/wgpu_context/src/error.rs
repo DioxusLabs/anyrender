@@ -15,7 +15,7 @@ pub enum WgpuContextError {
     /// Surface doesn't support the required texture formats.
     /// Make sure that you have a surface which provides one of
     /// `TextureFormat::Rgba8Unorm`
-    /// or [`TextureFormat::Bgra8Unorm`] as texture formats.
+    /// or `TextureFormat::Bgra8Unorm` as texture formats.
     // TODO: Why does this restriction exist?
     UnsupportedSurfaceFormat,
     /// Wgpu failed to request an adapter

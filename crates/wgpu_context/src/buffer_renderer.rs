@@ -11,7 +11,7 @@ pub struct BufferRendererConfig {
     pub usage: TextureUsages,
 }
 
-/// Utility struct for rendering to Vec<u8>
+/// Utility struct for rendering to `Vec<u8>`
 pub struct BufferRenderer {
     // The device and queue for rendering to the surface
     pub dev_id: usize,
