@@ -73,7 +73,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
                     NonZero::new(physical_height.max(1)).unwrap(),
                 )
                 .unwrap();
-            self.renderer = Renderer::new(physical_width, physical_height);
+            self.renderer.resize(physical_width, physical_height);
         };
     }
 

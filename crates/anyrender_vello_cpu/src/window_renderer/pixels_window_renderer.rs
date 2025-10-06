@@ -78,7 +78,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
                 .pixels
                 .resize_surface(physical_width, physical_height)
                 .unwrap();
-            self.renderer = Renderer::new(physical_width, physical_height);
+            self.renderer.resize(physical_width, physical_height);
         };
     }
 
