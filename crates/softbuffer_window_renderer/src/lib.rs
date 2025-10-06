@@ -99,12 +99,14 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();
-        let (chunks, remainder) = vec.as_chunks::<4>();
-        assert_eq!(chunks.len(), out.len());
-        assert_eq!(remainder.len(), 0);
 
-        for (src, dest) in chunks.iter().zip(out.iter_mut()) {
-            let [r, g, b, a] = *src;
+        // TODO: replace chunk_exacts with as_chunks once MSRV hits 1.88
+        let chunks = vec.chunks_exact(4);
+        assert_eq!(chunks.size_hint().0, out.len());
+        assert_eq!(chunks.remainder().len(), 0);
+
+        for (src, dest) in chunks.zip(out.iter_mut()) {
+            let [r, g, b, a]: [u8; 4] = src.try_into().unwrap();
             if a == 0 {
                 *dest = u32::MAX;
             } else {
