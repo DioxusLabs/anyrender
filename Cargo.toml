@@ -23,10 +23,10 @@ rust-version = "1.86.0"
 
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
-anyrender = { version = "0.5.0", path = "./crates/anyrender" }
-anyrender_vello = { version = "0.5.1", path = "./crates/anyrender_vello" }
-anyrender_vello_cpu = { version = "0.6.0", path = "./crates/anyrender_vello_cpu" }
-anyrender_svg = { version = "0.5.0", path = "./crates/anyrender_svg" }
+anyrender = { version = "0.6.0", path = "./crates/anyrender" }
+anyrender_vello = { version = "0.6.0", path = "./crates/anyrender_vello" }
+anyrender_vello_cpu = { version = "0.7.0", path = "./crates/anyrender_vello_cpu" }
+anyrender_svg = { version = "0.6.0", path = "./crates/anyrender_svg" }
 wgpu_context = { version = "0.1.0", path = "./crates/wgpu_context" }
 pixels_window_renderer = { version = "0.1.0", path = "./crates/pixels_window_renderer" }
 softbuffer_window_renderer = { version = "0.1.0", path = "./crates/softbuffer_window_renderer" }
