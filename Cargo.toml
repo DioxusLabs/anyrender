@@ -8,6 +8,7 @@ members = [
   "crates/pixels_window_renderer",
   "crates/softbuffer_window_renderer",
   "examples/winit",
+  "examples/bunnymark",
 ]
 resolver = "2"
 
