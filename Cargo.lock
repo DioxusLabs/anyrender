@@ -125,8 +125,8 @@ dependencies = [
  "debug_timer",
  "kurbo 0.12.0",
  "peniko",
- "pixels",
- "softbuffer",
+ "pixels_window_renderer",
+ "softbuffer_window_renderer",
  "vello_cpu",
 ]
 
@@ -1838,6 +1838,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pixels_window_renderer"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "debug_timer",
+ "pixels",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2302,6 +2311,15 @@ dependencies = [
  "web-sys",
  "windows-sys 0.59.0",
  "x11rb",
+]
+
+[[package]]
+name = "softbuffer_window_renderer"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "debug_timer",
+ "softbuffer",
 ]
 
 [[package]]

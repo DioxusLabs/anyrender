@@ -1,0 +1,17 @@
+[package]
+name = "softbuffer_window_renderer"
+description = "AnyRender WindowRenderer backed by the softbuffer crate"
+version = "0.1.0"
+documentation = "https://docs.rs/softbuffer_window_renderer"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[features]
+log_frame_times = ["debug_timer/enable"]
+
+[dependencies]
+anyrender = { workspace = true }
+debug_timer = { workspace = true }
+softbuffer = { workspace = true }

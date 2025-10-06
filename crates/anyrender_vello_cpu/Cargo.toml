@@ -9,10 +9,14 @@ license.workspace = true
 edition.workspace = true
 
 [features]
-pixels_window_renderer = ["dep:pixels"]
-softbuffer_window_renderer = ["dep:softbuffer"]
+pixels_window_renderer = ["dep:pixels_window_renderer"]
+softbuffer_window_renderer = ["dep:softbuffer_window_renderer"]
 multithreading = ["vello_cpu/multithreading"]
-log_frame_times = ["debug_timer/enable"]
+log_frame_times = [
+  "debug_timer/enable",
+  "softbuffer_window_renderer?/log_frame_times",
+  "pixels_window_renderer?/log_frame_times",
+]
 
 [dependencies]
 anyrender = { workspace = true }
@@ -21,8 +25,8 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 
 # WindowRenderer backends
-softbuffer = { workspace = true, optional = true }
-pixels = { workspace = true, optional = true }
+softbuffer_window_renderer = { workspace = true, optional = true }
+pixels_window_renderer = { workspace = true, optional = true }
 
 # External vello_cpu
 vello_cpu = { workspace = true }
