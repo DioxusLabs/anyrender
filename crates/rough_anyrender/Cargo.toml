@@ -1,0 +1,32 @@
+[package]
+name = "rough_anyrender"
+version = "0.1.0"
+edition = "2021"
+authors = ["orhanbalci@gmail.com <orhanbalci@gmail.com>"]
+description = "Draw Hand Sketched 2D Drawings Using Vello"
+repository = "https://github.com/orhanbalci/rough-rs.git"
+homepage = "https://github.com/orhanbalci"
+keywords = ["graphics", "bezier", "sketch", "2D", "vello"]
+categories = ["graphics"]
+license = "MIT"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyrender = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+roughr = { version = "0.12.0" }
+num-traits = "0.2"
+euclid = "0.22"
+palette = "0.7"
+
+[dev-dependencies]
+anyrender_vello = { workspace = true }
+rand = "0.8"
+rand_distr = "0.4"
+svg_path_ops = { version = "0.11.0" }
+bevy = "0.17"
+bevy_vello = "0.12"
+wgpu = "26"
