@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTDOCFLAGS: "-D warnings"
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: "sparse"
+
+jobs:
+
+  # MSRV check.
+  # AnyRender only guarantees "latest stable". However we have this check here to ensure that we advertise
+  # our MSRV. We also make an effort not to increase MSRV in patch versions of AnyRender.
+  #
+  # We only run `cargo build` (not `cargo test`) so as to avoid requiring dev-dependencies to build with the MSRV
+  # version. Building is likely sufficient as runtime errors varying between rust versions is very unlikely.
+  build-msrv:
+    name: "MSRV Build [Rust 1.86]"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.86
+      - run: cargo build --workspace
+
+  build-features-default:
+    name: "Build [default features]"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+      - run: cargo clippy --workspace -- -D warnings
+
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc
+
+  # just cargo check for now
+  matrix_test:
+    runs-on: ${{ matrix.platform.os }}
+    env:
+      RUST_CARGO_COMMAND: ${{ matrix.platform.cross == true && 'cross' || 'cargo' }}
+    strategy:
+      matrix:
+        platform:
+          - {
+              name: windows,
+              target: x86_64-pc-windows-msvc,
+              os: windows-latest,
+              cross: false,
+              command: "test",
+              args: "--all --tests",
+              setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
+            }
+          - {
+              name: macos,
+              target: aarch64-apple-darwin,
+              os: macos-latest,
+              cross: false,
+              command: "test",
+              args: "--all --tests",
+              setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
+            }
+          - {
+              name: linux,
+              target: x86_64-unknown-linux-gnu,
+              os: ubuntu-latest,
+              cross: false,
+              command: "test",
+              args: "--all --tests",
+            }
+
+    name: Test (${{ matrix.platform.name }})
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: install stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.platform.target }}
+          components: rustfmt
+
+      - name: Install cross
+        if: ${{ matrix.platform.cross == true }}
+        uses: taiki-e/install-action@cross
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: "${{ matrix.platform.target }}"
+          cache-all-crates: "true"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Setup
+        run: ${{ matrix.platform.setup }} 
+        shell: bash
+
+      - name: test
+        run: |
+          ${{ env.RUST_CARGO_COMMAND }} ${{ matrix.platform.command }} ${{ matrix.platform.args }} --target ${{ matrix.platform.target }}
