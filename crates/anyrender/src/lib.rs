@@ -54,7 +54,14 @@ pub trait ImageRenderer {
     where
         Self: 'a;
     fn new(width: u32, height: u32) -> Self;
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut Vec<u8>);
+    fn resize(&mut self, width: u32, height: u32);
+    fn reset(&mut self);
+    fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+        vec: &mut Vec<u8>,
+    );
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]);
 }
 
 /// Draw a scene to a buffer using an `ImageRenderer`

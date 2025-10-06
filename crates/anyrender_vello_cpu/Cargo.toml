@@ -9,6 +9,7 @@ license.workspace = true
 edition.workspace = true
 
 [features]
+default = ["pixels_window_renderer", "softbuffer_window_renderer"]
 pixels_window_renderer = ["dep:pixels"]
 softbuffer_window_renderer = ["dep:softbuffer"]
 multithreading = ["vello_cpu/multithreading"]

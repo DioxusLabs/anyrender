@@ -76,6 +76,27 @@ impl BufferRenderer {
         }
     }
 
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.config.width = width;
+        self.config.height = height;
+        self.texture_view = create_texture(
+            self.config.width,
+            self.config.height,
+            TextureFormat::Rgba8Unorm,
+            self.config.usage | TextureUsages::COPY_SRC,
+            &self.device_handle.device,
+        );
+
+        let padded_byte_width = (width * 4).next_multiple_of(256);
+        let buffer_size = padded_byte_width as u64 * height as u64;
+        self.gpu_buffer = self.device_handle.device.create_buffer(&BufferDescriptor {
+            label: None,
+            size: buffer_size,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+    }
+
     // /// Resizes the surface to the new dimensions.
     // pub fn resize(&mut self, width: u32, height: u32) {
     //     // TODO: Use clever resize semantics to avoid thrashing the memory allocator during a resize
@@ -97,13 +118,20 @@ impl BufferRenderer {
         self.texture_view.clone()
     }
 
-    pub fn copy_texture_to_buffer(&self, cpu_buffer: &mut Vec<u8>) {
+    pub fn copy_texture_to_vec(&self, cpu_buffer: &mut Vec<u8>) {
+        cpu_buffer.clear();
+        cpu_buffer.reserve((self.config.width * self.config.height * 4) as usize);
+        self.copy_texture_to_buffer(&mut *cpu_buffer);
+    }
+
+    pub fn copy_texture_to_buffer(&self, cpu_buffer: &mut [u8]) {
         let mut encoder = self
             .device()
             .create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("Copy out buffer"),
             });
-        let padded_byte_width = (self.config.width * 4).next_multiple_of(256);
+        let row_byte_width = self.config.width as usize * 4;
+        let padded_row_byte_width = row_byte_width.next_multiple_of(256);
 
         let texture = self.texture_view.texture();
         encoder.copy_texture_to_buffer(
@@ -112,7 +140,7 @@ impl BufferRenderer {
                 buffer: &self.gpu_buffer,
                 layout: TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(padded_byte_width),
+                    bytes_per_row: Some(padded_row_byte_width as u32),
                     rows_per_image: None,
                 },
             },
@@ -135,13 +163,13 @@ impl BufferRenderer {
 
         let data = buf_slice.get_mapped_range();
 
-        cpu_buffer.clear();
-        cpu_buffer.reserve((self.config.width * self.config.height * 4) as usize);
-
         // Pad result
-        for row in 0..self.config.height {
-            let start = (row * padded_byte_width).try_into().unwrap();
-            cpu_buffer.extend(&data[start..start + (self.config.width * 4) as usize]);
+        for row in 0..(self.config.height as usize) {
+            let src_start = row * padded_row_byte_width;
+            let src = &data[src_start..(src_start + row_byte_width)];
+
+            let dest_start = row * row_byte_width;
+            cpu_buffer[dest_start..(dest_start + row_byte_width)].clone_from_slice(src);
         }
 
         // Unmap buffer

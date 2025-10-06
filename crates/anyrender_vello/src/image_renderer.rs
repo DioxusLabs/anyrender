@@ -53,10 +53,31 @@ impl ImageRenderer for VelloImageRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+    fn resize(&mut self, width: u32, height: u32) {
+        self.buffer_renderer.resize(width, height);
+    }
+
+    fn reset(&mut self) {
+        if let Some(scene) = &mut self.scene {
+            scene.reset();
+        }
+    }
+
+    fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
         draw_fn: F,
         cpu_buffer: &mut Vec<u8>,
+    ) {
+        let size = self.buffer_renderer.size();
+        cpu_buffer.clear();
+        cpu_buffer.reserve((size.width * size.height * 4) as usize);
+        self.render(draw_fn, cpu_buffer);
+    }
+
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+        cpu_buffer: &mut [u8],
     ) {
         let mut scene = VelloScenePainter {
             inner: self.scene.take().unwrap(),
