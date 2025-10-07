@@ -1,5 +1,6 @@
 use anyrender::{PaintScene, WindowRenderer};
 use anyrender_skia::SkiaWindowRenderer;
+use anyrender_tiny_skia::{TinySkiaImageRenderer, TinySkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
@@ -32,6 +33,7 @@ enum Renderer {
     Gpu(Box<VelloWindowRenderer>),
     Hybrid(Box<VelloHybridWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
+    TinySkia(Box<TinySkiaWindowRenderer>),
 }
 
 impl Renderer {
@@ -41,6 +43,7 @@ impl Renderer {
             Renderer::Gpu(r) => r.is_active(),
             Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
+            Renderer::TinySkia(r) => r.is_active(),
         }
     }
 
@@ -50,6 +53,7 @@ impl Renderer {
             Renderer::Gpu(r) => r.set_size(w, h),
             Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
+            Renderer::TinySkia(r) => r.set_size(w, h),
         }
     }
 }
@@ -205,6 +209,7 @@ impl ApplicationHandler for App {
                     Renderer::Gpu(_) => "vello",
                     Renderer::Hybrid(_) => "vello_hybrid",
                     Renderer::Cpu(_) => "vello_cpu",
+                    Renderer::TinySkia(_) => "tiny_skia",
                 };
                 print!(
                     "[{}] [{} bunnies] ",
@@ -252,6 +257,16 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(0, 255, 0),
                         );
                     }),
+                    Renderer::TinySkia(r) => r.render(|scene_painter| {
+                        App::draw_scene(
+                            scene_painter,
+                            self.logical_width,
+                            self.logical_height,
+                            self.scale_factor,
+                            &self.bunny_manager,
+                            Color::from_rgb8(0, 255, 0),
+                        );
+                    }),
                 }
                 window.request_redraw();
             }
@@ -287,6 +302,11 @@ impl ApplicationHandler for App {
                             });
                         }
                         Renderer::Skia(_) => {
+                            self.set_backend(TinySkiaWindowRenderer::new(), event_loop, |r| {
+                                Renderer::TinySkia(Box::new(r))
+                            });
+                        }
+                        Renderer::TinySkia(_) => {
                             self.set_backend(VelloCpuWindowRenderer::new(), event_loop, |r| {
                                 Renderer::Cpu(Box::new(r))
                             });
