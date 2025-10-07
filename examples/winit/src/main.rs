@@ -1,4 +1,5 @@
 use anyrender::{NullWindowRenderer, PaintScene, WindowRenderer};
+use anyrender_tiny_skia::TinySkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
@@ -23,7 +24,8 @@ type VelloCpuSBWindowRenderer = SoftbufferWindowRenderer<VelloCpuImageRenderer>;
 type VelloCpuWindowRenderer = PixelsWindowRenderer<VelloCpuImageRenderer>;
 
 // type InitialBackend = VelloWindowRenderer;
-type InitialBackend = VelloHybridWindowRenderer;
+// type InitialBackend = VelloHybridWindowRenderer;
+type InitialBackend = TinySkiaWindowRenderer;
 // type InitialBackend = VelloCpuWindowRenderer;
 // type InitialBackend = VelloCpuSBWindowRenderer;
 // type InitialBackend = NullWindowRenderer;
@@ -32,6 +34,7 @@ enum Renderer {
     Gpu(Box<VelloWindowRenderer>),
     Hybrid(Box<VelloHybridWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
+    TinySkia(Box<TinySkiaWindowRenderer>),
     CpuSoftbuffer(Box<VelloCpuSBWindowRenderer>),
     Null(NullWindowRenderer),
 }
@@ -55,6 +58,11 @@ impl From<VelloCpuSBWindowRenderer> for Renderer {
         Self::CpuSoftbuffer(Box::new(renderer))
     }
 }
+impl From<TinySkiaWindowRenderer> for Renderer {
+    fn from(renderer: TinySkiaWindowRenderer) -> Self {
+        Self::TinySkia(Box::new(renderer))
+    }
+}
 impl From<NullWindowRenderer> for Renderer {
     fn from(renderer: NullWindowRenderer) -> Self {
         Self::Null(renderer)
@@ -67,6 +75,7 @@ impl Renderer {
             Renderer::Gpu(r) => r.is_active(),
             Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
+            Renderer::TinySkia(r) => r.is_active(),
             Renderer::CpuSoftbuffer(r) => r.is_active(),
             Renderer::Null(r) => r.is_active(),
         }
@@ -77,6 +86,7 @@ impl Renderer {
             Renderer::Gpu(r) => r.set_size(w, h),
             Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
+            Renderer::TinySkia(r) => r.set_size(w, h),
             Renderer::CpuSoftbuffer(r) => r.set_size(w, h),
             Renderer::Null(r) => r.set_size(w, h),
         }
@@ -196,6 +206,9 @@ impl ApplicationHandler for App {
                 Renderer::Gpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(255, 0, 0))),
                 Renderer::Hybrid(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0))),
                 Renderer::Cpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 255, 0))),
+                Renderer::TinySkia(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 255)))
+                }
                 Renderer::CpuSoftbuffer(r) => {
                     r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 255)))
                 }
@@ -221,6 +234,9 @@ impl ApplicationHandler for App {
                 }
                 Renderer::Null(_) => {
                     self.set_backend(VelloCpuWindowRenderer::new(), event_loop);
+                }
+                Renderer::TinySkia(_) => {
+                    self.set_backend(VelloWindowRenderer::new(), event_loop);
                 }
             },
             _ => {}
