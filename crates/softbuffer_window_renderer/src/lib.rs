@@ -91,26 +91,23 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         let Ok(mut surface_buffer) = state.surface.buffer_mut() else {
             return;
         };
+        let out = surface_buffer.as_mut();
         timer.record_time("buffer_mut");
 
         // Paint
-        let mut vec = Vec::new();
-        self.renderer.render_to_vec(draw_fn, &mut vec);
+        let (prefix, out_u8, suffix) = unsafe { out.align_to_mut::<u8>() };
+        assert_eq!(prefix.len(), 0);
+        assert_eq!(suffix.len(), 0);
+
+        self.renderer.render(draw_fn, out_u8);
         timer.record_time("render");
 
-        let out = surface_buffer.as_mut();
-
-        // TODO: replace chunk_exacts with as_chunks once MSRV hits 1.88
-        let chunks = vec.chunks_exact(4);
-        assert_eq!(chunks.size_hint().0, out.len());
-        assert_eq!(chunks.remainder().len(), 0);
-
-        for (src, dest) in chunks.zip(out.iter_mut()) {
-            let [r, g, b, a]: [u8; 4] = src.try_into().unwrap();
-            if a == 0 {
-                *dest = u32::MAX;
+        // Swizel
+        for pixel in out.iter_mut() {
+            if *pixel >> 24 == 0 {
+                *pixel = u32::MAX >> 8;
             } else {
-                *dest = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+                *pixel = pixel.swap_bytes() >> 8;
             }
         }
         timer.record_time("swizel");
