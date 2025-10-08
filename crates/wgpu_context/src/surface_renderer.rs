@@ -187,6 +187,12 @@ impl<'s> SurfaceRenderer<'s> {
             .configure(&self.device_handle.device, &self.config);
     }
 
+    pub fn current_surface_texture(&self) -> SurfaceTexture {
+        self.surface
+            .get_current_texture()
+            .expect("failed to get surface texture")
+    }
+
     pub fn target_texture_view(&self) -> TextureView {
         match &self.intermediate_texture {
             Some(intermediate_texture) => intermediate_texture.texture_view.clone(),

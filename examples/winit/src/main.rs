@@ -1,6 +1,7 @@
 use anyrender::{NullWindowRenderer, PaintScene, WindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
+use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
 use std::sync::Arc;
@@ -21,13 +22,15 @@ struct App {
 type VelloCpuSBWindowRenderer = SoftbufferWindowRenderer<VelloCpuImageRenderer>;
 type VelloCpuWindowRenderer = PixelsWindowRenderer<VelloCpuImageRenderer>;
 
-// type InitialBackend = NullWindowRenderer;
-// type InitialBackend = VelloCpuWindowRenderer;
-type InitialBackend = VelloCpuSBWindowRenderer;
 // type InitialBackend = VelloWindowRenderer;
+type InitialBackend = VelloHybridWindowRenderer;
+// type InitialBackend = VelloCpuWindowRenderer;
+// type InitialBackend = VelloCpuSBWindowRenderer;
+// type InitialBackend = NullWindowRenderer;
 
 enum Renderer {
     Gpu(Box<VelloWindowRenderer>),
+    Hybrid(Box<VelloHybridWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
     CpuSoftbuffer(Box<VelloCpuSBWindowRenderer>),
     Null(NullWindowRenderer),
@@ -35,6 +38,11 @@ enum Renderer {
 impl From<VelloWindowRenderer> for Renderer {
     fn from(renderer: VelloWindowRenderer) -> Self {
         Self::Gpu(Box::new(renderer))
+    }
+}
+impl From<VelloHybridWindowRenderer> for Renderer {
+    fn from(renderer: VelloHybridWindowRenderer) -> Self {
+        Self::Hybrid(Box::new(renderer))
     }
 }
 impl From<VelloCpuWindowRenderer> for Renderer {
@@ -57,6 +65,7 @@ impl Renderer {
     fn is_active(&self) -> bool {
         match self {
             Renderer::Gpu(r) => r.is_active(),
+            Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
             Renderer::CpuSoftbuffer(r) => r.is_active(),
             Renderer::Null(r) => r.is_active(),
@@ -66,6 +75,7 @@ impl Renderer {
     fn set_size(&mut self, w: u32, h: u32) {
         match self {
             Renderer::Gpu(r) => r.set_size(w, h),
+            Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
             Renderer::CpuSoftbuffer(r) => r.set_size(w, h),
             Renderer::Null(r) => r.set_size(w, h),
@@ -184,6 +194,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => match renderer {
                 Renderer::Gpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(255, 0, 0))),
+                Renderer::Hybrid(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0))),
                 Renderer::Cpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 255, 0))),
                 Renderer::CpuSoftbuffer(r) => {
                     r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 255)))
@@ -200,6 +211,9 @@ impl ApplicationHandler for App {
                 ..
             } => match renderer {
                 Renderer::Cpu(_) | Renderer::CpuSoftbuffer(_) => {
+                    self.set_backend(VelloHybridWindowRenderer::new(), event_loop);
+                }
+                Renderer::Hybrid(_) => {
                     self.set_backend(VelloWindowRenderer::new(), event_loop);
                 }
                 Renderer::Gpu(_) => {

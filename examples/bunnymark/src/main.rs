@@ -1,6 +1,7 @@
 use anyrender::{PaintScene, WindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
+use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use bunny::BunnyManager;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
@@ -27,6 +28,7 @@ struct App {
 
 enum Renderer {
     Gpu(Box<VelloWindowRenderer>),
+    Hybrid(Box<VelloHybridWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
 }
 
@@ -34,6 +36,7 @@ impl Renderer {
     fn is_active(&self) -> bool {
         match self {
             Renderer::Gpu(r) => r.is_active(),
+            Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
         }
     }
@@ -41,6 +44,7 @@ impl Renderer {
     fn set_size(&mut self, w: u32, h: u32) {
         match self {
             Renderer::Gpu(r) => r.set_size(w, h),
+            Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
         }
     }
@@ -151,8 +155,8 @@ impl ApplicationHandler for App {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.set_backend(VelloCpuWindowRenderer::new(), event_loop, |r| {
-            Renderer::Cpu(Box::new(r))
+        self.set_backend(VelloHybridWindowRenderer::new(), event_loop, |r| {
+            Renderer::Hybrid(Box::new(r))
         });
     }
 
@@ -194,6 +198,7 @@ impl ApplicationHandler for App {
                     .update(self.logical_width as f64, self.logical_height as f64);
                 let renderer_name = match renderer {
                     Renderer::Gpu(_) => "vello",
+                    Renderer::Hybrid(_) => "vello_hybrid",
                     Renderer::Cpu(_) => "vello_cpu",
                 };
                 print!(
@@ -203,6 +208,16 @@ impl ApplicationHandler for App {
                 );
                 match renderer {
                     Renderer::Gpu(r) => r.render(|scene_painter| {
+                        App::draw_scene(
+                            scene_painter,
+                            self.logical_width,
+                            self.logical_height,
+                            self.scale_factor,
+                            &self.bunny_manager,
+                            Color::from_rgb8(255, 0, 0),
+                        );
+                    }),
+                    Renderer::Hybrid(r) => r.render(|scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -242,6 +257,11 @@ impl ApplicationHandler for App {
                 if logical_key == Key::Named(NamedKey::Space) {
                     match renderer {
                         Renderer::Cpu(_) => {
+                            self.set_backend(VelloHybridWindowRenderer::new(), event_loop, |r| {
+                                Renderer::Hybrid(Box::new(r))
+                            });
+                        }
+                        Renderer::Hybrid(_) => {
                             self.set_backend(VelloWindowRenderer::new(), event_loop, |r| {
                                 Renderer::Gpu(Box::new(r))
                             });
