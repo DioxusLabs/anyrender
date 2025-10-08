@@ -21,6 +21,14 @@ categories = ["gui"]
 edition = "2024"
 rust-version = "1.86.0"
 
+[profile.production]
+inherits = "release"
+lto = true
+codegen-units = 1
+debug = false
+strip = true
+incremental = false
+
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
 anyrender = { version = "0.6.0", path = "./crates/anyrender" }
