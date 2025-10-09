@@ -74,7 +74,7 @@ pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity((width * height * 4) as usize);
     let mut renderer = R::new(width, height);
-    renderer.render(draw_fn, &mut buf);
+    renderer.render_to_vec(draw_fn, &mut buf);
 
     buf
 }
