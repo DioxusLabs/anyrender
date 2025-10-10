@@ -3,6 +3,7 @@ members = [
   "crates/anyrender",
   "crates/anyrender_vello",
   "crates/anyrender_vello_cpu",
+  "crates/anyrender_vello_hybrid",
   "crates/anyrender_svg",
   "crates/wgpu_context",
   "crates/pixels_window_renderer",
@@ -26,6 +27,7 @@ rust-version = "1.86.0"
 anyrender = { version = "0.6.0", path = "./crates/anyrender" }
 anyrender_vello = { version = "0.6.0", path = "./crates/anyrender_vello" }
 anyrender_vello_cpu = { version = "0.7.0", path = "./crates/anyrender_vello_cpu" }
+anyrender_vello_hybrid = { version = "0.1.0", path = "./crates/anyrender_vello_hybrid" }
 anyrender_svg = { version = "0.6.0", path = "./crates/anyrender_svg" }
 wgpu_context = { version = "0.1.0", path = "./crates/wgpu_context" }
 pixels_window_renderer = { version = "0.1.0", path = "./crates/pixels_window_renderer" }
@@ -38,6 +40,8 @@ peniko = "0.5.0"
 kurbo = "0.12"
 vello = { version = "0.6", features = [ "wgpu" ] }
 vello_cpu = { version = "0.0.3", default-features = false, features = ["std", "text"]}
+vello_hybrid = { git = "https://github.com/linebender/vello", rev = "59460521d4487f1d285cad45c7b4daabf0d95161" }
+vello_common = { git = "https://github.com/linebender/vello", rev = "59460521d4487f1d285cad45c7b4daabf0d95161" }
 
 # Rendering
 wgpu = "26"

@@ -12,6 +12,7 @@ peniko = { workspace = true }
 wgpu = { workspace = true }
 anyrender = { workspace = true }
 anyrender_vello = { workspace = true }
+anyrender_vello_hybrid = { workspace = true }
 anyrender_vello_cpu = { workspace = true, features = [
   "pixels_window_renderer",
   "softbuffer_window_renderer",
