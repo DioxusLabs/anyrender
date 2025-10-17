@@ -1,7 +1,7 @@
 [package]
 name = "wgpu_context"
 description = "Context for managing WGPU surfaces"
-version = "0.1.0"
+version = "0.1.1"
 documentation = "https://docs.rs/wgpu_context"
 homepage.workspace = true
 repository.workspace = true

@@ -30,6 +30,7 @@ Currently existing backends are:
 
 - [anyrender_vello](https://docs.rs/anyrender_vello) which draws using [vello](https://docs.rs/vello)
 - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu) which draws using [vello_cpu](https://docs.rs/vello_cpu)
+- [anyrender_vello_hybrid](https://docs.rs/anyrender_vello_hybrid) which draws using [vello_hybrid](https://docs.rs/vello_hybrid)
 
 Contributions for other backends (Skia, FemtoVG, etc) would be very welcome.
 

@@ -1,4 +1,4 @@
-//! An Anyrender backend using the vello_cpu crate
+//! A [`vello_cpu`] backend for the [`anyrender`] 2D drawing abstraction
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod image_renderer;
