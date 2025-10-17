@@ -33,18 +33,16 @@ impl MetalBackend {
             // More about: https://developer.apple.com/documentation/quartzcore/cametallayer/1478168-framebufferonly
             layer.setFramebufferOnly(false);
 
-            unsafe {
-                let view = match window.window_handle().unwrap().as_raw() {
-                    raw_window_handle::RawWindowHandle::AppKit(appkit) => {
-                        appkit.ns_view.as_ptr() as *mut NSView
-                    }
-                    _ => panic!("Wrong window handle type"),
+            let view_ptr = match window.window_handle().unwrap().as_raw() {
+                raw_window_handle::RawWindowHandle::AppKit(appkit) => {
+                    appkit.ns_view.as_ptr() as *mut NSView
                 }
-                .as_ref()
-                .unwrap();
-                view.setWantsLayer(true);
-                view.setLayer(Some(&layer.clone().into_super()));
-            }
+                _ => panic!("Wrong window handle type"),
+            };
+            let view = unsafe { view_ptr.as_ref().unwrap() };
+
+            view.setWantsLayer(true);
+            view.setLayer(Some(&layer.clone().into_super()));
             layer.setDrawableSize(CGSize::new(width as f64, height as f64));
             layer
         };
@@ -85,9 +83,10 @@ impl SkiaBackend for MetalBackend {
             (size.width as scalar, size.height as scalar)
         };
 
-        let surface = unsafe {
-            let texture_info =
-                mtl::TextureInfo::new(Retained::as_ptr(&drawable.texture()) as mtl::Handle);
+        let surface = {
+            let texture_info = unsafe {
+                mtl::TextureInfo::new(Retained::as_ptr(&drawable.texture()) as mtl::Handle)
+            };
 
             let backend_render_target = backend_render_targets::make_mtl(
                 (drawable_width as i32, drawable_height as i32),
