@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyrender::WindowRenderer;
 use debug_timer::debug_timer;
-use skia_safe::{FontMgr, Surface, Typeface};
+use skia_safe::{Color, FontMgr, Surface, Typeface};
 
 use crate::{opengl::OpenGLBackend, scene::SkiaScenePainter};
 
@@ -92,6 +92,9 @@ impl WindowRenderer for SkiaWindowRenderer {
             Some(it) => it,
             None => return,
         };
+
+        surface.canvas().restore_to_count(1);
+        surface.canvas().clear(Color::WHITE);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
