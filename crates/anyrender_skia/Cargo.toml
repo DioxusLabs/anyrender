@@ -1,0 +1,38 @@
+[package]
+name = "anyrender_skia"
+description = "Skia backend for anyrender"
+version = "0.1.0"
+documentation = "https://docs.rs/anyrender_skia"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[features]
+log_frame_times = ["debug_timer/enable"]
+
+[dependencies]
+anyrender = { workspace = true }
+
+debug_timer = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+raw-window-handle = { workspace = true }
+futures-intrusive = { workspace = true }
+pollster = { workspace = true }
+rustc-hash = { workspace = true }
+skia-safe = { version = "0.89.1", features = ["gl", "vulkan"]}
+gl = "0.14.0"
+ash = "^0.38.0"
+vulkano = "0.35.2"
+glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = {version = "0.6.3", default-features = false}
+objc2-core-foundation = {version = "0.3.2", default-features = false }
+objc2-metal = {version = "0.3.2", default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue"]}
+objc2-app-kit = {version = "0.3.2", features = ["NSView", "objc2-quartz-core"], default-features = false}
+objc2-quartz-core = {version = "0.3.2", default-features = false}
+
+skia-safe = { version = "0.89.1", features = ["metal"] }
