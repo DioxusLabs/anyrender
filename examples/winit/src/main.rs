@@ -25,7 +25,7 @@ type VelloCpuWindowRenderer = PixelsWindowRenderer<VelloCpuImageRenderer>;
 
 type InitialBackend = SkiaWindowRenderer;
 // type InitialBackend = VelloWindowRenderer;
-type InitialBackend = VelloHybridWindowRenderer;
+// type InitialBackend = VelloHybridWindowRenderer;
 // type InitialBackend = VelloCpuWindowRenderer;
 // type InitialBackend = VelloCpuSBWindowRenderer;
 // type InitialBackend = NullWindowRenderer;
