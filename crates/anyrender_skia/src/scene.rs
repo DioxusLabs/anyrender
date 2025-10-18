@@ -159,7 +159,7 @@ impl PaintScene for SkiaScenePainter<'_> {
                     .filter(|(_, value)| *value != 0.0)
                     .map(|(axis, factor)| {
                         let value = if factor < 0.0 {
-                            lerp_f32(axis.def, axis.min, -factor)
+                            lerp_f32(axis.min, axis.def, -factor)
                         } else {
                             lerp_f32(axis.def, axis.max, factor)
                         };
