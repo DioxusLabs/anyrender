@@ -174,7 +174,7 @@ dependencies = [
  "peniko",
  "pollster 0.4.0",
  "raw-window-handle",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "vello_common",
  "vello_hybrid",
  "wgpu 26.0.1",

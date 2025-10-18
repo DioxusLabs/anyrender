@@ -158,11 +158,11 @@ impl PaintScene for SkiaScenePainter<'_> {
                     .zip(normalized_coords.iter().map(|c| f2dot14_to_f32(*c)))
                     .filter(|(_, value)| *value != 0.0)
                     .map(|(axis, factor)| {
-                        let value = axis.min + ((axis.max - axis.min) * factor);
-
-                        // let bytes = axis.tag.to_be_bytes();
-                        // let tag_s = str::from_utf8(&bytes).unwrap();
-                        // println!("{tag_s} {factor} {value}");
+                        let value = if factor < 0.0 {
+                            lerp_f32(axis.def, axis.min, -factor)
+                        } else {
+                            lerp_f32(axis.def, axis.max, factor)
+                        };
 
                         Coordinate {
                             axis: axis.tag,
@@ -268,6 +268,10 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         self.inner.restore();
     }
+}
+
+fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 fn apply_peniko_style_to_skia_paint<'a>(style: peniko::StyleRef<'a>, paint: &mut Paint) {
