@@ -43,7 +43,7 @@ impl OpenGLBackend {
                 #[cfg(target_os = "macos")]
                 DisplayApiPreference::Cgl,
                 #[cfg(target_os = "windows")]
-                DisplayApiPreference::Wgl,
+                DisplayApiPreference::Wgl(Some(raw_window_handle.clone())),
                 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
                 DisplayApiPreference::Egl,
             )
