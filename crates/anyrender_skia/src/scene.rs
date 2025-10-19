@@ -49,7 +49,6 @@ impl PaintScene for SkiaScenePainter<'_> {
 
     fn pop_layer(&mut self) {
         self.inner.restore();
-        self.inner.restore();
     }
 
     fn stroke<'a>(
