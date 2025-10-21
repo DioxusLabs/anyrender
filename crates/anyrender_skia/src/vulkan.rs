@@ -1,38 +1,57 @@
-use std::sync::Arc;
-
-use skia_safe::{
-    ColorType, Surface,
-    gpu::{
-        DirectContext, SurfaceOrigin, direct_contexts,
-        ganesh::vk::backend_render_targets,
-        surfaces,
-        vk::{self},
+use ash::{
+    vk::{
+        make_api_version, AccessFlags, ApplicationInfo, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, Handle, ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceFeatures, PipelineStageFlags, PresentInfoKHR, Queue, QueueFlags, SubmitInfo, SurfaceKHR, SwapchainKHR, API_VERSION_1_1, KHR_SWAPCHAIN_NAME
+    }, Device, Entry, Instance
+};
+use ash::{
+    khr::surface::Instance as InstanceSurfaceFns,
+    vk::{
+        ColorSpaceKHR, CompositeAlphaFlagsKHR, Extent2D, Format, Image, ImageUsageFlags,
+        PresentModeKHR, SharingMode, SwapchainCreateInfoKHR,
     },
 };
-use vulkano::{
-    Handle, Validated, VulkanError, VulkanObject,
-    device::{DeviceExtensions, Queue, QueueCreateInfo, physical::PhysicalDeviceType},
-    image::{Image, view::ImageView},
-    instance::{InstanceCreateFlags, InstanceCreateInfo},
-    swapchain::{
-        self, Swapchain, SwapchainAcquireFuture, SwapchainCreateInfo, SwapchainPresentInfo,
-        acquire_next_image,
+use ash::{
+    khr::swapchain::Device as DeviceSwapchainFns,
+    vk::{Fence, FenceCreateFlags, FenceCreateInfo, Semaphore, SemaphoreCreateInfo},
+};
+use ash_window::enumerate_required_extensions;
+use raw_window_handle::DisplayHandle;
+use skia_safe::{
+    Surface,
+    gpu::{
+        ContextOptions, DirectContext, backend_render_targets, direct_contexts, surfaces,
+        vk::{Alloc, BackendContext, GetProcOf, Version},
     },
-    sync::GpuFuture,
+};
+use std::{
+    ffi::{CStr, CString},
+    sync::Arc,
+    u64,
 };
 
 use crate::window_renderer::SkiaBackend;
 
 pub(crate) struct VulkanBackend {
+    _entry: Entry, // Dont drop until backend is dropped
+    instance: Instance,
+    surface_fns: InstanceSurfaceFns,
+    surface: SurfaceKHR,
+    physical_device: PhysicalDevice,
+    queue_family_index: u32,
+    device: Arc<Device>,
+    queue: Queue,
+    swapchain: SwapchainKHR,
+    swapchain_fns: DeviceSwapchainFns,
+    swapchain_images: Vec<Image>,
+    swapchain_format: Format,
+    swapchain_extent: Extent2D,
+    swapchain_image_index: u32,
     gr_context: DirectContext,
-    queue: Arc<Queue>,
-    swapchain: Arc<Swapchain>,
-    swapchain_images: Vec<Arc<Image>>,
-    swapchain_image_views: Vec<Arc<ImageView>>,
-    next_frame: Option<(u32, SwapchainAcquireFuture)>,
-    last_render: Option<Box<dyn GpuFuture>>,
-    swapchain_is_valid: bool,
-    window_size: [u32; 2],
+    image_available_semaphore: Semaphore,
+    render_finished_semaphore: Semaphore,
+    in_flight_fence: Fence,
+    cmd_pool: CommandPool,
+    cmd_buf: CommandBuffer,
 }
 
 impl VulkanBackend {
@@ -41,284 +60,517 @@ impl VulkanBackend {
         width: u32,
         height: u32,
     ) -> VulkanBackend {
-        let library = vulkano::VulkanLibrary::new().expect("vulkan library is available on system");
+        let entry = unsafe { Entry::load().unwrap() };
 
-        let required_extensions = swapchain::Surface::required_extensions(&window).unwrap();
-
-        let instance = vulkano::instance::Instance::new(
-            library.clone(),
-            InstanceCreateInfo {
-                flags: InstanceCreateFlags::ENUMERATE_PORTABILITY,
-                enabled_extensions: required_extensions,
-                ..Default::default()
-            },
-        )
-        .expect("instance supporting required extensions available");
-
-        let device_extensions = DeviceExtensions {
-            khr_swapchain: true,
-            ..DeviceExtensions::empty()
-        };
-
-        let surface =
-            unsafe { swapchain::Surface::from_window_ref(instance.clone(), &window) }.unwrap();
-
-        let (physical_device, queue_family_index) = instance
-            .enumerate_physical_devices()
-            .unwrap()
-            .filter(|p| p.supported_extensions().contains(&device_extensions))
-            .filter_map(|p| {
-                p.queue_family_properties()
-                    .iter()
-                    .enumerate()
-                    .position(|(i, q)| {
-                        q.queue_flags
-                            .intersects(vulkano::device::QueueFlags::GRAPHICS)
-                            && p.surface_support(i as u32, &surface).unwrap_or(false)
-                    })
-                    .map(|i| (p, i as u32))
-            })
-            .min_by_key(|(p, _)| match p.properties().device_type {
-                PhysicalDeviceType::DiscreteGpu => 0,
-                PhysicalDeviceType::IntegratedGpu => 1,
-                PhysicalDeviceType::VirtualGpu => 2,
-                PhysicalDeviceType::Cpu => 3,
-                PhysicalDeviceType::Other => 4,
-                _ => 5,
-            })
-            .expect("suitable physical device available");
-
-        let (device, mut queues) = vulkano::device::Device::new(
-            physical_device,
-            vulkano::device::DeviceCreateInfo {
-                enabled_extensions: device_extensions,
-                queue_create_infos: vec![QueueCreateInfo {
-                    queue_family_index,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
-        )
-        .expect("device initializes");
-
-        let queue = queues.next().unwrap();
-
-        let (swapchain, images) = {
-            let surface_capabilities = device
-                .physical_device()
-                .surface_capabilities(&surface, Default::default())
-                .unwrap();
-
-            let (image_format, _) = device
-                .physical_device()
-                .surface_formats(&surface, Default::default())
-                .unwrap()
-                .into_iter()
-                .find(|(format, _)| *format == vulkano::format::Format::B8G8R8A8_UNORM)
-                .unwrap();
-
-            swapchain::Swapchain::new(
-                device.clone(),
-                surface,
-                swapchain::SwapchainCreateInfo {
-                    min_image_count: surface_capabilities.min_image_count.max(2),
-                    image_extent: [width, height],
-                    image_usage: vulkano::image::ImageUsage::INPUT_ATTACHMENT,
-                    image_format,
-                    present_mode: swapchain::PresentMode::Mailbox,
-                    composite_alpha: surface_capabilities
-                        .supported_composite_alpha
-                        .into_iter()
-                        .next()
-                        .unwrap(),
-                    ..Default::default()
-                },
-            )
-        }
-        .unwrap();
-
-        let last_render = Some(vulkano::sync::now(device.clone()).boxed());
-
-        let gr_context = unsafe {
-            let get_proc = |gpo| {
-                let get_device_proc_addr = instance.fns().v1_0.get_device_proc_addr;
-
-                match gpo {
-                    vk::GetProcOf::Instance(instance, name) => {
-                        let vk_instance = ash::vk::Instance::from_raw(instance as _);
-                        library.get_instance_proc_addr(vk_instance, name)
-                    }
-                    vk::GetProcOf::Device(device, name) => {
-                        let vk_device = ash::vk::Device::from_raw(device as _);
-                        get_device_proc_addr(vk_device, name)
-                    }
-                }
-                .map(|f| f as _)
-                .unwrap()
-            };
-
-            direct_contexts::make_vulkan(
-                &vk::BackendContext::new(
-                    instance.handle().as_raw() as _,
-                    device.physical_device().handle().as_raw() as _,
-                    device.handle().as_raw() as _,
-                    (queue.handle().as_raw() as _, queue.queue_index() as usize),
-                    &get_proc,
-                ),
+        let instance = create_instance(&entry, window.display_handle().unwrap());
+        let surface_fns = InstanceSurfaceFns::new(&entry, &instance);
+        let surface = unsafe {
+            ash_window::create_surface(
+                &entry,
+                &instance,
+                window.display_handle().unwrap().as_raw(),
+                window.window_handle().unwrap().as_raw(),
                 None,
             )
-        }
-        .unwrap();
+            .unwrap()
+        };
 
-        let mut image_views: Vec<Arc<ImageView>> = Vec::with_capacity(images.len());
-        for image in &images {
-            image_views.push(ImageView::new_default(image.clone()).unwrap());
-        }
+        let (physical_device, queue_family_index) =
+            pick_physical_device(&instance, &surface_fns, surface);
 
-        VulkanBackend {
-            gr_context,
+        let (device, queue) = create_logical_device(&instance, physical_device, queue_family_index);
+        let device = Arc::new(device);
+
+        let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
+            create_swapchain(
+                &instance,
+                &device,
+                physical_device,
+                &surface_fns,
+                surface,
+                queue_family_index,
+                width,
+                height,
+                None,
+            );
+
+        let gr_context = create_gr_context(
+            &entry,
+            &instance,
+            physical_device,
+            device.clone(),
+            queue,
+            queue_family_index,
+        );
+
+        let (image_available_semaphore, render_finished_semaphore, in_flight_fence) =
+            create_sync_objects(&device);
+
+        let cmd_pool = unsafe {
+            device
+                .create_command_pool(
+                    &CommandPoolCreateInfo::default().flags(CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+                    None,
+                )
+                .unwrap()
+        };
+
+        let cmd_buf = unsafe {
+            device
+                .allocate_command_buffers(
+                    &CommandBufferAllocateInfo::default()
+                        .command_pool(cmd_pool)
+                        .level(CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .unwrap()[0]
+        };
+
+        Self {
+            _entry: entry,
+            instance,
+            surface_fns,
+            surface,
+            physical_device,
+            queue_family_index,
+            device,
             queue,
             swapchain,
-            swapchain_images: images,
-            swapchain_image_views: image_views,
-            last_render,
-            swapchain_is_valid: true,
-            next_frame: None,
-            window_size: [width, height],
+            swapchain_fns,
+            swapchain_images,
+            swapchain_format,
+            swapchain_extent,
+            swapchain_image_index: 0,
+            gr_context,
+            image_available_semaphore,
+            render_finished_semaphore,
+            in_flight_fence,
+            cmd_pool,
+            cmd_buf,
         }
     }
+}
 
-    fn prepare_swapchain(&mut self) {
-        if self.swapchain_is_valid {
-            return;
+impl Drop for VulkanBackend {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+
+            self.device
+                .free_command_buffers(self.cmd_pool, std::slice::from_ref(&self.cmd_buf));
+            self.device.destroy_command_pool(self.cmd_pool, None);
+            self.device
+                .destroy_semaphore(self.image_available_semaphore, None);
+            self.device
+                .destroy_semaphore(self.render_finished_semaphore, None);
+            self.device.destroy_fence(self.in_flight_fence, None);
+
+            self.gr_context.free_gpu_resources();
+            self.gr_context.release_resources_and_abandon();
+
+            // This causes a segmentation fault, most likely because the swapchain can be only destroyed after the window is closed
+            // self.swapchain_fns.destroy_swapchain(self.swapchain, None);
+            // self.device.destroy_device(None);
+            // self.surface_fns.destroy_surface(self.surface, None);
+            // self.instance.destroy_instance(None);
         }
-
-        let (new_swapchain, new_images) = self
-            .swapchain
-            .recreate(SwapchainCreateInfo {
-                image_extent: self.window_size.clone(),
-
-                ..self.swapchain.create_info()
-            })
-            .unwrap();
-
-        let mut new_image_views: Vec<Arc<ImageView>> = Vec::with_capacity(new_images.len());
-        for image in &new_images {
-            new_image_views.push(ImageView::new_default(image.clone()).unwrap());
-        }
-
-        self.swapchain = new_swapchain;
-        self.swapchain_images = new_images;
-        self.swapchain_image_views = new_image_views;
-        self.swapchain_is_valid = true;
-    }
-
-    fn next_frame(&mut self) -> Option<(u32, SwapchainAcquireFuture)> {
-        let (image_index, suboptimal, acquire_future) =
-            match acquire_next_image(self.swapchain.clone(), None).map_err(Validated::unwrap) {
-                Ok(it) => it,
-                Err(VulkanError::OutOfDate) => {
-                    self.swapchain_is_valid = false;
-                    return None;
-                }
-                Err(e) => panic!("failed to acquire next image: {e:?}"),
-            };
-
-        if suboptimal {
-            self.swapchain_is_valid = false;
-        }
-
-        Some((image_index, acquire_future))
-    }
-
-    fn create_surface_from_image_view(&mut self, image_view: Arc<ImageView>) -> Surface {
-        let image = image_view.image();
-        let [width, height, _] = image.extent();
-
-        let alloc = vk::Alloc::default();
-        let image_info = &unsafe {
-            vk::ImageInfo::new(
-                image.handle().as_raw() as _,
-                alloc,
-                vk::ImageTiling::OPTIMAL,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::Format::B8G8R8A8_UNORM,
-                1,
-                None,
-                None,
-                None,
-                None,
-            )
-        };
-
-        let render_target =
-            backend_render_targets::make_vk((width as i32, height as i32), image_info);
-
-        surfaces::wrap_backend_render_target(
-            &mut self.gr_context,
-            &render_target,
-            SurfaceOrigin::TopLeft,
-            ColorType::BGRA8888,
-            None,
-            None,
-        )
-        .unwrap()
     }
 }
 
 impl SkiaBackend for VulkanBackend {
     fn set_size(&mut self, width: u32, height: u32) {
-        self.window_size = [width, height];
-        self.swapchain_is_valid = false;
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+
+            let old_swapchain = self.swapchain;
+
+            let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
+                create_swapchain(
+                    &self.instance,
+                    &self.device,
+                    self.physical_device,
+                    &self.surface_fns,
+                    self.surface,
+                    self.queue_family_index,
+                    width,
+                    height,
+                    Some(old_swapchain),
+                );
+            self.swapchain = swapchain;
+            self.swapchain_fns = swapchain_fns;
+            self.swapchain_images = swapchain_images;
+            self.swapchain_format = swapchain_format;
+            self.swapchain_extent = swapchain_extent;
+
+            self.swapchain_fns.destroy_swapchain(old_swapchain, None);
+        }
     }
 
     fn prepare(&mut self) -> Option<Surface> {
-        if let Some(last_render) = self.last_render.as_mut() {
-            last_render.cleanup_finished();
-        }
+        let surface = unsafe {
+            self.device
+                .wait_for_fences(&[self.in_flight_fence], true, u64::MAX)
+                .unwrap();
 
-        self.prepare_swapchain();
+            self.device.reset_fences(&[self.in_flight_fence]).unwrap();
 
-        if let Some((image_index, acquire_future)) = self.next_frame() {
-            self.next_frame = Some((image_index, acquire_future));
+            let (image_index, _) = self
+                .swapchain_fns
+                .acquire_next_image(
+                    self.swapchain,
+                    u64::MAX,
+                    self.image_available_semaphore,
+                    Fence::null(),
+                )
+                .unwrap();
 
-            return Some(self.create_surface_from_image_view(
-                self.swapchain_image_views[image_index as usize].clone(),
-            ));
-        } else {
-            None
-        }
+            self.swapchain_image_index = image_index;
+
+            let image = self.swapchain_images[image_index as usize];
+
+            let alloc = Alloc::default();
+            let sk_image_info = skia_safe::gpu::vk::ImageInfo::new(
+                image.as_raw() as _,
+                alloc,
+                skia_safe::gpu::vk::ImageTiling::OPTIMAL,
+                skia_safe::gpu::vk::ImageLayout::UNDEFINED,
+                skia_safe::gpu::vk::Format::B8G8R8A8_UNORM,
+                1,
+                None,
+                None,
+                None,
+                skia_safe::gpu::vk::SharingMode::EXCLUSIVE,
+            );
+            let render_target = backend_render_targets::make_vk(
+                (
+                    self.swapchain_extent.width as i32,
+                    self.swapchain_extent.height as i32,
+                ),
+                &sk_image_info,
+            );
+
+            surfaces::wrap_backend_render_target(
+                &mut self.gr_context,
+                &render_target,
+                skia_safe::gpu::SurfaceOrigin::TopLeft,
+                skia_safe::ColorType::BGRA8888,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        Some(surface)
     }
 
-    // In vulkan implementation we do not reuse surface so we just drop it straight away
-    fn flush(&mut self, _: Surface) {
+    fn flush(&mut self, surface: Surface) {
         self.gr_context.flush_and_submit();
 
-        let (image_index, acquire_future) = self.next_frame.take().unwrap();
+        let image = self.swapchain_images[self.swapchain_image_index as usize];
 
-        let future = self
-            .last_render
-            .take()
-            .unwrap()
-            .join(acquire_future)
-            .then_swapchain_present(
-                self.queue.clone(),
-                SwapchainPresentInfo::swapchain_image_index(self.swapchain.clone(), image_index),
-            )
-            .then_signal_fence_and_flush();
+        unsafe {
+            self.device
+                .begin_command_buffer(self.cmd_buf, &CommandBufferBeginInfo::default())
+                .unwrap();
 
-        match future.map_err(Validated::unwrap) {
-            Ok(future) => {
-                self.last_render = Some(future.boxed());
-            }
-            Err(VulkanError::OutOfDate) => {
-                self.swapchain_is_valid = false;
-                self.last_render = Some(vulkano::sync::now(self.queue.device().clone()).boxed());
-            }
-            Err(e) => {
-                self.last_render = Some(vulkano::sync::now(self.queue.device().clone()).boxed());
-                println!("skia vlk: failed to flush future: {e:?}")
-            }
+            let image_barrier = ImageMemoryBarrier::default()
+                .src_access_mask(AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .dst_access_mask(AccessFlags::MEMORY_READ)
+                .old_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .new_layout(ImageLayout::PRESENT_SRC_KHR)
+                .image(image)
+                .subresource_range(ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+
+            self.device.cmd_pipeline_barrier(
+                self.cmd_buf,
+                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                PipelineStageFlags::BOTTOM_OF_PIPE,
+                DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_barrier],
+            );
+
+            self.device.end_command_buffer(self.cmd_buf).unwrap();
         };
+
+        let wait_semaphores = [self.image_available_semaphore];
+        let wait_stages = [PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+
+        let signal_semaphores = [self.render_finished_semaphore];
+
+        let submit_infos = [SubmitInfo::default()
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(std::slice::from_ref(&self.cmd_buf))
+            .signal_semaphores(&signal_semaphores)];
+
+        unsafe {
+            self.device
+                .queue_submit(self.queue, &submit_infos, self.in_flight_fence)
+                .unwrap();
+        };
+
+        let swapchains = [self.swapchain];
+        let image_indices = [self.swapchain_image_index];
+        let present_info = PresentInfoKHR::default()
+            .wait_semaphores(&signal_semaphores)
+            .swapchains(&swapchains)
+            .image_indices(&image_indices);
+
+        unsafe {
+            self.swapchain_fns
+                .queue_present(self.queue, &present_info)
+                .unwrap();
+        };
+
+        drop(surface);
     }
+}
+
+fn create_instance(entry: &Entry, display_handle: DisplayHandle<'_>) -> Instance {
+    let app_name = CString::new("AnyRender").unwrap();
+    let engine_name = CString::new("No Engine").unwrap();
+    let app_info = ApplicationInfo::default()
+        .application_name(&app_name)
+        .application_version(make_api_version(0, 1, 0, 0))
+        .engine_name(&engine_name)
+        .engine_version(make_api_version(0, 1, 0, 0))
+        .api_version(API_VERSION_1_1);
+
+    let extension_names = enumerate_required_extensions(display_handle.as_raw())
+        .unwrap()
+        .to_vec();
+
+    let create_info = InstanceCreateInfo::default()
+        .application_info(&app_info)
+        .enabled_extension_names(&extension_names);
+
+    unsafe { entry.create_instance(&create_info, None).unwrap() }
+}
+
+fn pick_physical_device(
+    instance: &Instance,
+    surface_fns: &InstanceSurfaceFns,
+    surface: SurfaceKHR,
+) -> (PhysicalDevice, u32) {
+    let devices = unsafe { instance.enumerate_physical_devices().unwrap() };
+    devices
+        .into_iter()
+        .find_map(|physical_device| {
+            let queue_family_index = unsafe {
+                instance
+                    .get_physical_device_queue_family_properties(physical_device)
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, props)| {
+                        let supports_graphics = props.queue_flags.contains(QueueFlags::GRAPHICS);
+                        let supports_surface = surface_fns
+                            .get_physical_device_surface_support(
+                                physical_device,
+                                index as u32,
+                                surface,
+                            )
+                            .unwrap();
+                        if supports_graphics && supports_surface {
+                            Some(index as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap()
+            };
+            let extensions_supported = unsafe {
+                instance
+                    .enumerate_device_extension_properties(physical_device)
+                    .map(|exts| {
+                        exts.iter().any(|ext| {
+                            CStr::from_ptr(ext.extension_name.as_ptr()) == KHR_SWAPCHAIN_NAME
+                        })
+                    })
+                    .unwrap_or(false)
+            };
+
+            if extensions_supported {
+                Some((physical_device, queue_family_index))
+            } else {
+                None
+            }
+        })
+        .unwrap()
+}
+
+fn create_logical_device(
+    instance: &Instance,
+    physical_device: PhysicalDevice,
+    queue_family_index: u32,
+) -> (Device, Queue) {
+    let queue_priorities = [1.0f32];
+    let queue_create_info = DeviceQueueCreateInfo::default()
+        .queue_family_index(queue_family_index)
+        .queue_priorities(&queue_priorities);
+
+    let features = PhysicalDeviceFeatures::default().sample_rate_shading(true);
+
+    let extensions = [KHR_SWAPCHAIN_NAME.as_ptr()];
+
+    let create_info = DeviceCreateInfo::default()
+        .queue_create_infos(std::slice::from_ref(&queue_create_info))
+        .enabled_extension_names(&extensions)
+        .enabled_features(&features);
+
+    let device = unsafe {
+        instance
+            .create_device(physical_device, &create_info, None)
+            .unwrap()
+    };
+
+    let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
+
+    (device, queue)
+}
+
+fn create_swapchain(
+    instance: &Instance,
+    device: &Device,
+    physical_device: PhysicalDevice,
+    surface_fns: &InstanceSurfaceFns,
+    surface: SurfaceKHR,
+    queue_family_index: u32,
+    width: u32,
+    height: u32,
+    old_swapchain: Option<SwapchainKHR>,
+) -> (
+    SwapchainKHR,
+    DeviceSwapchainFns,
+    Vec<Image>,
+    Format,
+    Extent2D,
+) {
+    let surface_caps = unsafe {
+        surface_fns
+            .get_physical_device_surface_capabilities(physical_device, surface)
+            .unwrap()
+    };
+
+    let surface_formats = unsafe {
+        surface_fns
+            .get_physical_device_surface_formats(physical_device, surface)
+            .unwrap()
+    };
+
+    let present_modes = unsafe {
+        surface_fns
+            .get_physical_device_surface_present_modes(physical_device, surface)
+            .unwrap()
+    };
+
+    let format = surface_formats
+        .iter()
+        .find(|f| {
+            f.format == Format::B8G8R8A8_UNORM && f.color_space == ColorSpaceKHR::SRGB_NONLINEAR
+        })
+        .unwrap();
+
+    let present_mode = present_modes
+        .iter()
+        .cloned()
+        .find(|&m| m == PresentModeKHR::MAILBOX)
+        .unwrap_or(PresentModeKHR::FIFO);
+
+    let extent = Extent2D { width, height };
+    let image_count = surface_caps.min_image_count.max(2);
+
+    let create_info = SwapchainCreateInfoKHR::default()
+        .surface(surface)
+        .min_image_count(image_count)
+        .image_format(format.format)
+        .image_color_space(format.color_space)
+        .image_extent(extent)
+        .image_array_layers(1)
+        .image_usage(
+            ImageUsageFlags::COLOR_ATTACHMENT
+                | ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::TRANSFER_DST,
+        )
+        .image_sharing_mode(SharingMode::EXCLUSIVE)
+        .queue_family_indices(std::slice::from_ref(&queue_family_index))
+        .pre_transform(surface_caps.current_transform)
+        .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
+        .present_mode(present_mode)
+        .clipped(true)
+        .old_swapchain(old_swapchain.unwrap_or(SwapchainKHR::null()));
+
+    let swapchain_fns = DeviceSwapchainFns::new(&instance, &device);
+    let swapchain = unsafe { swapchain_fns.create_swapchain(&create_info, None).unwrap() };
+    let images = unsafe { swapchain_fns.get_swapchain_images(swapchain).unwrap() };
+
+    (swapchain, swapchain_fns, images, format.format, extent)
+}
+
+fn create_gr_context(
+    entry: &Entry,
+    instance: &Instance,
+    physical_device: PhysicalDevice,
+    device: Arc<Device>,
+    queue: Queue,
+    queue_family_index: u32,
+) -> DirectContext {
+    let get_proc = unsafe {
+        |gpo: GetProcOf| {
+            let get_device_proc_addr = instance.fp_v1_0().get_device_proc_addr;
+
+            match gpo {
+                GetProcOf::Instance(instance, name) => {
+                    let vk_instance = ash::vk::Instance::from_raw(instance as _);
+                    entry.get_instance_proc_addr(vk_instance, name)
+                }
+                GetProcOf::Device(device, name) => {
+                    let vk_device = ash::vk::Device::from_raw(device as _);
+                    get_device_proc_addr(vk_device, name)
+                }
+            }
+            .map(|f| f as _)
+            .unwrap()
+        }
+    };
+
+    let mut backend_context = unsafe {
+        BackendContext::new(
+            instance.handle().as_raw() as _,
+            physical_device.as_raw() as _,
+            device.handle().as_raw() as _,
+            (queue.as_raw() as _, queue_family_index as usize),
+            &get_proc,
+        )
+    };
+    backend_context.set_max_api_version(Version::new(1, 1, 0));
+
+    let context_options = ContextOptions::default();
+
+    direct_contexts::make_vulkan(&backend_context, &context_options).unwrap()
+}
+
+fn create_sync_objects(device: &Device) -> (Semaphore, Semaphore, Fence) {
+    let semaphore_info = SemaphoreCreateInfo::default();
+    let fence_info = FenceCreateInfo::default().flags(FenceCreateFlags::SIGNALED);
+
+    let image_available_semaphore =
+        unsafe { device.create_semaphore(&semaphore_info, None).unwrap() };
+    let render_finished_semaphore =
+        unsafe { device.create_semaphore(&semaphore_info, None).unwrap() };
+    let in_flight_fence = unsafe { device.create_fence(&fence_info, None).unwrap() };
+
+    (
+        image_available_semaphore,
+        render_finished_semaphore,
+        in_flight_fence,
+    )
 }

@@ -24,7 +24,7 @@ rustc-hash = { workspace = true }
 skia-safe = { version = "0.89.1", features = ["gl", "vulkan"]}
 gl = "0.14.0"
 ash = "^0.38.0"
-vulkano = "0.35.2"
+ash-window = "0.13.0"
 glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
 
 
