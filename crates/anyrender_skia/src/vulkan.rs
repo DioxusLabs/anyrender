@@ -1,7 +1,14 @@
 use ash::{
+    Device, Entry, Instance,
     vk::{
-        make_api_version, AccessFlags, ApplicationInfo, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags, CommandPoolCreateInfo, DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, Handle, ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, InstanceCreateInfo, PhysicalDevice, PhysicalDeviceFeatures, PipelineStageFlags, PresentInfoKHR, Queue, QueueFlags, SubmitInfo, SurfaceKHR, SwapchainKHR, API_VERSION_1_1, KHR_SWAPCHAIN_NAME
-    }, Device, Entry, Instance
+        API_VERSION_1_1, AccessFlags, ApplicationInfo, CommandBuffer, CommandBufferAllocateInfo,
+        CommandBufferBeginInfo, CommandBufferLevel, CommandPool, CommandPoolCreateFlags,
+        CommandPoolCreateInfo, DependencyFlags, DeviceCreateInfo, DeviceQueueCreateInfo, Handle,
+        ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+        InstanceCreateInfo, KHR_SWAPCHAIN_NAME, PhysicalDevice, PhysicalDeviceFeatures,
+        PipelineStageFlags, PresentInfoKHR, Queue, QueueFlags, SubmitInfo, SurfaceKHR,
+        SwapchainKHR, make_api_version,
+    },
 };
 use ash::{
     khr::surface::Instance as InstanceSurfaceFns,
@@ -109,7 +116,10 @@ impl VulkanBackend {
         let cmd_pool = unsafe {
             device
                 .create_command_pool(
-                    &CommandPoolCreateInfo::default().flags(CommandPoolCreateFlags::TRANSIENT | CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+                    &CommandPoolCreateInfo::default().flags(
+                        CommandPoolCreateFlags::TRANSIENT
+                            | CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    ),
                     None,
                 )
                 .unwrap()
