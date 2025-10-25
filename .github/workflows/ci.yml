@@ -131,7 +131,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install development libraries on ubuntu
-        if: "${{ matrix.os == 'ubuntu-latest' }}"
+        if: ${{ matrix.platform.os == 'ubuntu-latest' }}
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
 
       - name: Setup
