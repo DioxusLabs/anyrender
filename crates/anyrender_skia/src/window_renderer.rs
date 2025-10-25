@@ -4,7 +4,7 @@ use anyrender::WindowRenderer;
 use debug_timer::debug_timer;
 use skia_safe::{Color, FontMgr, Surface, Typeface};
 
-use crate::{opengl::OpenGLBackend, scene::SkiaScenePainter};
+use crate::scene::SkiaScenePainter;
 
 pub(crate) trait SkiaBackend {
     fn set_size(&mut self, width: u32, height: u32);
@@ -55,7 +55,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         #[cfg(target_os = "macos")]
         let backend = crate::metal::MetalBackend::new(window, width, height);
         #[cfg(not(target_os = "macos"))]
-        let backend = OpenGLBackend::new(window, width, height);
+        let backend = opengl::OpenGLBackend::new(window, width, height);
 
         self.render_state = RenderState::Active(ActiveRenderState {
             backend: Box::new(backend),

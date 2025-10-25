@@ -5,6 +5,7 @@ mod window_renderer;
 // Backends
 #[cfg(target_os = "macos")]
 mod metal;
+#[cfg(not(target_os = "macos"))]
 mod opengl;
 #[cfg(feature = "vulkan")]
 mod vulkan;
