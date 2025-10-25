@@ -3,7 +3,15 @@ use std::collections::HashMap;
 use anyrender::PaintScene;
 use peniko::{StyleRef, color::DynamicColor};
 use skia_safe::{
-    canvas::{GlyphPositions, SaveLayerRec}, font::Edging, font_arguments::{variation_position::Coordinate, VariationPosition}, gradient_shader::{interpolation, Interpolation}, image_filters::{self, CropRect}, shaders, AlphaType, BlendMode, Canvas, Color, Color4f, ColorType, Data, Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageInfo, MaskFilter, Matrix, Paint, PaintCap, PaintJoin, PaintStyle, Point, RRect, Rect, SamplingOptions, Shader, TileMode, Typeface
+    AlphaType, BlendMode, Canvas, Color, Color4f, ColorType, Data, Font, FontArguments,
+    FontHinting, FontMgr, GlyphId, ImageInfo, MaskFilter, Matrix, Paint, PaintCap, PaintJoin,
+    PaintStyle, Point, RRect, Rect, SamplingOptions, Shader, TileMode, Typeface,
+    canvas::{GlyphPositions, SaveLayerRec},
+    font::Edging,
+    font_arguments::{VariationPosition, variation_position::Coordinate},
+    gradient_shader::{Interpolation, interpolation},
+    image_filters::{self, CropRect},
+    shaders,
 };
 
 pub struct SkiaScenePainter<'a> {
@@ -234,11 +242,7 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         if std_dev > 0.0 {
             paint.set_mask_filter(
-                MaskFilter::blur(
-                    skia_safe::BlurStyle::Normal,
-                    std_dev as f32,
-                    false
-                ).unwrap()
+                MaskFilter::blur(skia_safe::BlurStyle::Normal, std_dev as f32, false).unwrap(),
             );
         }
 
