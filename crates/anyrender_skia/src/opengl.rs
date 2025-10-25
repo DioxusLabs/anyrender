@@ -145,7 +145,7 @@ impl OpenGLBackend {
         fb_info: &mut FramebufferInfo,
     ) -> Surface {
         gl_surface.resize(
-            &gl_context,
+            gl_context,
             NonZeroU32::new(width).unwrap(),
             NonZeroU32::new(height).unwrap(),
         );

@@ -124,7 +124,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         if !self.typeface_cache.contains_key(&font_key) {
             let Some(typeface) = self
                 .font_mgr
-                .new_from_data(&font.data.data(), font.index as usize)
+                .new_from_data(font.data.data(), font.index as usize)
             else {
                 let tf = Typeface::make_deserialize(font.data.data(), None);
                 eprintln!(
@@ -150,7 +150,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         if !normalized_coords.is_empty() {
             let axes = original_typeface
                 .variation_design_parameters()
-                .unwrap_or(vec![]);
+                .unwrap_or_default();
             if !axes.is_empty() {
                 let coordinates: Vec<Coordinate> = axes
                     .iter()
@@ -263,7 +263,7 @@ impl PaintScene for SkiaScenePainter<'_> {
             radius as f32,
         );
 
-        self.inner.draw_rrect(&rrect, &paint);
+        self.inner.draw_rrect(rrect, &paint);
 
         self.inner.restore();
     }
@@ -339,7 +339,7 @@ fn anyrender_brush_to_skia_paint<'a>(
                         &positions[..],
                         peniko_to_skia_extend_to_tile_mode(gradient.extend),
                         interpolation,
-                        &brush_transform.map(|it| kurbo_affine_to_skia_matrix(it)),
+                        &brush_transform.map(kurbo_affine_to_skia_matrix),
                     )
                     .unwrap()
                 }
@@ -374,7 +374,7 @@ fn anyrender_brush_to_skia_paint<'a>(
                             &positions[..],
                             peniko_to_skia_extend_to_tile_mode(gradient.extend),
                             interpolation,
-                            &brush_transform.map(|it| kurbo_affine_to_skia_matrix(it)),
+                            &brush_transform.map(kurbo_affine_to_skia_matrix),
                         )
                         .unwrap()
                     } else {
@@ -385,7 +385,7 @@ fn anyrender_brush_to_skia_paint<'a>(
                             &positions[..],
                             peniko_to_skia_extend_to_tile_mode(gradient.extend),
                             interpolation,
-                            &brush_transform.map(|it| kurbo_affine_to_skia_matrix(it)),
+                            &brush_transform.map(kurbo_affine_to_skia_matrix),
                         )
                         .unwrap()
                     }
@@ -420,7 +420,7 @@ fn anyrender_brush_to_skia_paint<'a>(
                             rad_to_deg(sweep_gradient_position.end_angle),
                         ),
                         interpolation,
-                        &brush_transform.map(|it| kurbo_affine_to_skia_matrix(it)),
+                        &brush_transform.map(kurbo_affine_to_skia_matrix),
                     )
                     .unwrap()
                 }
@@ -463,7 +463,7 @@ fn anyrender_brush_to_skia_paint<'a>(
                     peniko_to_skia_extend_to_tile_mode(brush.sampler.y_extend),
                 ),
                 &SamplingOptions::default(),
-                &brush_transform.map(|it| kurbo_affine_to_skia_matrix(it)),
+                &brush_transform.map(kurbo_affine_to_skia_matrix),
             );
 
             let mut paint = Paint::default();
@@ -666,7 +666,7 @@ fn kurbo_shape_to_skia_path(shape: &impl kurbo::Shape) -> skia_safe::Path {
 fn kurbo_bezpath_els_to_skia_path(path: &[kurbo::PathEl]) -> skia_safe::Path {
     let mut sk_path = skia_safe::Path::new();
     for el in path {
-        add_kurbo_bezpath_el_to_skia_path(&el, &mut sk_path);
+        add_kurbo_bezpath_el_to_skia_path(el, &mut sk_path);
     }
     sk_path
 }
