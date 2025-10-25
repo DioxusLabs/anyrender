@@ -8,7 +8,6 @@ use glutin::{
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
     surface::{GlSurface, SurfaceAttributesBuilder, WindowSurface},
 };
-use skia_safe::Canvas;
 use skia_safe::{
     Surface,
     gpu::{
