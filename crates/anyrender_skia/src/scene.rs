@@ -10,7 +10,6 @@ use skia_safe::{
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
     gradient_shader::{Interpolation, interpolation},
-    image_filters::{self, CropRect},
     shaders,
 };
 
