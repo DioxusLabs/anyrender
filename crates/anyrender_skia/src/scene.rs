@@ -5,7 +5,7 @@ use peniko::{StyleRef, color::DynamicColor};
 use skia_safe::{
     AlphaType, BlendMode, Canvas, Color, Color4f, ColorType, Data, Font, FontArguments,
     FontHinting, FontMgr, GlyphId, ImageInfo, Matrix, Paint, PaintCap, PaintJoin, PaintStyle,
-    Point, RRect, Rect, SamplingOptions, Shader, Surface, TileMode, Typeface,
+    Point, RRect, Rect, SamplingOptions, Shader, TileMode, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -67,7 +67,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         apply_peniko_style_to_skia_paint(StyleRef::Stroke(style), &mut paint);
         paint.set_anti_alias(true);
 
-        draw_kurbo_shape_to_skia_canvas(self.inner, shape, &paint);
+        draw_kurbo_shape_to_skia_canvas(self.inner, shape, &paint, None);
 
         self.inner.restore();
     }
@@ -88,7 +88,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         paint.set_style(PaintStyle::Fill);
         paint.set_anti_alias(true);
 
-        draw_kurbo_shape_to_skia_canvas(self.inner, shape, &paint);
+        draw_kurbo_shape_to_skia_canvas(self.inner, shape, &paint, Some(style));
 
         self.inner.restore();
     }
@@ -599,6 +599,7 @@ fn draw_kurbo_shape_to_skia_canvas(
     canvas: &skia_safe::Canvas,
     shape: &impl kurbo::Shape,
     paint: &skia_safe::Paint,
+    fill_type: Option<peniko::Fill>,
 ) {
     if let Some(rect) = shape.as_rect() {
         canvas.draw_rect(
@@ -640,9 +641,17 @@ fn draw_kurbo_shape_to_skia_canvas(
             paint,
         );
     } else if let Some(path_els) = shape.as_path_slice() {
-        canvas.draw_path(&kurbo_bezpath_els_to_skia_path(path_els), paint);
+        let mut path = kurbo_bezpath_els_to_skia_path(path_els);
+        if let Some(fill_type) = fill_type {
+            path.set_fill_type(to_skia_fill_type(fill_type));
+        }
+        canvas.draw_path(&path, paint);
     } else {
-        canvas.draw_path(&kurbo_shape_to_skia_path(shape), paint);
+        let mut path = kurbo_shape_to_skia_path(shape);
+        if let Some(fill_type) = fill_type {
+            path.set_fill_type(to_skia_fill_type(fill_type));
+        }
+        canvas.draw_path(&path, paint);
     }
 }
 
@@ -672,6 +681,13 @@ fn add_kurbo_bezpath_el_to_skia_path(path_el: &kurbo::PathEl, skia_path: &mut sk
         }
         kurbo::PathEl::ClosePath => _ = skia_path.close(),
     };
+}
+
+fn to_skia_fill_type(fill: peniko::Fill) -> skia_safe::PathFillType {
+    match fill {
+        peniko::Fill::NonZero => skia_safe::PathFillType::Winding,
+        peniko::Fill::EvenOdd => skia_safe::PathFillType::EvenOdd,
+    }
 }
 
 fn skpt(p: kurbo::Point) -> skia_safe::Point {
