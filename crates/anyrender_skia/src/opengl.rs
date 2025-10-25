@@ -1,6 +1,5 @@
 use std::{ffi::CString, num::NonZeroU32, sync::Arc};
 
-use debug_timer::debug_timer;
 use glutin::display::DisplayApiPreference;
 use glutin::{
     config::{ConfigTemplateBuilder, GetGlConfig, GlConfig},
