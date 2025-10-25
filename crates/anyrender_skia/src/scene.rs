@@ -553,6 +553,7 @@ fn kurbo_affine_to_skia_matrix(affine: kurbo::Affine) -> Matrix {
     )
 }
 
+#[allow(deprecated)] // We need to support it even though it's deprecated
 fn peniko_blend_to_skia_blend(blend_mode: peniko::BlendMode) -> BlendMode {
     if blend_mode.mix == peniko::Mix::Normal || blend_mode.mix == peniko::Mix::Clip {
         match blend_mode.compose {
