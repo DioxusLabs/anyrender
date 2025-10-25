@@ -25,22 +25,19 @@ struct ActiveRenderState {
     typeface_cache: HashMap<(u64, u32), Typeface>,
 }
 
-#[derive(Clone, Default)]
-pub struct SkiaRendererOptions {}
-
 pub struct SkiaWindowRenderer {
-    options: SkiaRendererOptions,
     render_state: RenderState,
+}
+
+impl Default for SkiaWindowRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SkiaWindowRenderer {
     pub fn new() -> Self {
-        Self::new_with_options(SkiaRendererOptions::default())
-    }
-
-    pub fn new_with_options(options: SkiaRendererOptions) -> Self {
         Self {
-            options,
             render_state: RenderState::Suspended,
         }
     }
