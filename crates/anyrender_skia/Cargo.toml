@@ -10,10 +10,10 @@ edition.workspace = true
 
 [features]
 log_frame_times = ["debug_timer/enable"]
+vulkan = ["skia-safe/vulkan"]
 
 [dependencies]
 anyrender = { workspace = true }
-
 debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
@@ -26,9 +26,6 @@ gl = "0.14.0"
 ash = "^0.38.0"
 ash-window = "0.13.0"
 glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-skia-safe = { version = "0.89.1", features = ["vulkan"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = {version = "0.6.3", default-features = false}

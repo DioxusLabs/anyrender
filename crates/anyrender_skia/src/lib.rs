@@ -6,6 +6,7 @@ mod window_renderer;
 #[cfg(target_os = "macos")]
 mod metal;
 mod opengl;
+#[cfg(feature = "vulkan")]
 mod vulkan;
 
 pub use scene::SkiaScenePainter;
