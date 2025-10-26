@@ -1,10 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use anyrender::WindowRenderer;
 use debug_timer::debug_timer;
-use skia_safe::{Color, FontMgr, Surface, Typeface};
+use skia_safe::{Color, Surface};
 
-use crate::scene::SkiaScenePainter;
+use crate::scene::{ResourceCache, SkiaScenePainter};
 
 pub(crate) trait SkiaBackend {
     fn set_size(&mut self, width: u32, height: u32);
@@ -21,8 +21,7 @@ enum RenderState {
 
 struct ActiveRenderState {
     backend: Box<dyn SkiaBackend>,
-    font_mgr: FontMgr,
-    typeface_cache: HashMap<(u64, u32), Typeface>,
+    resource_cache: ResourceCache,
 }
 
 pub struct SkiaWindowRenderer {
@@ -59,8 +58,7 @@ impl WindowRenderer for SkiaWindowRenderer {
 
         self.render_state = RenderState::Active(ActiveRenderState {
             backend: Box::new(backend),
-            font_mgr: FontMgr::new(),
-            typeface_cache: HashMap::new(),
+            resource_cache: ResourceCache::new(),
         })
     }
 
@@ -95,8 +93,7 @@ impl WindowRenderer for SkiaWindowRenderer {
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
-            font_mgr: &mut state.font_mgr,
-            typeface_cache: &mut state.typeface_cache,
+            cache: &mut state.resource_cache,
         });
         timer.record_time("cmd");
 

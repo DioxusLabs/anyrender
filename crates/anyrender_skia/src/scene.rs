@@ -13,10 +13,27 @@ use skia_safe::{
     shaders,
 };
 
+pub struct ResourceCache {
+    pub(crate) font_mgr: FontMgr,
+    #[cfg(target_os = "macos")]
+    pub(crate) extracted_font_data: HashMap<(u64, u32), peniko::FontData>,
+    pub(crate) typefaces: HashMap<(u64, u32), Typeface>,
+}
+
+impl ResourceCache {
+    pub fn new() -> Self {
+        Self {
+            font_mgr: FontMgr::new(),
+            #[cfg(target_os = "macos")]
+            extracted_font_data: HashMap::new(),
+            typefaces: HashMap::new(),
+        }
+    }
+}
+
 pub struct SkiaScenePainter<'a> {
     pub(crate) inner: &'a Canvas,
-    pub(crate) font_mgr: &'a mut FontMgr,
-    pub(crate) typeface_cache: &'a mut HashMap<(u64, u32), Typeface>,
+    pub(crate) cache: &'a mut ResourceCache,
 }
 
 impl PaintScene for SkiaScenePainter<'_> {
@@ -94,7 +111,7 @@ impl PaintScene for SkiaScenePainter<'_> {
 
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
-        font: &'a peniko::FontData,
+        #[allow(unused_mut)] mut font: &'a peniko::FontData,
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [anyrender::NormalizedCoord],
@@ -120,24 +137,55 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         let font_key = (font.data.id(), font.index);
 
-        if !self.typeface_cache.contains_key(&font_key) {
+        // Skia doesn't support loading TTC files on macOS, so we extract each font used
+        // from a TTC into it's own TTF before passing it into Skia
+        #[cfg(target_os = "macos")]
+        #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
+        {
+            use peniko::Blob;
+            use std::sync::Arc;
+
+            if let Some(collection) = oaty::Collection::new(font.data.data()) {
+                if !self.cache.extracted_font_data.contains_key(&font_key) {
+                    let Some(data) = collection
+                        .get_font(font.index)
+                        .and_then(|font| font.copy_data())
+                    else {
+                        eprintln!(
+                            "WARNING: failed to extract font {} {}",
+                            font_key.0, font_key.1
+                        );
+                        return;
+                    };
+
+                    let blob = Blob::new(Arc::new(data));
+                    let font_data = peniko::FontData::new(blob, 0);
+                    self.cache.extracted_font_data.insert(font_key, font_data);
+                }
+                font = self.cache.extracted_font_data.get(&font_key).unwrap()
+            }
+        }
+
+        if !self.cache.typefaces.contains_key(&font_key) {
             let Some(typeface) = self
+                .cache
                 .font_mgr
                 .new_from_data(font.data.data(), font.index as usize)
             else {
                 let tf = Typeface::make_deserialize(font.data.data(), None);
                 eprintln!(
-                    "WARNING: failed to load font {} {} {}",
+                    "WARNING: failed to load font {} {} {} {}",
                     font_key.0,
                     font_key.1,
-                    tf.is_some()
+                    tf.is_some(),
+                    font.index
                 );
                 return;
             };
-            self.typeface_cache.insert(font_key, typeface);
+            self.cache.typefaces.insert(font_key, typeface);
         }
 
-        let original_typeface = self.typeface_cache.get(&font_key).unwrap();
+        let original_typeface = self.cache.typefaces.get(&font_key).unwrap();
         let mut normalized_typeface: Option<Typeface> = None;
 
         fn f2dot14_to_f32(raw_value: i16) -> f32 {

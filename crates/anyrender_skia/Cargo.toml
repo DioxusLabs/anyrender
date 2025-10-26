@@ -22,6 +22,7 @@ futures-intrusive = { workspace = true }
 pollster = { workspace = true }
 rustc-hash = { workspace = true }
 skia-safe = { version = "0.89.1", features = ["gl", "pdf", "textlayout"]}
+oaty = "0.1"
 gl = "0.14.0"
 ash = "^0.38.0"
 ash-window = "0.13.0"
