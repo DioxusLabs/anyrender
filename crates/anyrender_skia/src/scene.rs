@@ -10,8 +10,14 @@ use skia_safe::{
 use crate::cache::GenerationalCache;
 
 pub(crate) struct SkiaSceneCache {
+    paint: Paint,
+    #[cfg(target_os = "macos")]
+    extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     image_shader: GenerationalCache<u64, Shader>,
+    font_mgr: FontMgr,
+    glyph_id_buf: Vec<GlyphId>,
+    glyph_pos_buf: Vec<Point>,
 }
 
 impl SkiaSceneCache {
@@ -24,46 +30,36 @@ impl SkiaSceneCache {
 impl Default for SkiaSceneCache {
     fn default() -> Self {
         Self {
+            paint: Paint::default(),
+            #[cfg(target_os = "macos")]
+            extracted_font_data: GenerationalCache::new(1),
             typeface: GenerationalCache::new(60), // Keep this high until we figure out a fix for skia_safe fontmgr cache leak
             image_shader: GenerationalCache::new(1),
-        }
-    }
-}
-
-pub(crate) struct SkiaSceneBuffers {
-    glyph_id: Vec<GlyphId>,
-    glyph_pos: Vec<Point>,
-}
-
-impl Default for SkiaSceneBuffers {
-    fn default() -> Self {
-        Self {
-            glyph_id: Default::default(),
-            glyph_pos: Default::default(),
+            font_mgr: FontMgr::new(),
+            glyph_id_buf: Default::default(),
+            glyph_pos_buf: Default::default(),
         }
     }
 }
 
 pub struct SkiaScenePainter<'a> {
     pub(crate) inner: &'a Canvas,
-    pub(crate) paint: Paint,
-    pub(crate) font_mgr: &'a mut FontMgr,
     pub(crate) cache: &'a mut SkiaSceneCache,
-    pub(crate) buffers: &'a mut SkiaSceneBuffers,
 }
 
 impl SkiaScenePainter<'_> {
     fn reset_paint(&mut self) {
-        self.paint.reset();
-        self.paint.set_anti_alias(true);
+        self.cache.paint.reset();
+        self.cache.paint.set_anti_alias(true);
     }
 
     fn set_paint_alpha(&mut self, alpha: f32) {
-        self.paint.set_alpha_f(alpha);
+        self.cache.paint.set_alpha_f(alpha);
     }
 
     fn set_paint_blend_mode(&mut self, blend_mode: impl Into<peniko::BlendMode>) {
-        self.paint
+        self.cache
+            .paint
             .set_blend_mode(sk_peniko::blend_mode_from(blend_mode.into()));
     }
 
@@ -89,18 +85,19 @@ impl SkiaScenePainter<'_> {
         let brush: anyrender::PaintRef<'a> = brush.into();
         match brush {
             anyrender::Paint::Solid(alpha_color) => {
-                self.paint.set_color4f(
+                self.cache.paint.set_color4f(
                     &sk_peniko::color4f_from_alpha_color(alpha_color),
                     &ColorSpace::new_srgb(),
                 );
             }
             anyrender::Paint::Gradient(gradient) => {
-                self.paint
+                self.cache
+                    .paint
                     .set_shader(sk_peniko::shader_from_gradient(gradient, brush_transform));
             }
             anyrender::Paint::Image(image_brush) => {
                 if let Some(shader) = self.cache.image_shader.hit(&image_brush.image.data.id()) {
-                    self.paint.set_shader(shader.clone());
+                    self.cache.paint.set_shader(shader.clone());
                     return;
                 }
 
@@ -112,7 +109,7 @@ impl SkiaScenePainter<'_> {
                         .insert(image_brush.image.data.id(), shader.clone());
                 }
 
-                self.paint.set_shader(image_shader);
+                self.cache.paint.set_shader(image_shader);
             }
             anyrender::Paint::Custom(_) => unreachable!(), // ToDo: figure out what to do with this
         }
@@ -121,18 +118,18 @@ impl SkiaScenePainter<'_> {
     fn set_paint_style<'a>(&mut self, style: impl Into<peniko::StyleRef<'a>>) {
         match style.into() {
             peniko::StyleRef::Fill(_) => {
-                self.paint.set_style(PaintStyle::Fill);
+                self.cache.paint.set_style(PaintStyle::Fill);
             }
             peniko::StyleRef::Stroke(stroke) => {
-                self.paint.set_style(PaintStyle::Stroke);
-                self.paint.set_stroke(true);
-                self.paint.set_stroke_width(stroke.width as f32);
-                self.paint.set_stroke_join(match stroke.join {
+                self.cache.paint.set_style(PaintStyle::Stroke);
+                self.cache.paint.set_stroke(true);
+                self.cache.paint.set_stroke_width(stroke.width as f32);
+                self.cache.paint.set_stroke_join(match stroke.join {
                     kurbo::Join::Bevel => PaintJoin::Bevel,
                     kurbo::Join::Miter => PaintJoin::Miter,
                     kurbo::Join::Round => PaintJoin::Round,
                 });
-                self.paint.set_stroke_cap(match stroke.start_cap {
+                self.cache.paint.set_stroke_cap(match stroke.start_cap {
                     kurbo::Cap::Butt => PaintCap::Butt,
                     kurbo::Cap::Square => PaintCap::Square,
                     kurbo::Cap::Round => PaintCap::Round,
@@ -158,7 +155,7 @@ impl SkiaScenePainter<'_> {
                     rect.x1 as f32,
                     rect.y1 as f32,
                 ),
-                &self.paint,
+                &self.cache.paint,
             );
         } else if let Some(rrect) = shape.as_rounded_rect() {
             let rect = Rect::new(
@@ -175,32 +172,32 @@ impl SkiaScenePainter<'_> {
                     rrect.radii().top_right as f32,
                     rrect.radii().bottom_right as f32,
                 ),
-                &self.paint,
+                &self.cache.paint,
             );
         } else if let Some(line) = shape.as_line() {
             self.inner.draw_line(
                 (line.p0.x as f32, line.p0.y as f32),
                 (line.p1.x as f32, line.p1.y as f32),
-                &self.paint,
+                &self.cache.paint,
             );
         } else if let Some(circle) = shape.as_circle() {
             self.inner.draw_circle(
                 (circle.center.x as f32, circle.center.y as f32),
                 circle.radius as f32,
-                &self.paint,
+                &self.cache.paint,
             );
         } else if let Some(path_els) = shape.as_path_slice() {
             let mut path = sk_kurbo::path_from_path_elements(path_els);
             if let Some(fill) = fill.into() {
                 path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
             }
-            self.inner.draw_path(&path, &self.paint);
+            self.inner.draw_path(&path, &self.cache.paint);
         } else {
             let mut path = sk_kurbo::path_from_shape(shape);
             if let Some(fill) = fill.into() {
                 path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
             }
-            self.inner.draw_path(&path, &self.paint);
+            self.inner.draw_path(&path, &self.cache.paint);
         }
     }
 }
@@ -221,7 +218,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.set_paint_alpha(alpha);
         self.set_paint_blend_mode(blend);
         self.inner
-            .save_layer(&SaveLayerRec::default().paint(&self.paint));
+            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
 
         self.set_matrix(transform);
         self.clip(clip);
@@ -239,16 +236,12 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
-        self.inner.save();
-
         self.set_matrix(transform);
 
         self.reset_paint();
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape(shape);
-
-        self.inner.restore();
     }
 
     fn fill<'a>(
@@ -259,16 +252,12 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
-        self.inner.save();
-
         self.set_matrix(transform);
 
         self.reset_paint();
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape_with_fill(shape, style);
-
-        self.inner.restore();
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -284,8 +273,6 @@ impl PaintScene for SkiaScenePainter<'_> {
         glyph_transform: Option<kurbo::Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        self.inner.save();
-
         self.set_matrix(transform);
 
         if let Some(glyph_transform) = glyph_transform {
@@ -299,8 +286,36 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         let font_key = (font.data.id(), font.index);
 
+        #[cfg(target_os = "macos")]
+        #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
+        {
+            use peniko::Blob;
+            use std::sync::Arc;
+
+            if let Some(collection) = oaty::Collection::new(font.data.data()) {
+                if !self.cache.extracted_font_data.contains_key(&font_key) {
+                    let Some(data) = collection
+                        .get_font(font.index)
+                        .and_then(|font| font.copy_data())
+                    else {
+                        eprintln!(
+                            "WARNING: failed to extract font {} {}",
+                            font_key.0, font_key.1
+                        );
+                        return;
+                    };
+
+                    let blob = Blob::new(Arc::new(data));
+                    let font_data = peniko::FontData::new(blob, 0);
+                    self.cache.extracted_font_data.insert(font_key, font_data);
+                }
+                font = self.cache.extracted_font_data.hit(&font_key).unwrap()
+            }
+        }
+
         if !self.cache.typeface.contains_key(&font_key) {
             let Some(typeface) = self
+                .cache
                 .font_mgr
                 .new_from_data(font.data.data(), font.index as usize)
             else {
@@ -375,26 +390,24 @@ impl PaintScene for SkiaScenePainter<'_> {
         font.set_edging(Edging::SubpixelAntiAlias);
 
         let (min_size, _) = glyphs.size_hint();
-        self.buffers.glyph_id.reserve(min_size);
-        self.buffers.glyph_pos.reserve(min_size);
+        self.cache.glyph_id_buf.reserve(min_size);
+        self.cache.glyph_pos_buf.reserve(min_size);
 
         for glyph in glyphs {
-            self.buffers.glyph_id.push(GlyphId::from(glyph.id as u16));
-            self.buffers.glyph_pos.push(Point::new(glyph.x, glyph.y));
+            self.cache.glyph_id_buf.push(GlyphId::from(glyph.id as u16));
+            self.cache.glyph_pos_buf.push(Point::new(glyph.x, glyph.y));
         }
 
         self.inner.draw_glyphs_at(
-            &self.buffers.glyph_id[..],
-            GlyphPositions::Points(&self.buffers.glyph_pos[..]),
+            &self.cache.glyph_id_buf[..],
+            GlyphPositions::Points(&self.cache.glyph_pos_buf[..]),
             Point::new(0.0, 0.0),
             &font,
-            &self.paint,
+            &self.cache.paint,
         );
 
-        self.buffers.glyph_id.clear();
-        self.buffers.glyph_pos.clear();
-
-        self.inner.restore();
+        self.cache.glyph_id_buf.clear();
+        self.cache.glyph_pos_buf.clear();
     }
 
     fn draw_box_shadow(
@@ -405,16 +418,14 @@ impl PaintScene for SkiaScenePainter<'_> {
         radius: f64,
         std_dev: f64,
     ) {
-        self.inner.save();
-
         self.set_matrix(transform);
 
         self.reset_paint();
         self.set_paint_brush(brush, None);
-        self.paint.set_style(PaintStyle::Fill);
+        self.cache.paint.set_style(PaintStyle::Fill);
 
         if std_dev > 0.0 {
-            self.paint.set_mask_filter(
+            self.cache.paint.set_mask_filter(
                 MaskFilter::blur(BlurStyle::Normal, std_dev as f32, false).unwrap(),
             );
         }
@@ -432,9 +443,7 @@ impl PaintScene for SkiaScenePainter<'_> {
             radius as f32,
         );
 
-        self.inner.draw_rrect(rrect, &self.paint);
-
-        self.inner.restore();
+        self.inner.draw_rrect(rrect, &self.cache.paint);
     }
 }
 

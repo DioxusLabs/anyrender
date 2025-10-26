@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     SkiaScenePainter,
-    scene::{SkiaSceneBuffers, SkiaSceneCache},
+    scene::{SkiaSceneCache},
 };
 
 pub(crate) trait SkiaBackend {
@@ -23,8 +23,6 @@ enum RenderState {
 
 struct ActiveRenderState {
     backend: Box<dyn SkiaBackend>,
-    font_mgr: FontMgr,
-    scene_buffers: SkiaSceneBuffers,
     scene_cache: SkiaSceneCache,
 }
 
@@ -62,8 +60,6 @@ impl WindowRenderer for SkiaWindowRenderer {
 
         self.render_state = RenderState::Active(ActiveRenderState {
             backend: Box::new(backend),
-            font_mgr: FontMgr::new(),
-            scene_buffers: SkiaSceneBuffers::default(),
             scene_cache: SkiaSceneCache::default(),
         })
     }
@@ -99,10 +95,7 @@ impl WindowRenderer for SkiaWindowRenderer {
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
-            paint: Paint::default(),
-            font_mgr: &mut state.font_mgr,
             cache: &mut state.scene_cache,
-            buffers: &mut state.scene_buffers,
         });
         timer.record_time("cmd");
 
@@ -112,6 +105,6 @@ impl WindowRenderer for SkiaWindowRenderer {
         state.scene_cache.next_gen();
         timer.record_time("cache next gen");
 
-        timer.print_times("Frame time: ");
+        timer.print_times("skia: ");
     }
 }
