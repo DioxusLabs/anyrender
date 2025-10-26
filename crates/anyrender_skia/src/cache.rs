@@ -41,17 +41,12 @@ where
         }
     }
 
-    pub(crate) fn next_gen(&mut self) -> usize {
-        let extracted_count = self
-            .resources
-            .extract_if(|_, entry| {
-                self.current_generation.wrapping_sub(entry.generation) >= self.max_age
-            })
-            .count();
+    pub(crate) fn next_gen(&mut self) {
+        self.resources.retain(|_, entry| {
+            self.current_generation.wrapping_sub(entry.generation) < self.max_age
+        });
 
         self.current_generation = self.current_generation.wrapping_add(1);
-
-        extracted_count
     }
 
     pub(crate) fn contains_key(&self, key: &K) -> bool {
