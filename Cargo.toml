@@ -26,7 +26,7 @@ rust-version = "1.86.0"
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
 anyrender = { version = "0.6.0", path = "./crates/anyrender" }
-anyrender_skia = { version = "0.1.0-beta.1", path = "./crates/anyrender_skia" }
+anyrender_skia = { version = "0.1.0-beta.2", path = "./crates/anyrender_skia" }
 anyrender_vello = { version = "0.6.0", path = "./crates/anyrender_vello" }
 anyrender_vello_cpu = { version = "0.8.0", path = "./crates/anyrender_vello_cpu" }
 anyrender_vello_hybrid = { version = "0.1.0", path = "./crates/anyrender_vello_hybrid" }
