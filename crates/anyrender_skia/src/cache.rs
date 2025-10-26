@@ -51,7 +51,7 @@ where
 
         self.current_generation = self.current_generation.wrapping_add(1);
 
-        return extracted_count;
+        extracted_count
     }
 
     pub(crate) fn contains_key(&self, key: &K) -> bool {

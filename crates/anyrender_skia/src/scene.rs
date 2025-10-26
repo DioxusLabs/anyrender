@@ -86,7 +86,7 @@ impl SkiaScenePainter<'_> {
         match brush {
             anyrender::Paint::Solid(alpha_color) => {
                 self.cache.paint.set_color4f(
-                    &sk_peniko::color4f_from_alpha_color(alpha_color),
+                    sk_peniko::color4f_from_alpha_color(alpha_color),
                     &ColorSpace::new_srgb(),
                 );
             }

@@ -14,7 +14,7 @@ pub(crate) trait SkiaBackend {
 }
 
 enum RenderState {
-    Active(ActiveRenderState),
+    Active(Box<ActiveRenderState>),
     Suspended,
 }
 
@@ -55,10 +55,10 @@ impl WindowRenderer for SkiaWindowRenderer {
         #[cfg(not(target_os = "macos"))]
         let backend = crate::opengl::OpenGLBackend::new(window, width, height);
 
-        self.render_state = RenderState::Active(ActiveRenderState {
+        self.render_state = RenderState::Active(Box::new(ActiveRenderState {
             backend: Box::new(backend),
             scene_cache: SkiaSceneCache::default(),
-        })
+        }))
     }
 
     fn suspend(&mut self) {
