@@ -1,12 +1,9 @@
 use anyrender::WindowRenderer;
 use debug_timer::debug_timer;
-use skia_safe::{Color, FontMgr, Paint, Surface};
+use skia_safe::{Color, Surface};
 use std::sync::Arc;
 
-use crate::{
-    SkiaScenePainter,
-    scene::{SkiaSceneCache},
-};
+use crate::{SkiaScenePainter, scene::SkiaSceneCache};
 
 pub(crate) trait SkiaBackend {
     fn set_size(&mut self, width: u32, height: u32);
