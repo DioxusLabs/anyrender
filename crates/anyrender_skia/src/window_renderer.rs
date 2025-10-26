@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
-
 use anyrender::WindowRenderer;
 use debug_timer::debug_timer;
-use skia_safe::{Color, FontMgr, Surface, Typeface};
+use skia_safe::{Color, FontMgr, Paint, Surface};
+use std::sync::Arc;
 
-use crate::scene::SkiaScenePainter;
+use crate::{
+    SkiaScenePainter,
+    scene::{SkiaSceneBuffers, SkiaSceneCache},
+};
 
 pub(crate) trait SkiaBackend {
     fn set_size(&mut self, width: u32, height: u32);
@@ -22,7 +24,8 @@ enum RenderState {
 struct ActiveRenderState {
     backend: Box<dyn SkiaBackend>,
     font_mgr: FontMgr,
-    typeface_cache: HashMap<(u64, u32), Typeface>,
+    scene_buffers: SkiaSceneBuffers,
+    scene_cache: SkiaSceneCache,
 }
 
 pub struct SkiaWindowRenderer {
@@ -60,7 +63,8 @@ impl WindowRenderer for SkiaWindowRenderer {
         self.render_state = RenderState::Active(ActiveRenderState {
             backend: Box::new(backend),
             font_mgr: FontMgr::new(),
-            typeface_cache: HashMap::new(),
+            scene_buffers: SkiaSceneBuffers::default(),
+            scene_cache: SkiaSceneCache::default(),
         })
     }
 
@@ -95,13 +99,18 @@ impl WindowRenderer for SkiaWindowRenderer {
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
+            paint: Paint::default(),
             font_mgr: &mut state.font_mgr,
-            typeface_cache: &mut state.typeface_cache,
+            cache: &mut state.scene_cache,
+            buffers: &mut state.scene_buffers,
         });
         timer.record_time("cmd");
 
         state.backend.flush(surface);
         timer.record_time("render");
+
+        state.scene_cache.next_gen();
+        timer.record_time("cache next gen");
 
         timer.print_times("Frame time: ");
     }

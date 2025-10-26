@@ -9,6 +9,7 @@ mod metal;
 mod opengl;
 #[cfg(feature = "vulkan")]
 mod vulkan;
+mod cache;
 
 pub use scene::SkiaScenePainter;
 pub use window_renderer::SkiaWindowRenderer;
