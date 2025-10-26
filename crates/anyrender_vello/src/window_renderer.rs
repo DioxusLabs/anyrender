@@ -230,7 +230,7 @@ impl WindowRenderer for VelloWindowRenderer {
         render_surface.device().poll(wgpu::PollType::Wait).unwrap();
 
         timer.record_time("wait");
-        timer.print_times("Frame time: ");
+        timer.print_times("vello: ");
 
         // static COUNTER: AtomicU64 = AtomicU64::new(0);
         // println!("FRAME {}", COUNTER.fetch_add(1, atomic::Ordering::Relaxed));

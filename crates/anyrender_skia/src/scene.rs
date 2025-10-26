@@ -262,7 +262,7 @@ impl PaintScene for SkiaScenePainter<'_> {
 
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
-        font: &'a peniko::FontData,
+        #[allow(unused_mut)] mut font: &'a peniko::FontData,
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [anyrender::NormalizedCoord],
@@ -321,10 +321,11 @@ impl PaintScene for SkiaScenePainter<'_> {
             else {
                 let tf = Typeface::make_deserialize(font.data.data(), None);
                 eprintln!(
-                    "WARNING: failed to load font {} {} {}",
+                    "WARNING: failed to load font {} {} {} {}",
                     font_key.0,
                     font_key.1,
-                    tf.is_some()
+                    tf.is_some(),
+                    font.index
                 );
                 return;
             };
