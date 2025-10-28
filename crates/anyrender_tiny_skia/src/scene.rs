@@ -173,6 +173,7 @@ struct Glyph {
 struct CacheColor(bool);
 
 pub(crate) struct Layer {
+pub(crate) struct Layer {
     pub(crate) pixmap: Pixmap,
     /// clip is stored with the transform at the time clip is called
     pub(crate) clip: Option<Rect>,
@@ -465,20 +466,20 @@ pub struct TinySkiaScenePainter {
 
 impl TinySkiaScenePainter {
     pub fn new(width: u32, height: u32) -> Self {
-        let mut layers = vec![];
-        if let (Some(pixmap), Some(mask)) = (Pixmap::new(width, height), Mask::new(width, height)) {
-            let main_layer = Layer {
-                pixmap,
-                mask,
-                clip: None,
-                alpha: 1.0,
-                transform: Affine::IDENTITY,
-                combine_transform: Affine::IDENTITY,
-                blend_mode: Mix::Normal.into(),
-                cache_color: CacheColor(false),
-            };
-            layers.push(main_layer);
-        }
+        let width = width.max(1);
+        let height = height.max(1);
+        let pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
+        let mask = Mask::new(width, height).expect("Failed to create mask");
+        let main_layer = Layer {
+            pixmap,
+            mask,
+            clip: None,
+            alpha: 1.0,
+            transform: Affine::IDENTITY,
+            combine_transform: Affine::IDENTITY,
+            blend_mode: Mix::Normal.into(),
+            cache_color: CacheColor(false),
+        };
         let cache_color = CacheColor(false);
         Self {
             layers,
@@ -489,11 +490,11 @@ impl TinySkiaScenePainter {
 
 impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
-        if let Some(first_layer) = self.layers.last_mut() {
-            // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
-            first_layer.clip = None;
-            first_layer.transform = Affine::IDENTITY;
-        }
+        let first_layer = self.layers.last_mut().unwrap();
+        // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
+        first_layer.clip = None;
+        first_layer.transform = Affine::IDENTITY;
+        
     }
 
     fn push_layer(
@@ -698,12 +699,8 @@ enum BlendStrategy {
 
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
-        (Mix::Normal, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         #[allow(deprecated)]
-        (Mix::Clip, compose) => BlendStrategy::MultiPass {
-            first_pass: compose_to_tiny_blend_mode(compose),
-            second_pass: TinyBlendMode::Source,
-        },
+        (Mix::Normal | Mix::Clip, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
         (mix, compose) => BlendStrategy::MultiPass {
             first_pass: compose_to_tiny_blend_mode(compose),
