@@ -63,31 +63,31 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
         timer.record_time("cmd");
 
-        if let Some(layer) = self.scene.layers.first() {
-            let pixmap = &layer.pixmap;
-            let width = pixmap.width() as usize;
-            let height = pixmap.height() as usize;
-            let expected_len = width * height * 4;
 
-            assert!(
-                buffer.len() >= expected_len,
-                "buffer too small: {} < {}",
-                buffer.len(),
-                expected_len
-            );
+        let pixmap = &self.scene.layers[0].pixmap;
+        let width = pixmap.width() as usize;
+        let height = pixmap.height() as usize;
+        let expected_len = width * height * 4;
 
-            let pixels = pixmap.pixels();
+        assert!(
+            buffer.len() >= expected_len,
+            "buffer too small: {} < {}",
+            buffer.len(),
+            expected_len
+        );
 
-            buffer[..expected_len]
-                .chunks_exact_mut(4)
-                .zip(pixels.iter())
-                .for_each(|(chunk, pixel)| {
-                    chunk[0] = pixel.red();
-                    chunk[1] = pixel.green();
-                    chunk[2] = pixel.blue();
-                    chunk[3] = pixel.alpha();
-                });
-        }
+        let pixels = pixmap.pixels();
+
+        buffer[..expected_len]
+            .chunks_exact_mut(4)
+            .zip(pixels.iter())
+            .for_each(|(chunk, pixel)| {
+                chunk[0] = pixel.red();
+                chunk[1] = pixel.green();
+                chunk[2] = pixel.blue();
+                chunk[3] = pixel.alpha();
+            });
+        
 
         timer.record_time("render");
         timer.print_times("tiny-skia image: ");
