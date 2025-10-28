@@ -64,13 +64,14 @@ impl ImageRenderer for TinySkiaImageRenderer {
         let painter = &mut self.scene;
 
         painter.reset();
-        draw_fn(&mut painter);
+        draw_fn(painter);
         timer.record_time("cmd");
 
         // Convert pixmap to RGBA8
-        let expected_len = (self.width * self.height * 4) as usize;
+        let pixmap = &self.scene.layers[0].pixmap;
+        let expected_len = (pixmap.width() * pixmap.height() * 4) as usize;
         if buffer.len() >= expected_len {
-            for (i, pixel) in self.layers[0].pixmap.pixels().iter().enumerate() {
+            for (i, pixel) in pixmap.pixels().iter().enumerate() {
                 let base = i * 4;
                 if base + 3 < buffer.len() {
                     buffer[base] = pixel.red();

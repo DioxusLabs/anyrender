@@ -172,7 +172,7 @@ struct Glyph {
 #[derive(PartialEq, Clone, Copy)]
 struct CacheColor(bool);
 
-struct Layer {
+pub(crate) struct Layer {
     pub(crate) pixmap: Pixmap,
     /// clip is stored with the transform at the time clip is called
     pub(crate) clip: Option<Rect>,
@@ -465,6 +465,8 @@ pub struct TinySkiaScenePainter {
 
 impl TinySkiaScenePainter {
     pub fn new(width: u32, height: u32) -> Self {
+        let width = width.max(1);
+        let height = height.max(1);
         let pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
         let mask = Mask::new(width, height).expect("Failed to create mask");
         let main_layer = Layer {
@@ -487,11 +489,17 @@ impl TinySkiaScenePainter {
 
 impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
-        assert!(self.layers.len() == 1);
-        let first_layer = self.layers.last_mut().unwrap();
-        // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
-        first_layer.clip = None;
-        first_layer.transform = Affine::IDENTITY;
+        // TODO: reuse allocations
+        //
+        // assert!(self.layers.len() == 1);
+        // let first_layer = self.layers.last_mut().unwrap();
+        // // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
+        // first_layer.clip = None;
+        // first_layer.transform = Affine::IDENTITY;
+
+        let width = self.layers[0].pixmap.width();
+        let height = self.layers[0].pixmap.height();
+        *self = Self::new(width, height);
     }
 
     fn push_layer(
@@ -693,12 +701,8 @@ enum BlendStrategy {
 
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
-        (Mix::Normal, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         #[allow(deprecated)]
-        (Mix::Clip, compose) => BlendStrategy::MultiPass {
-            first_pass: compose_to_tiny_blend_mode(compose),
-            second_pass: TinyBlendMode::Source,
-        },
+        (Mix::Normal | Mix::Clip, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
         (mix, compose) => BlendStrategy::MultiPass {
             first_pass: compose_to_tiny_blend_mode(compose),
