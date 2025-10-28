@@ -18,13 +18,8 @@ impl ImageRenderer for TinySkiaImageRenderer {
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        if !self.scene.layers.is_empty() {
-            self.scene.layers[0].pixmap =
-                Pixmap::new(width, height).expect("Failed to create pixmap");
-            self.scene.layers[0].mask = Mask::new(width, height).expect("Failed to create mask");
-        } else {
-            self.scene = TinySkiaScenePainter::new(width, height);
-        }
+        self.scene.layers[0].pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
+        self.scene.layers[0].mask = Mask::new(width, height).expect("Failed to create mask");
     }
 
     fn reset(&mut self) {
@@ -63,7 +58,6 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
         timer.record_time("cmd");
 
-
         let pixmap = &self.scene.layers[0].pixmap;
         let width = pixmap.width() as usize;
         let height = pixmap.height() as usize;
@@ -87,7 +81,6 @@ impl ImageRenderer for TinySkiaImageRenderer {
                 chunk[2] = pixel.blue();
                 chunk[3] = pixel.alpha();
             });
-        
 
         timer.record_time("render");
         timer.print_times("tiny-skia image: ");

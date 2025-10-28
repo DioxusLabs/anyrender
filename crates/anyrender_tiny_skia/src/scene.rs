@@ -1,23 +1,16 @@
 //! A [`tiny-skia`] backend for the [`anyrender`] 2D drawing abstraction
 
 use anyhow::{Result, anyhow};
-use anyrender::{
-    ImageRenderer, NormalizedCoord, Paint as AnyRenderPaint, PaintRef, PaintScene, WindowHandle,
-    WindowRenderer,
-};
-use debug_timer::debug_timer;
+use anyrender::{NormalizedCoord, Paint as AnyRenderPaint, PaintRef, PaintScene};
 use kurbo::{Affine, PathEl, Point, Rect, Shape};
 use peniko::{
     BlendMode, BrushRef, Color, Compose, Fill, FontData, GradientKind, ImageBrushRef, Mix,
     StyleRef, color::palette,
 };
 use resvg::tiny_skia::StrokeDash;
-use softbuffer::{Context, Surface};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::rc::Rc;
-use std::sync::Arc;
 use swash::{
     FontRef, GlyphId,
     scale::{Render, ScaleContext, Source, StrikeWith, image::Content as SwashContent},
@@ -25,8 +18,8 @@ use swash::{
 };
 use tiny_skia::{
     self, FillRule, FilterQuality, GradientStop, LineCap, LineJoin, LinearGradient, Mask, MaskType,
-    Paint, Path, PathBuilder, Pattern, Pixmap, RadialGradient, Shader, SpreadMode, Stroke,
-    Transform,
+    Paint, Path, PathBuilder, Pattern, Pixmap, PixmapPaint, RadialGradient, Shader, SpreadMode,
+    Stroke, Transform,
 };
 
 thread_local! {
@@ -172,7 +165,6 @@ struct Glyph {
 #[derive(PartialEq, Clone, Copy)]
 struct CacheColor(bool);
 
-pub(crate) struct Layer {
 pub(crate) struct Layer {
     pub(crate) pixmap: Pixmap,
     /// clip is stored with the transform at the time clip is called
@@ -459,8 +451,14 @@ impl Layer {
     }
 }
 
+pub enum LayerOrClip {
+    Layer(Layer),
+    Clip(Affine),
+}
+
 pub struct TinySkiaScenePainter {
-    pub(crate) layers: Vec<Layer>,
+    pub(crate) layers: Vec<LayerOrClip>,
+    pub(crate) last_non_clip_layer: usize,
     cache_color: CacheColor,
 }
 
@@ -482,19 +480,26 @@ impl TinySkiaScenePainter {
         };
         let cache_color = CacheColor(false);
         Self {
-            layers,
+            layers: vec![LayerOrClip::Layer(main_layer)],
+            last_non_clip_layer: 0,
             cache_color,
+        }
+    }
+
+    pub fn non_clip_layer(&mut self) -> Option<&mut Layer> {
+        match self.layers.get_mut(self.last_non_clip_layer) {
+            Some(LayerOrClip::Layer(layer)) => Some(layer),
+            _ => None,
         }
     }
 }
 
 impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
-        let first_layer = self.layers.last_mut().unwrap();
+        let first_layer = self.non_clip_layer().unwrap();
         // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
         first_layer.clip = None;
         first_layer.transform = Affine::IDENTITY;
-        
     }
 
     fn push_layer(
@@ -504,8 +509,18 @@ impl PaintScene for TinySkiaScenePainter {
         transform: Affine,
         clip: &impl Shape,
     ) {
-        if let Ok(layer) = Layer::new(blend, alpha, transform, clip, self.cache_color) {
-            self.layers.push(layer);
+        let blend: BlendMode = blend.into();
+        #[allow(deprecated)]
+        if alpha == 1. && matches!(blend.mix, Mix::Normal | Mix::Clip) {
+            let layer = self.non_clip_layer().unwrap();
+            let transform = layer.transform;
+            self.layers.push(LayerOrClip::Clip(transform));
+            let layer = self.non_clip_layer().unwrap();
+            layer.transform(transform);
+            layer.clip(clip);
+        } else if let Ok(layer) = Layer::new(blend, alpha, transform, clip, self.cache_color) {
+            self.layers.push(LayerOrClip::Layer(layer));
+            self.last_non_clip_layer = self.layers.len() - 1;
         }
     }
 
@@ -513,7 +528,7 @@ impl PaintScene for TinySkiaScenePainter {
         if self.layers.len() <= 1 {
             return;
         }
-        let layer = self.layers.pop().unwrap();
+        let layer = self.non_clip_layer().unwrap();
         let parent = self.layers.last_mut().unwrap();
         apply_layer(&layer, parent);
     }
@@ -526,17 +541,16 @@ impl PaintScene for TinySkiaScenePainter {
         _brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        if let Some(layer) = self.layers.last_mut() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let brush_ref: BrushRef<'_> = paint_ref.into();
+        let layer = self.layers.last_mut().unwrap();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let brush_ref: BrushRef<'_> = paint_ref.into();
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform = old_transform * transform;
 
-            layer.stroke(shape, brush_ref, style);
+        layer.stroke(shape, brush_ref, style);
 
-            layer.transform = old_transform;
-        }
+        layer.transform = old_transform;
     }
 
     fn fill<'b>(
@@ -547,17 +561,16 @@ impl PaintScene for TinySkiaScenePainter {
         _brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        if let Some(layer) = self.layers.last_mut() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let brush_ref: BrushRef<'_> = paint_ref.into();
+        let layer = self.layers.last_mut().unwrap();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let brush_ref: BrushRef<'_> = paint_ref.into();
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform = old_transform * transform;
 
-            layer.fill(shape, brush_ref, 0.0);
+        layer.fill(shape, brush_ref, 0.0);
 
-            layer.transform = old_transform;
-        }
+        layer.transform = old_transform;
     }
 
     fn draw_glyphs<'b, 's: 'b>(
@@ -573,29 +586,28 @@ impl PaintScene for TinySkiaScenePainter {
         _glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        if let Some(layer) = self.layers.last_mut() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let color = match paint_ref {
-                AnyRenderPaint::Solid(c) => c,
-                _ => palette::css::BLACK,
-            };
+        let layer = self.layers.last_mut().unwrap();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let color = match paint_ref {
+            AnyRenderPaint::Solid(c) => c,
+            _ => palette::css::BLACK,
+        };
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform = old_transform * transform;
 
-            for glyph in glyphs {
-                layer.draw_glyph(
-                    glyph.id as GlyphId,
-                    font_size,
-                    color,
-                    font,
-                    glyph.x,
-                    glyph.y,
-                );
-            }
-
-            layer.transform = old_transform;
+        for glyph in glyphs {
+            layer.draw_glyph(
+                glyph.id as GlyphId,
+                font_size,
+                color,
+                font,
+                glyph.x,
+                glyph.y,
+            );
         }
+
+        layer.transform = old_transform;
     }
 
     fn draw_box_shadow(
@@ -700,7 +712,9 @@ enum BlendStrategy {
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
         #[allow(deprecated)]
-        (Mix::Normal | Mix::Clip, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
+        (Mix::Normal | Mix::Clip, compose) => {
+            BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose))
+        }
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
         (mix, compose) => BlendStrategy::MultiPass {
             first_pass: compose_to_tiny_blend_mode(compose),
@@ -754,38 +768,21 @@ fn mix_to_tiny_blend_mode(mix: Mix) -> TinyBlendMode {
 fn apply_layer(layer: &Layer, parent: &mut Layer) {
     match determine_blend_strategy(&layer.blend_mode) {
         BlendStrategy::SinglePass(blend_mode) => {
-            let mut paint = Paint {
-                blend_mode,
-                anti_alias: true,
-                ..Default::default()
-            };
-
             let transform = skia_transform_with_scaled_translation(
                 parent.transform * layer.combine_transform,
                 1.,
                 1.,
             );
 
-            let layer_pattern = Pattern::new(
+            parent.pixmap.draw_pixmap(
+                0,
+                0,
                 layer.pixmap.as_ref(),
-                SpreadMode::Pad,
-                FilterQuality::Bilinear,
-                layer.alpha,
-                Transform::identity(),
-            );
-
-            paint.shader = layer_pattern;
-
-            let layer_rect = try_ret!(tiny_skia::Rect::from_xywh(
-                0.0,
-                0.0,
-                layer.pixmap.width() as f32,
-                layer.pixmap.height() as f32,
-            ));
-
-            parent.pixmap.fill_rect(
-                layer_rect,
-                &paint,
+                &PixmapPaint {
+                    opacity: layer.alpha,
+                    blend_mode,
+                    quality: FilterQuality::Bilinear,
+                },
                 transform,
                 parent.clip.is_some().then_some(&parent.mask),
             );
@@ -796,37 +793,21 @@ fn apply_layer(layer: &Layer, parent: &mut Layer) {
         } => {
             let original_parent = parent.pixmap.clone();
 
-            let mut paint = Paint {
-                blend_mode: first_pass,
-                anti_alias: true,
-                ..Default::default()
-            };
-
             let transform = skia_transform_with_scaled_translation(
                 parent.transform * layer.combine_transform,
                 1.,
                 1.,
             );
-            let layer_pattern = Pattern::new(
+
+            parent.pixmap.draw_pixmap(
+                0,
+                0,
                 layer.pixmap.as_ref(),
-                SpreadMode::Pad,
-                FilterQuality::Bilinear,
-                1.0,
-                Transform::identity(),
-            );
-
-            paint.shader = layer_pattern;
-
-            let layer_rect = try_ret!(tiny_skia::Rect::from_xywh(
-                0.0,
-                0.0,
-                layer.pixmap.width() as f32,
-                layer.pixmap.height() as f32,
-            ));
-
-            parent.pixmap.fill_rect(
-                layer_rect,
-                &paint,
+                &PixmapPaint {
+                    opacity: 1.0,
+                    blend_mode: first_pass,
+                    quality: FilterQuality::Bilinear,
+                },
                 transform,
                 parent.clip.is_some().then_some(&parent.mask),
             );
@@ -834,28 +815,18 @@ fn apply_layer(layer: &Layer, parent: &mut Layer) {
             let intermediate = parent.pixmap.clone();
             parent.pixmap = original_parent;
 
-            let mut paint = Paint {
-                blend_mode: second_pass,
-                anti_alias: true,
-                ..Default::default()
-            };
-
-            let intermediate_pattern = Pattern::new(
+            parent.pixmap.draw_pixmap(
+                0,
+                0,
                 intermediate.as_ref(),
-                SpreadMode::Pad,
-                FilterQuality::Bilinear,
-                1.0,
-                Transform::identity(),
-            );
-
-            paint.shader = intermediate_pattern;
-
-            parent.pixmap.fill_rect(
-                layer_rect,
-                &paint,
+                &PixmapPaint {
+                    opacity: layer.alpha,
+                    blend_mode: second_pass,
+                    quality: FilterQuality::Bilinear,
+                },
                 transform,
                 parent.clip.is_some().then_some(&parent.mask),
-            )
+            );
         }
     }
     parent.transform *= layer.transform;
