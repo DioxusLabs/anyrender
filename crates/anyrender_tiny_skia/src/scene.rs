@@ -29,7 +29,7 @@ thread_local! {
     static IMAGE_CACHE: RefCell<HashMap<Vec<u8>, (CacheColor, Rc<Pixmap>)>> = RefCell::new(HashMap::new());
     #[allow(clippy::type_complexity)]
     // The cache key includes: (glyph_id, font_size_bits, coords_hash, hint, fill_rule, transform_hash, offset_hash), color
-    static GLYPH_CACHE: RefCell<HashMap<((GlyphId, u32, u64, bool, u8, u64, u64), u32), (CacheColor, Option<Rc<Glyph>>)>> = RefCell::new(HashMap::new());
+    static GLYPH_CACHE: RefCell<HashMap<((GlyphId, u32, u64, bool, u8, u64 ), u32), (CacheColor, Option<Rc<Glyph>>)>> = RefCell::new(HashMap::new());
     static SWASH_SCALER: RefCell<ScaleContext> = RefCell::new(ScaleContext::new());
 }
 
@@ -88,7 +88,6 @@ fn cache_glyph(
     hint: bool,
     fill: peniko::Fill,
     glyph_transform: Option<Affine>,
-    offset: Point,
 ) -> Option<Rc<Glyph>> {
     let c = color.to_rgba8();
     // Create a more comprehensive cache key including normalized coords, hinting, fill rule, transform, and offset
@@ -103,11 +102,6 @@ fn cache_glyph(
             })
         })
         .unwrap_or(0);
-    let offset_hash = offset
-        .x
-        .to_bits()
-        .wrapping_mul(31)
-        .wrapping_add(offset.y.to_bits());
     let cache_key = (
         glyph_id,
         font_size.to_bits(),
@@ -115,7 +109,6 @@ fn cache_glyph(
         hint,
         fill as u8,
         transform_hash,
-        offset_hash,
     );
 
     if let Some(opt_glyph) = GLYPH_CACHE.with_borrow_mut(|gc| {
@@ -163,7 +156,6 @@ fn cache_glyph(
             peniko::Fill::EvenOdd => swash::zeno::Fill::EvenOdd,
         })
         .transform(zeno_transform)
-        .offset(swash::zeno::Vector::new(offset.x as f32, offset.y as f32))
         .render(&mut scaler, glyph_id)
     })?;
 
@@ -220,6 +212,13 @@ struct Glyph {
 
 #[derive(PartialEq, Clone, Copy)]
 struct CacheColor(bool);
+impl std::ops::Not for CacheColor {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(!self.0)
+    }
+}
 
 pub(crate) struct Layer {
     pub(crate) pixmap: Pixmap,
@@ -333,9 +332,8 @@ impl Layer {
     ) -> Result<Self, anyhow::Error> {
         let transform = Affine::IDENTITY;
         let bbox = clip.bounding_box();
-        let scaled_box = bbox;
-        let width = scaled_box.width() as u32;
-        let height = scaled_box.height() as u32;
+        let width = bbox.width() as u32;
+        let height = bbox.height() as u32;
         let mut mask = Mask::new(width, height).ok_or_else(|| anyhow!("unable to create mask"))?;
         mask.fill_path(
             &shape_to_path(clip).ok_or_else(|| anyhow!("unable to create clip shape"))?,
@@ -354,21 +352,15 @@ impl Layer {
         })
     }
 
-    fn transform(&mut self, transform: Affine) {
-        self.transform *= transform;
-    }
-
-    fn clip(&mut self, shape: &impl Shape) {
+    fn clip(&mut self, shape: &impl Shape, transform: Affine) {
+        let transform = skia_transform(transform, 1.);
         let path = try_ret!(shape_to_path(shape));
-        let transform = self.skia_transform();
         if let Some(ref mut mask) = self.mask {
             mask.fill_path(&path, FillRule::default(), false, transform);
         } else {
             // Create a new mask if none exists
-            let width = self.pixmap.width();
-            let height = self.pixmap.height();
-            if let Some(mut mask) = Mask::new(width, height) {
-                mask.fill_path(&path, FillRule::default(), false, self.skia_transform());
+            if let Some(mut mask) = Mask::new(self.pixmap.width(), self.pixmap.height()) {
+                mask.fill_path(&path, FillRule::default(), false, transform);
                 self.mask = Some(mask);
             }
         }
@@ -510,13 +502,12 @@ impl Layer {
             hint,
             fill,
             glyph_transform,
-            Point::new(x as f64, y as f64),
         ) {
             // Since transform and offset are now handled by swash, just render directly
             self.render_pixmap_direct(
                 &cached_glyph.pixmap,
-                cached_glyph.left,
-                -cached_glyph.top,
+                cached_glyph.left + x,
+                -cached_glyph.top + y,
                 self.transform,
             );
         }
@@ -557,20 +548,22 @@ impl TinySkiaScenePainter {
         }
     }
 
-    pub(crate) fn non_clip_layer(&mut self) -> Option<&mut Layer> {
+    pub(crate) fn non_clip_layer(&mut self) -> &mut Layer {
         match self.layers.get_mut(self.last_non_clip_layer) {
-            Some(LayerOrClip::Layer(layer)) => Some(layer),
-            _ => None,
+            Some(LayerOrClip::Layer(layer)) => layer,
+            _ => panic!("the base layer should aways exist and be a non clip layer"),
         }
     }
 }
 
 impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
-        let first_layer = self.non_clip_layer().unwrap();
-        // first_layer.pixmap.fill(tiny_skia::Color::WHITE);
+        let first_layer = self.non_clip_layer();
+        first_layer.pixmap.fill(tiny_skia::Color::TRANSPARENT);
         first_layer.mask = None;
         first_layer.transform = Affine::IDENTITY;
+        first_layer.cache_color = !first_layer.cache_color;
+        self.layers.shrink_to(1);
     }
 
     fn push_layer(
@@ -583,16 +576,14 @@ impl PaintScene for TinySkiaScenePainter {
         let blend: BlendMode = blend.into();
         #[allow(deprecated)]
         if alpha == 1. && matches!(blend.mix, Mix::Normal | Mix::Clip) {
-            let layer = self.non_clip_layer().unwrap();
-            let transform = layer.transform;
+            let layer = self.non_clip_layer();
 
             // Capture the current mask state before applying new clip
             let previous_mask = layer.mask.clone();
 
             self.layers.push(LayerOrClip::Clip { previous_mask });
-            let layer = self.non_clip_layer().unwrap();
-            layer.transform(transform);
-            layer.clip(clip);
+            let layer = self.non_clip_layer();
+            layer.clip(clip, transform);
         } else if let Ok(layer) = Layer::new(blend, alpha, transform, clip, self.cache_color) {
             self.layers.push(LayerOrClip::Layer(layer));
             self.last_non_clip_layer = self.layers.len() - 1;
@@ -620,9 +611,8 @@ impl PaintScene for TinySkiaScenePainter {
             }
             Some(LayerOrClip::Clip { previous_mask }) => {
                 // This was just a clip, restore the previous mask state
-                if let Some(layer) = self.non_clip_layer() {
-                    layer.mask = previous_mask;
-                }
+                let layer = self.non_clip_layer();
+                layer.mask = previous_mask;
             }
             None => {}
         }
@@ -636,17 +626,16 @@ impl PaintScene for TinySkiaScenePainter {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        if let Some(layer) = self.non_clip_layer() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let brush_ref: BrushRef<'_> = paint_ref.into();
+        let layer = self.non_clip_layer();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let brush_ref: BrushRef<'_> = paint_ref.into();
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform *= transform;
 
-            layer.stroke(shape, brush_ref, style, brush_transform);
+        layer.stroke(shape, brush_ref, style, brush_transform);
 
-            layer.transform = old_transform;
-        }
+        layer.transform = old_transform;
     }
 
     fn fill<'b>(
@@ -657,17 +646,16 @@ impl PaintScene for TinySkiaScenePainter {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        if let Some(layer) = self.non_clip_layer() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let brush_ref: BrushRef<'_> = paint_ref.into();
+        let layer = self.non_clip_layer();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let brush_ref: BrushRef<'_> = paint_ref.into();
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform *= transform;
 
-            layer.fill(shape, brush_ref, 0.0, style, brush_transform);
+        layer.fill(shape, brush_ref, 0.0, style, brush_transform);
 
-            layer.transform = old_transform;
-        }
+        layer.transform = old_transform;
     }
 
     fn draw_glyphs<'b, 's: 'b>(
@@ -683,61 +671,60 @@ impl PaintScene for TinySkiaScenePainter {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        if let Some(layer) = self.non_clip_layer() {
-            let paint_ref: PaintRef<'_> = brush.into();
-            let style_ref: StyleRef<'_> = style.into();
+        let layer = self.non_clip_layer();
+        let paint_ref: PaintRef<'_> = brush.into();
+        let style_ref: StyleRef<'_> = style.into();
 
-            // Extract color from paint and apply brush_alpha
-            let base_color = match paint_ref {
-                AnyRenderPaint::Solid(c) => c,
-                _ => palette::css::BLACK,
-            };
+        // Extract color from paint and apply brush_alpha
+        let base_color = match paint_ref {
+            AnyRenderPaint::Solid(c) => c,
+            _ => palette::css::BLACK,
+        };
 
-            let color = base_color.multiply_alpha(brush_alpha);
+        let color = base_color.multiply_alpha(brush_alpha);
 
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let old_transform = layer.transform;
+        layer.transform *= transform;
 
-            for glyph in glyphs {
-                match style_ref {
-                    StyleRef::Fill(fill) => {
-                        // For fill styles, render the glyph normally
-                        layer.draw_glyph(
-                            glyph.id as GlyphId,
-                            font_size,
-                            color,
-                            font,
-                            glyph.x,
-                            glyph.y,
-                            normalized_coords,
-                            hint,
-                            glyph_transform,
-                            fill,
-                        );
-                    }
-                    StyleRef::Stroke(_stroke) => {
-                        // TODO!
-                        // For stroke styles, we need to render the glyph outline
-                        // Since swash doesn't directly support stroke rendering,
-                        // we just render the glyph normally for now
-                        layer.draw_glyph(
-                            glyph.id as GlyphId,
-                            font_size,
-                            color,
-                            font,
-                            glyph.x,
-                            glyph.y,
-                            normalized_coords,
-                            hint,
-                            glyph_transform,
-                            peniko::Fill::default(), // Default fill for stroke fallback
-                        );
-                    }
+        for glyph in glyphs {
+            match style_ref {
+                StyleRef::Fill(fill) => {
+                    // For fill styles, render the glyph normally
+                    layer.draw_glyph(
+                        glyph.id as GlyphId,
+                        font_size,
+                        color,
+                        font,
+                        glyph.x,
+                        glyph.y,
+                        normalized_coords,
+                        hint,
+                        glyph_transform,
+                        fill,
+                    );
+                }
+                StyleRef::Stroke(_stroke) => {
+                    // TODO!
+                    // For stroke styles, we need to render the glyph outline
+                    // Since swash doesn't directly support stroke rendering,
+                    // we just render the glyph normally for now
+                    layer.draw_glyph(
+                        glyph.id as GlyphId,
+                        font_size,
+                        color,
+                        font,
+                        glyph.x,
+                        glyph.y,
+                        normalized_coords,
+                        hint,
+                        glyph_transform,
+                        peniko::Fill::default(), // Default fill for stroke fallback
+                    );
                 }
             }
-
-            layer.transform = old_transform;
         }
+
+        layer.transform = old_transform;
     }
 
     fn draw_box_shadow(
@@ -748,63 +735,62 @@ impl PaintScene for TinySkiaScenePainter {
         radius: f64,
         std_dev: f64,
     ) {
-        if let Some(layer) = self.non_clip_layer() {
-            let old_transform = layer.transform;
-            layer.transform = old_transform * transform;
+        let layer = self.non_clip_layer();
+        let old_transform = layer.transform;
+        layer.transform = old_transform * transform;
 
-            // Create a shadow using multiple passes with varying opacity
-            // This approximates a Gaussian blur using box blur technique
-            let blur_steps = (std_dev * 2.0).max(1.0) as i32;
-            let base_alpha = brush.components[3] * 0.1; // Reduced alpha for accumulative effect
-            for i in 0..blur_steps {
-                let offset = i as f64 - (blur_steps as f64 / 2.0);
-                let alpha_factor = 1.0 - (offset.abs() / (blur_steps as f64 / 2.0)).powf(0.5);
-                let current_alpha = (base_alpha as f64 * alpha_factor).min(1.0);
+        // Create a shadow using multiple passes with varying opacity
+        // This approximates a Gaussian blur using box blur technique
+        let blur_steps = (std_dev * 2.0).max(1.0) as i32;
+        let base_alpha = brush.components[3] * 0.1; // Reduced alpha for accumulative effect
+        for i in 0..blur_steps {
+            let offset = i as f64 - (blur_steps as f64 / 2.0);
+            let alpha_factor = 1.0 - (offset.abs() / (blur_steps as f64 / 2.0)).powf(0.5);
+            let current_alpha = (base_alpha as f64 * alpha_factor).min(1.0);
 
-                // Create shadow color with reduced alpha
-                let shadow_color = Color::new([
-                    brush.components[0],
-                    brush.components[1],
-                    brush.components[2],
-                    current_alpha as f32,
-                ]);
+            // Create shadow color with reduced alpha
+            let shadow_color = Color::new([
+                brush.components[0],
+                brush.components[1],
+                brush.components[2],
+                current_alpha as f32,
+            ]);
 
-                // Create rounded rectangle for the shadow
-                let shadow_rect = Rect::new(
-                    rect.x0 + offset,
-                    rect.y0 + offset,
-                    rect.x1 + offset,
-                    rect.y1 + offset,
+            // Create rounded rectangle for the shadow
+            let shadow_rect = Rect::new(
+                rect.x0 + offset,
+                rect.y0 + offset,
+                rect.x1 + offset,
+                rect.y1 + offset,
+            );
+
+            let rounded_rect = kurbo::RoundedRect::new(
+                shadow_rect.x0,
+                shadow_rect.y0,
+                shadow_rect.x1,
+                shadow_rect.y1,
+                radius,
+            );
+
+            // Create paint for this shadow layer
+            let paint = Paint {
+                shader: Shader::SolidColor(to_color(shadow_color)),
+                ..Default::default()
+            };
+
+            // Draw the shadow layer
+            if let Some(path) = shape_to_path(&rounded_rect) {
+                layer.pixmap.fill_path(
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    layer.skia_transform(),
+                    layer.mask.as_ref(),
                 );
-
-                let rounded_rect = kurbo::RoundedRect::new(
-                    shadow_rect.x0,
-                    shadow_rect.y0,
-                    shadow_rect.x1,
-                    shadow_rect.y1,
-                    radius,
-                );
-
-                // Create paint for this shadow layer
-                let paint = Paint {
-                    shader: Shader::SolidColor(to_color(shadow_color)),
-                    ..Default::default()
-                };
-
-                // Draw the shadow layer
-                if let Some(path) = shape_to_path(&rounded_rect) {
-                    layer.pixmap.fill_path(
-                        &path,
-                        &paint,
-                        FillRule::Winding,
-                        layer.skia_transform(),
-                        layer.mask.as_ref(),
-                    );
-                }
             }
-
-            layer.transform = old_transform;
         }
+
+        layer.transform = old_transform;
     }
 }
 
