@@ -528,7 +528,7 @@ impl PaintScene for TinySkiaScenePainter {
         if self.layers.len() <= 1 {
             return;
         }
-        
+
         match self.layers.pop() {
             Some(LayerOrClip::Layer(layer)) => {
                 // This was a real layer, apply it to the parent
@@ -635,13 +635,69 @@ impl PaintScene for TinySkiaScenePainter {
 
     fn draw_box_shadow(
         &mut self,
-        _transform: Affine,
-        _rect: Rect,
-        _brush: Color,
-        _radius: f64,
-        _std_dev: f64,
+        transform: Affine,
+        rect: Rect,
+        brush: Color,
+        radius: f64,
+        std_dev: f64,
     ) {
-        // TODO: Implement box shadow for tiny-skia
+        if let Some(layer) = self.non_clip_layer() {
+            let old_transform = layer.transform;
+            layer.transform = old_transform * transform;
+
+            // Create a shadow using multiple passes with varying opacity
+            // This approximates a Gaussian blur using box blur technique
+            let blur_steps = (std_dev * 2.0).max(1.0) as i32;
+            let base_alpha = brush.components[3] * 0.1; // Reduced alpha for accumulative effect
+            for i in 0..blur_steps {
+                let offset = i as f64 - (blur_steps as f64 / 2.0);
+                let alpha_factor = 1.0 - (offset.abs() / (blur_steps as f64 / 2.0)).powf(0.5);
+                let current_alpha = (base_alpha as f64 * alpha_factor).min(1.0);
+
+                // Create shadow color with reduced alpha
+                let shadow_color = Color::new([
+                    brush.components[0],
+                    brush.components[1],
+                    brush.components[2],
+                    current_alpha as f32,
+                ]);
+
+                // Create rounded rectangle for the shadow
+                let shadow_rect = Rect::new(
+                    rect.x0 + offset,
+                    rect.y0 + offset,
+                    rect.x1 + offset,
+                    rect.y1 + offset,
+                );
+
+                let rounded_rect = kurbo::RoundedRect::new(
+                    shadow_rect.x0,
+                    shadow_rect.y0,
+                    shadow_rect.x1,
+                    shadow_rect.y1,
+                    radius,
+                );
+
+                // Create paint for this shadow layer
+                let paint = Paint {
+                    shader: Shader::SolidColor(to_color(shadow_color)),
+                    ..Default::default()
+                };
+
+                // Draw the shadow layer
+                if let Some(path) = shape_to_path(&rounded_rect) {
+                    layer.pixmap.fill_path(
+                        &path,
+                        &paint,
+                        FillRule::Winding,
+                        layer.skia_transform(),
+                        layer.clip.is_some().then_some(&layer.mask),
+                    );
+                }
+            }
+
+            layer.transform = old_transform;
+        }
     }
 }
 
