@@ -1,6 +1,6 @@
 use anyrender::{ImageRenderer, PaintScene};
 use debug_timer::debug_timer;
-use tiny_skia::{Mask, Pixmap};
+use tiny_skia::Pixmap;
 
 use crate::TinySkiaScenePainter;
 
@@ -20,7 +20,7 @@ impl ImageRenderer for TinySkiaImageRenderer {
     fn resize(&mut self, width: u32, height: u32) {
         if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get_mut(0) {
             layer.pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
-            layer.mask = Mask::new(width, height).expect("Failed to create mask");
+            layer.mask = None;
         }
     }
 
@@ -34,7 +34,7 @@ impl ImageRenderer for TinySkiaImageRenderer {
         vec: &mut Vec<u8>,
     ) {
         vec.clear();
-        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.first() {
             vec.reserve((layer.pixmap.width() * layer.pixmap.height() * 4) as usize);
         }
 
@@ -44,7 +44,7 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
 
         // Convert pixmap to RGBA8
-        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.first() {
             for pixel in layer.pixmap.pixels() {
                 vec.push(pixel.red());
                 vec.push(pixel.green());
@@ -61,7 +61,7 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
         timer.record_time("cmd");
 
-        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.first() {
             let pixmap = &layer.pixmap;
             let width = pixmap.width() as usize;
             let height = pixmap.height() as usize;
