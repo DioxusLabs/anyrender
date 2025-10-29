@@ -18,8 +18,10 @@ impl ImageRenderer for TinySkiaImageRenderer {
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        self.scene.layers[0].pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
-        self.scene.layers[0].mask = Mask::new(width, height).expect("Failed to create mask");
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get_mut(0) {
+            layer.pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
+            layer.mask = Mask::new(width, height).expect("Failed to create mask");
+        }
     }
 
     fn reset(&mut self) {
@@ -32,10 +34,9 @@ impl ImageRenderer for TinySkiaImageRenderer {
         vec: &mut Vec<u8>,
     ) {
         vec.clear();
-        vec.reserve(
-            (self.scene.layers[0].pixmap.width() * self.scene.layers[0].pixmap.height() * 4)
-                as usize,
-        );
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+            vec.reserve((layer.pixmap.width() * layer.pixmap.height() * 4) as usize);
+        }
 
         let painter = &mut self.scene;
 
@@ -43,11 +44,13 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
 
         // Convert pixmap to RGBA8
-        for pixel in self.scene.layers[0].pixmap.pixels() {
-            vec.push(pixel.red());
-            vec.push(pixel.green());
-            vec.push(pixel.blue());
-            vec.push(pixel.alpha());
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+            for pixel in layer.pixmap.pixels() {
+                vec.push(pixel.red());
+                vec.push(pixel.green());
+                vec.push(pixel.blue());
+                vec.push(pixel.alpha());
+            }
         }
     }
 
@@ -58,29 +61,31 @@ impl ImageRenderer for TinySkiaImageRenderer {
         draw_fn(painter);
         timer.record_time("cmd");
 
-        let pixmap = &self.scene.layers[0].pixmap;
-        let width = pixmap.width() as usize;
-        let height = pixmap.height() as usize;
-        let expected_len = width * height * 4;
+        if let Some(crate::scene::LayerOrClip::Layer(layer)) = self.scene.layers.get(0) {
+            let pixmap = &layer.pixmap;
+            let width = pixmap.width() as usize;
+            let height = pixmap.height() as usize;
+            let expected_len = width * height * 4;
 
-        assert!(
-            buffer.len() >= expected_len,
-            "buffer too small: {} < {}",
-            buffer.len(),
-            expected_len
-        );
+            assert!(
+                buffer.len() >= expected_len,
+                "buffer too small: {} < {}",
+                buffer.len(),
+                expected_len
+            );
 
-        let pixels = pixmap.pixels();
+            let pixels = pixmap.pixels();
 
-        buffer[..expected_len]
-            .chunks_exact_mut(4)
-            .zip(pixels.iter())
-            .for_each(|(chunk, pixel)| {
-                chunk[0] = pixel.red();
-                chunk[1] = pixel.green();
-                chunk[2] = pixel.blue();
-                chunk[3] = pixel.alpha();
-            });
+            buffer[..expected_len]
+                .chunks_exact_mut(4)
+                .zip(pixels.iter())
+                .for_each(|(chunk, pixel)| {
+                    chunk[0] = pixel.red();
+                    chunk[1] = pixel.green();
+                    chunk[2] = pixel.blue();
+                    chunk[3] = pixel.alpha();
+                });
+        }
 
         timer.record_time("render");
         timer.print_times("tiny-skia image: ");
