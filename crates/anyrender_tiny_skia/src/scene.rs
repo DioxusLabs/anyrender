@@ -528,9 +528,29 @@ impl PaintScene for TinySkiaScenePainter {
         if self.layers.len() <= 1 {
             return;
         }
-        let layer = self.non_clip_layer().unwrap();
-        let parent = self.layers.last_mut().unwrap();
-        apply_layer(&layer, parent);
+        
+        match self.layers.pop() {
+            Some(LayerOrClip::Layer(layer)) => {
+                // This was a real layer, apply it to the parent
+                if let Some(LayerOrClip::Layer(parent)) = self.layers.last_mut() {
+                    apply_layer(&layer, parent);
+                }
+                // Update last_non_clip_layer to point to the current top layer
+                for (i, layer_or_clip) in self.layers.iter().enumerate().rev() {
+                    if matches!(layer_or_clip, LayerOrClip::Layer(_)) {
+                        self.last_non_clip_layer = i;
+                        break;
+                    }
+                }
+            }
+            Some(LayerOrClip::Clip(_)) => {
+                // This was just a clip, clear the clip on the current layer
+                if let Some(layer) = self.non_clip_layer() {
+                    layer.clear_clip();
+                }
+            }
+            None => {}
+        }
     }
 
     fn stroke<'b>(
@@ -541,16 +561,17 @@ impl PaintScene for TinySkiaScenePainter {
         _brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let layer = self.layers.last_mut().unwrap();
-        let paint_ref: PaintRef<'_> = brush.into();
-        let brush_ref: BrushRef<'_> = paint_ref.into();
+        if let Some(layer) = self.non_clip_layer() {
+            let paint_ref: PaintRef<'_> = brush.into();
+            let brush_ref: BrushRef<'_> = paint_ref.into();
 
-        let old_transform = layer.transform;
-        layer.transform = old_transform * transform;
+            let old_transform = layer.transform;
+            layer.transform = old_transform * transform;
 
-        layer.stroke(shape, brush_ref, style);
+            layer.stroke(shape, brush_ref, style);
 
-        layer.transform = old_transform;
+            layer.transform = old_transform;
+        }
     }
 
     fn fill<'b>(
@@ -561,16 +582,17 @@ impl PaintScene for TinySkiaScenePainter {
         _brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let layer = self.layers.last_mut().unwrap();
-        let paint_ref: PaintRef<'_> = brush.into();
-        let brush_ref: BrushRef<'_> = paint_ref.into();
+        if let Some(layer) = self.non_clip_layer() {
+            let paint_ref: PaintRef<'_> = brush.into();
+            let brush_ref: BrushRef<'_> = paint_ref.into();
 
-        let old_transform = layer.transform;
-        layer.transform = old_transform * transform;
+            let old_transform = layer.transform;
+            layer.transform = old_transform * transform;
 
-        layer.fill(shape, brush_ref, 0.0);
+            layer.fill(shape, brush_ref, 0.0);
 
-        layer.transform = old_transform;
+            layer.transform = old_transform;
+        }
     }
 
     fn draw_glyphs<'b, 's: 'b>(
@@ -586,28 +608,29 @@ impl PaintScene for TinySkiaScenePainter {
         _glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        let layer = self.layers.last_mut().unwrap();
-        let paint_ref: PaintRef<'_> = brush.into();
-        let color = match paint_ref {
-            AnyRenderPaint::Solid(c) => c,
-            _ => palette::css::BLACK,
-        };
+        if let Some(layer) = self.non_clip_layer() {
+            let paint_ref: PaintRef<'_> = brush.into();
+            let color = match paint_ref {
+                AnyRenderPaint::Solid(c) => c,
+                _ => palette::css::BLACK,
+            };
 
-        let old_transform = layer.transform;
-        layer.transform = old_transform * transform;
+            let old_transform = layer.transform;
+            layer.transform = old_transform * transform;
 
-        for glyph in glyphs {
-            layer.draw_glyph(
-                glyph.id as GlyphId,
-                font_size,
-                color,
-                font,
-                glyph.x,
-                glyph.y,
-            );
+            for glyph in glyphs {
+                layer.draw_glyph(
+                    glyph.id as GlyphId,
+                    font_size,
+                    color,
+                    font,
+                    glyph.x,
+                    glyph.y,
+                );
+            }
+
+            layer.transform = old_transform;
         }
-
-        layer.transform = old_transform;
     }
 
     fn draw_box_shadow(
