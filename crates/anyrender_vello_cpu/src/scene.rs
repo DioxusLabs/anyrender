@@ -63,8 +63,8 @@ impl PaintScene for VelloCpuScenePainter {
         );
     }
 
-    fn push_clip_layer(&mut self, clip: &impl Shape) {
-        self.0.set_transform(Affine::IDENTITY);
+    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+        self.0.set_transform(transform);
         self.0.push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
     }
 

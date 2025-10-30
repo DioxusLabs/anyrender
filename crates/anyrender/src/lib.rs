@@ -98,7 +98,7 @@ pub trait PaintScene {
     /// Pushes a new clip layer clipped by the specified shape.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
-    fn push_clip_layer(&mut self, clip: &impl Shape);
+    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape);
 
     /// Pops the current layer.
     fn pop_layer(&mut self);
