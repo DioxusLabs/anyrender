@@ -28,7 +28,7 @@
 //!  - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu)
 
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, Mix, StyleRef};
 use std::sync::Arc;
 
 pub mod wasm_send_sync;
@@ -98,7 +98,10 @@ pub trait PaintScene {
     /// Pushes a new clip layer clipped by the specified shape.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
-    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape);
+    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+        #[allow(deprecated, reason = "backwards compatibility until the next release")]
+        self.push_layer(BlendMode::from(Mix::Clip), 1.0, transform, clip);
+    }
 
     /// Pops the current layer.
     fn pop_layer(&mut self);
