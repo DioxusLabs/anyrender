@@ -60,6 +60,10 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         self.inner.push_layer(blend, alpha, transform, clip);
     }
 
+    fn push_clip_layer(&mut self, clip: &impl Shape) {
+        self.inner.push_clip_layer(Affine::IDENTITY, clip);
+    }
+
     fn pop_layer(&mut self) {
         self.inner.pop_layer();
     }

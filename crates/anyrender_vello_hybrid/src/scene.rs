@@ -103,6 +103,12 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         );
     }
 
+    fn push_clip_layer(&mut self, clip: &impl Shape) {
+        self.scene.set_transform(Affine::IDENTITY);
+        self.scene
+            .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+    }
+
     fn pop_layer(&mut self) {
         self.scene.pop_layer();
     }

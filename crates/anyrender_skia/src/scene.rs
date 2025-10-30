@@ -394,6 +394,14 @@ impl PaintScene for SkiaScenePainter<'_> {
         }
     }
 
+    fn push_clip_layer(&mut self, clip: &impl kurbo::Shape) {
+        self.inner.save(); // we need to do two saves because of pop_layer
+
+        self.set_matrix(kurbo::Affine::IDENTITY);
+        self.clip(clip);
+        self.inner.save();
+    }
+
     fn pop_layer(&mut self) {
         self.inner.restore();
         self.inner.restore();

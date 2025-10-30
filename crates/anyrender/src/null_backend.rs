@@ -91,6 +91,8 @@ impl PaintScene for NullScenePainter {
     ) {
     }
 
+    fn push_clip_layer(&mut self, _clip: &impl kurbo::Shape) {}
+
     fn pop_layer(&mut self) {}
 
     fn stroke<'a>(
