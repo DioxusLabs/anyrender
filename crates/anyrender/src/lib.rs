@@ -38,6 +38,8 @@ pub use types::*;
 mod null_backend;
 pub use null_backend::*;
 
+pub mod filter_effects;
+
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene
