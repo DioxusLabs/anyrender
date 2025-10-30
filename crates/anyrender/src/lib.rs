@@ -134,6 +134,7 @@ pub trait PaintScene {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [NormalizedCoord],
+        embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         brush: impl Into<PaintRef<'a>>,
         brush_alpha: f32,
