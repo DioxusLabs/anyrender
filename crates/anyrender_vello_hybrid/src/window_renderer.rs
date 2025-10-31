@@ -118,7 +118,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    fn resume(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Create wgpu_context::SurfaceRenderer
         let render_surface = pollster::block_on(self.wgpu_context.create_surface(
             window_handle.clone(),
@@ -138,8 +143,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             // Some(TextureConfiguration {
             //     usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
             // }),
-        ))
-        .expect("Error creating surface");
+        ))?;
 
         // Create vello::Renderer
         let renderer = VelloHybridRenderer::new(
@@ -164,6 +168,8 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             renderer,
             render_surface,
         });
+
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -189,9 +195,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let RenderState::Active(state) = &mut self.render_state else {
-            return;
+            return Ok(());
         };
 
         let render_surface = &state.render_surface;
@@ -220,35 +229,32 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         });
         timer.record_time("cmd");
 
-        let surface_texture = render_surface.current_surface_texture().unwrap();
+        let surface_texture = render_surface.current_surface_texture()?;
         let texture_view = surface_texture
             .texture
             .create_view(&TextureViewDescriptor::default());
 
-        state
-            .renderer
-            .render(
-                &self.scene,
-                render_surface.device(),
-                render_surface.queue(),
-                &mut encoder,
-                &RenderSize {
-                    width: render_surface.config.width,
-                    height: render_surface.config.height,
-                },
-                &texture_view,
-            )
-            .expect("failed to render to texture");
+        state.renderer.render(
+            &self.scene,
+            render_surface.device(),
+            render_surface.queue(),
+            &mut encoder,
+            &RenderSize {
+                width: render_surface.config.width,
+                height: render_surface.config.height,
+            },
+            &texture_view,
+        )?;
         render_surface.queue().submit([encoder.finish()]);
         timer.record_time("render");
 
         drop(texture_view);
         drop(surface_texture);
 
-        render_surface.maybe_blit_and_present().unwrap();
+        render_surface.maybe_blit_and_present()?;
         timer.record_time("present");
 
-        render_surface.device().poll(wgpu::PollType::Wait).unwrap();
+        render_surface.device().poll(wgpu::PollType::Wait)?;
 
         timer.record_time("wait");
         timer.print_times("vello_hybrid: ");
@@ -258,5 +264,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
+
+        Ok(())
     }
 }

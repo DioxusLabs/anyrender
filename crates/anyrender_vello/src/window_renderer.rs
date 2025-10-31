@@ -127,7 +127,12 @@ impl WindowRenderer for VelloWindowRenderer {
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    fn resume(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Create wgpu_context::SurfaceRenderer
         let render_surface = pollster::block_on(self.wgpu_context.create_surface(
             window_handle.clone(),
@@ -144,8 +149,7 @@ impl WindowRenderer for VelloWindowRenderer {
             Some(TextureConfiguration {
                 usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
             }),
-        ))
-        .expect("Error creating surface");
+        ))?;
 
         // Create vello::Renderer
         let renderer = VelloRenderer::new(
@@ -157,8 +161,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 // TODO: add pipeline cache
                 pipeline_cache: None,
             },
-        )
-        .unwrap();
+        )?;
 
         // Resume custom paint sources
         let device_handle = &render_surface.device_handle;
@@ -172,6 +175,7 @@ impl WindowRenderer for VelloWindowRenderer {
             renderer,
             render_surface,
         });
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -190,9 +194,12 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let RenderState::Active(state) = &mut self.render_state else {
-            return;
+            return Ok(());
         };
 
         let render_surface = &state.render_surface;
@@ -207,27 +214,24 @@ impl WindowRenderer for VelloWindowRenderer {
         });
         timer.record_time("cmd");
 
-        state
-            .renderer
-            .render_to_texture(
-                render_surface.device(),
-                render_surface.queue(),
-                &self.scene,
-                &render_surface.target_texture_view().unwrap(),
-                &RenderParams {
-                    base_color: self.config.base_color,
-                    width: render_surface.config.width,
-                    height: render_surface.config.height,
-                    antialiasing_method: self.config.antialiasing_method,
-                },
-            )
-            .expect("failed to render to texture");
+        state.renderer.render_to_texture(
+            render_surface.device(),
+            render_surface.queue(),
+            &self.scene,
+            &render_surface.target_texture_view()?,
+            &RenderParams {
+                base_color: self.config.base_color,
+                width: render_surface.config.width,
+                height: render_surface.config.height,
+                antialiasing_method: self.config.antialiasing_method,
+            },
+        )?;
         timer.record_time("render");
 
-        render_surface.maybe_blit_and_present().unwrap();
+        render_surface.maybe_blit_and_present()?;
         timer.record_time("present");
 
-        render_surface.device().poll(wgpu::PollType::Wait).unwrap();
+        render_surface.device().poll(wgpu::PollType::Wait)?;
 
         timer.record_time("wait");
         timer.print_times("vello: ");
@@ -237,5 +241,7 @@ impl WindowRenderer for VelloWindowRenderer {
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
+
+        Ok(())
     }
 }

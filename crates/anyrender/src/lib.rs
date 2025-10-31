@@ -43,11 +43,19 @@ pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
-    fn resume(&mut self, window: Arc<dyn WindowHandle>, width: u32, height: u32);
+    fn resume(
+        &mut self,
+        window: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>>;
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
     fn set_size(&mut self, width: u32, height: u32);
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// Abstraction for rendering a scene to an image buffer
@@ -55,15 +63,21 @@ pub trait ImageRenderer {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
-    fn new(width: u32, height: u32) -> Self;
+    fn new(width: u32, height: u32) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized;
     fn resize(&mut self, width: u32, height: u32);
     fn reset(&mut self);
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
         draw_fn: F,
         vec: &mut Vec<u8>,
-    );
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]);
+    ) -> Result<(), Box<dyn std::error::Error>>;
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+        buffer: &mut [u8],
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// Draw a scene to a buffer using an `ImageRenderer`
@@ -71,12 +85,12 @@ pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
     draw_fn: F,
     width: u32,
     height: u32,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut buf = Vec::with_capacity((width * height * 4) as usize);
-    let mut renderer = R::new(width, height);
-    renderer.render_to_vec(draw_fn, &mut buf);
+    let mut renderer = R::new(width, height)?;
+    renderer.render_to_vec(draw_fn, &mut buf)?;
 
-    buf
+    Ok(buf)
 }
 
 /// Abstraction for drawing a 2D scene

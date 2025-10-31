@@ -30,7 +30,7 @@ pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
 impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self::with_renderer(Renderer::new(0, 0))
+        Self::with_renderer(Renderer::new(0, 0).unwrap())
     }
 
     pub fn with_renderer<R: ImageRenderer>(renderer: R) -> SoftbufferWindowRenderer<R> {
@@ -52,9 +52,14 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
-        let context = Context::new(window_handle.clone()).unwrap();
-        let surface = Surface::new(&context, window_handle.clone()).unwrap();
+    fn resume(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let context = Context::new(window_handle.clone())?;
+        let surface = Surface::new(&context, window_handle.clone())?;
         self.render_state = RenderState::Active(ActiveRenderState {
             _context: context,
             surface,
@@ -62,6 +67,8 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         self.window_handle = Some(window_handle);
 
         self.set_size(width, height);
+
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -81,21 +88,24 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let RenderState::Active(state) = &mut self.render_state else {
-            return;
+            return Ok(());
         };
 
         debug_timer!(timer, feature = "log_frame_times");
 
         let Ok(mut surface_buffer) = state.surface.buffer_mut() else {
-            return;
+            return Ok(());
         };
         timer.record_time("buffer_mut");
 
         // Paint
         let mut vec = Vec::new();
-        self.renderer.render_to_vec(draw_fn, &mut vec);
+        self.renderer.render_to_vec(draw_fn, &mut vec)?;
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();
@@ -115,11 +125,13 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         }
         timer.record_time("swizel");
 
-        surface_buffer.present().unwrap();
+        surface_buffer.present()?;
         timer.record_time("present");
         timer.print_times("softbuffer: ");
 
         // Reset the renderer ready for the next render
         self.renderer.reset();
+
+        Ok(())
     }
 }

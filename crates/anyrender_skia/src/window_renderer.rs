@@ -49,7 +49,12 @@ impl WindowRenderer for SkiaWindowRenderer {
     where
         Self: 'a;
 
-    fn resume(&mut self, window: Arc<dyn anyrender::WindowHandle>, width: u32, height: u32) {
+    fn resume(
+        &mut self,
+        window: Arc<dyn anyrender::WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         graphics::set_font_cache_count_limit(100);
         graphics::set_typeface_cache_count_limit(100);
         graphics::set_resource_cache_total_bytes_limit(10485760);
@@ -62,7 +67,9 @@ impl WindowRenderer for SkiaWindowRenderer {
         self.render_state = RenderState::Active(Box::new(ActiveRenderState {
             backend: Box::new(backend),
             scene_cache: SkiaSceneCache::default(),
-        }))
+        }));
+
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -79,16 +86,19 @@ impl WindowRenderer for SkiaWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let RenderState::Active(state) = &mut self.render_state else {
-            return;
+            return Ok(());
         };
 
         debug_timer!(timer, feature = "log_frame_times");
 
         let mut surface = match state.backend.prepare() {
             Some(it) => it,
-            None => return,
+            None => return Ok(()),
         };
 
         surface.canvas().restore_to_count(1);
@@ -107,6 +117,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         timer.record_time("cache next gen");
 
         timer.print_times("skia: ");
+        Ok(())
     }
 }
 
