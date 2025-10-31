@@ -220,7 +220,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         });
         timer.record_time("cmd");
 
-        let surface_texture = render_surface.current_surface_texture();
+        let surface_texture = render_surface.current_surface_texture().unwrap();
         let texture_view = surface_texture
             .texture
             .create_view(&TextureViewDescriptor::default());
@@ -245,7 +245,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         drop(texture_view);
         drop(surface_texture);
 
-        render_surface.maybe_blit_and_present();
+        render_surface.maybe_blit_and_present().unwrap();
         timer.record_time("present");
 
         render_surface.device().poll(wgpu::PollType::Wait).unwrap();

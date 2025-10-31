@@ -213,7 +213,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 render_surface.device(),
                 render_surface.queue(),
                 &self.scene,
-                &render_surface.target_texture_view(),
+                &render_surface.target_texture_view().unwrap(),
                 &RenderParams {
                     base_color: self.config.base_color,
                     width: render_surface.config.width,
@@ -224,7 +224,7 @@ impl WindowRenderer for VelloWindowRenderer {
             .expect("failed to render to texture");
         timer.record_time("render");
 
-        render_surface.maybe_blit_and_present();
+        render_surface.maybe_blit_and_present().unwrap();
         timer.record_time("present");
 
         render_surface.device().poll(wgpu::PollType::Wait).unwrap();

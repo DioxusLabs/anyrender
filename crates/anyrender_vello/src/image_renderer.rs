@@ -96,7 +96,9 @@ impl ImageRenderer for VelloImageRenderer {
             )
             .expect("Got non-Send/Sync error from rendering");
 
-        self.buffer_renderer.copy_texture_to_buffer(cpu_buffer);
+        self.buffer_renderer
+            .copy_texture_to_buffer(cpu_buffer)
+            .unwrap();
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
