@@ -62,7 +62,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         #[cfg(target_os = "macos")]
         let backend = crate::metal::MetalBackend::new(window, width, height);
         #[cfg(not(target_os = "macos"))]
-        let backend = crate::opengl::OpenGLBackend::new(window, width, height);
+        let backend = crate::opengl::OpenGLBackend::new(window, width, height)?;
 
         self.render_state = RenderState::Active(Box::new(ActiveRenderState {
             backend: Box::new(backend),
