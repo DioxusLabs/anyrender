@@ -30,7 +30,7 @@ pub struct PixelsWindowRenderer<Renderer: ImageRenderer> {
 impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self::with_renderer(Renderer::new(0, 0))
+        Self::with_renderer(Renderer::new(0, 0).unwrap())
     }
 
     pub fn with_renderer<R: ImageRenderer>(renderer: R) -> PixelsWindowRenderer<R> {
@@ -52,7 +52,12 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    fn resume(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
         let mut pixels = Pixels::new(width, height, surface).unwrap();
         pixels.enable_vsync(true);
@@ -66,6 +71,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         self.window_handle = Some(window_handle);
 
         self.set_size(width, height);
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -86,15 +92,18 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let RenderState::Active(state) = &mut self.render_state else {
-            return;
+            return Ok(());
         };
 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Paint
-        self.renderer.render(draw_fn, state.pixels.frame_mut());
+        self.renderer.render(draw_fn, state.pixels.frame_mut())?;
         timer.record_time("render");
 
         state.pixels.render().unwrap();
@@ -103,5 +112,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
 
         // Reset the renderer ready for the next render
         self.renderer.reset();
+
+        Ok(())
     }
 }

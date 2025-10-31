@@ -1,4 +1,5 @@
 use crate::{DeviceHandle, WgpuContextError, util::create_texture};
+use wgpu::SurfaceError;
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Device, PresentMode, Queue, Surface,
     SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages, TextureView,
@@ -187,38 +188,31 @@ impl<'s> SurfaceRenderer<'s> {
             .configure(&self.device_handle.device, &self.config);
     }
 
-    pub fn current_surface_texture(&self) -> SurfaceTexture {
-        self.surface
-            .get_current_texture()
-            .expect("failed to get surface texture")
+    pub fn current_surface_texture(&self) -> Result<SurfaceTexture, SurfaceError> {
+        self.surface.get_current_texture()
     }
 
-    pub fn target_texture_view(&self) -> TextureView {
+    pub fn target_texture_view(&self) -> Result<TextureView, SurfaceError> {
         match &self.intermediate_texture {
-            Some(intermediate_texture) => intermediate_texture.texture_view.clone(),
+            Some(intermediate_texture) => Ok(intermediate_texture.texture_view.clone()),
             None => {
-                let surface_texture = self
-                    .surface
-                    .get_current_texture()
-                    .expect("failed to get surface texture");
-                surface_texture
+                let surface_texture = self.surface.get_current_texture()?;
+                Ok(surface_texture
                     .texture
-                    .create_view(&TextureViewDescriptor::default())
+                    .create_view(&TextureViewDescriptor::default()))
             }
         }
     }
 
-    pub fn maybe_blit_and_present(&self) {
-        let surface_texture = self
-            .surface
-            .get_current_texture()
-            .expect("failed to get surface texture");
+    pub fn maybe_blit_and_present(&self) -> Result<(), SurfaceError> {
+        let surface_texture = self.surface.get_current_texture()?;
 
         if let Some(its) = &self.intermediate_texture {
             self.blit_from_intermediate_texture_to_surface(&surface_texture, its);
         }
 
         surface_texture.present();
+        Ok(())
     }
 
     /// Blit from the intermediate texture to the surface texture

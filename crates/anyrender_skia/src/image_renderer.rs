@@ -16,12 +16,12 @@ impl ImageRenderer for SkiaImageRenderer {
     where
         Self: 'a;
 
-    fn new(width: u32, height: u32) -> Self {
+    fn new(width: u32, height: u32) -> Result<Self, Box<dyn std::error::Error>> {
         graphics::set_font_cache_count_limit(100);
         graphics::set_typeface_cache_count_limit(100);
         graphics::set_resource_cache_total_bytes_limit(10485760);
 
-        Self {
+        Ok(Self {
             image_info: ImageInfo::new(
                 (width as i32, height as i32),
                 ColorType::RGBA8888,
@@ -30,7 +30,7 @@ impl ImageRenderer for SkiaImageRenderer {
             ),
             surface_props: SurfaceProps::default(),
             scene_cache: SkiaSceneCache::default(),
-        }
+        })
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -48,7 +48,7 @@ impl ImageRenderer for SkiaImageRenderer {
         &mut self,
         draw_fn: F,
         buffer: &mut Vec<u8>,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         debug_timer!(timer, feature = "log_frame_times");
 
         let mut surface = surfaces::wrap_pixels(
@@ -57,7 +57,7 @@ impl ImageRenderer for SkiaImageRenderer {
             None,
             Some(&self.surface_props),
         )
-        .unwrap();
+        .ok_or("Invalid surface parameters")?;
 
         surface.canvas().clear(Color::WHITE);
 
@@ -71,9 +71,14 @@ impl ImageRenderer for SkiaImageRenderer {
         timer.record_time("cache next gen");
 
         timer.print_times("skia_raster: ");
+        Ok(())
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        draw_fn: F,
+        buffer: &mut [u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         debug_timer!(timer, feature = "log_frame_times");
 
         let mut surface = surfaces::wrap_pixels(
@@ -82,7 +87,7 @@ impl ImageRenderer for SkiaImageRenderer {
             None,
             Some(&self.surface_props),
         )
-        .unwrap();
+        .ok_or("Invalid surface parameters")?;
 
         surface.canvas().clear(Color::WHITE);
 
@@ -96,5 +101,6 @@ impl ImageRenderer for SkiaImageRenderer {
         timer.record_time("cache next gen");
 
         timer.print_times("skia_raster: ");
+        Ok(())
     }
 }

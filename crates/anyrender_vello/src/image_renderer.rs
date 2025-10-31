@@ -18,7 +18,7 @@ impl ImageRenderer for VelloImageRenderer {
     where
         Self: 'a;
 
-    fn new(width: u32, height: u32) -> Self {
+    fn new(width: u32, height: u32) -> Result<Self, Box<dyn std::error::Error>> {
         // Create WGPUContext
         let mut context = WGPUContext::new();
 
@@ -28,8 +28,7 @@ impl ImageRenderer for VelloImageRenderer {
                 width,
                 height,
                 usage: TextureUsages::STORAGE_BINDING,
-            }))
-            .expect("No compatible device found");
+            }))?;
 
         // Create vello::Renderer
         let vello_renderer = VelloRenderer::new(
@@ -40,14 +39,13 @@ impl ImageRenderer for VelloImageRenderer {
                 antialiasing_support: vello::AaSupport::area_only(),
                 pipeline_cache: None,
             },
-        )
-        .expect("Got non-Send/Sync error from creating renderer");
+        )?;
 
-        Self {
+        Ok(Self {
             buffer_renderer,
             vello_renderer,
             scene: VelloScene::new(),
-        }
+        })
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -62,18 +60,18 @@ impl ImageRenderer for VelloImageRenderer {
         &mut self,
         draw_fn: F,
         cpu_buffer: &mut Vec<u8>,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let size = self.buffer_renderer.size();
         cpu_buffer.clear();
         cpu_buffer.reserve((size.width * size.height * 4) as usize);
-        self.render(draw_fn, cpu_buffer);
+        self.render(draw_fn, cpu_buffer)
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
         draw_fn: F,
         cpu_buffer: &mut [u8],
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         draw_fn(&mut VelloScenePainter {
             inner: &mut self.scene,
             renderer: Some(&mut self.vello_renderer),
@@ -81,24 +79,24 @@ impl ImageRenderer for VelloImageRenderer {
         });
 
         let size = self.buffer_renderer.size();
-        self.vello_renderer
-            .render_to_texture(
-                self.buffer_renderer.device(),
-                self.buffer_renderer.queue(),
-                &self.scene,
-                &self.buffer_renderer.target_texture_view(),
-                &vello::RenderParams {
-                    base_color: vello::peniko::Color::TRANSPARENT,
-                    width: size.width,
-                    height: size.height,
-                    antialiasing_method: vello::AaConfig::Area,
-                },
-            )
-            .expect("Got non-Send/Sync error from rendering");
+        self.vello_renderer.render_to_texture(
+            self.buffer_renderer.device(),
+            self.buffer_renderer.queue(),
+            &self.scene,
+            &self.buffer_renderer.target_texture_view(),
+            &vello::RenderParams {
+                base_color: vello::peniko::Color::TRANSPARENT,
+                width: size.width,
+                height: size.height,
+                antialiasing_method: vello::AaConfig::Area,
+            },
+        )?;
 
-        self.buffer_renderer.copy_texture_to_buffer(cpu_buffer);
+        self.buffer_renderer.copy_texture_to_buffer(cpu_buffer)?;
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
+
+        Ok(())
     }
 }

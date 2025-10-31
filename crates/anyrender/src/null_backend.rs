@@ -20,8 +20,14 @@ impl WindowRenderer for NullWindowRenderer {
     where
         Self: 'a;
 
-    fn resume(&mut self, _window: Arc<dyn WindowHandle>, _width: u32, _height: u32) {
+    fn resume(
+        &mut self,
+        _window: Arc<dyn WindowHandle>,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.is_active = true;
+        Ok(())
     }
 
     fn suspend(&mut self) {
@@ -34,7 +40,12 @@ impl WindowRenderer for NullWindowRenderer {
 
     fn set_size(&mut self, _width: u32, _height: u32) {}
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F) {}
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        _draw_fn: F,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Default)]
@@ -52,8 +63,8 @@ impl ImageRenderer for NullImageRenderer {
     where
         Self: 'a;
 
-    fn new(_width: u32, _height: u32) -> Self {
-        Self
+    fn new(_width: u32, _height: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self)
     }
 
     fn resize(&mut self, _width: u32, _height: u32) {}
@@ -64,10 +75,17 @@ impl ImageRenderer for NullImageRenderer {
         &mut self,
         _draw_fn: F,
         _vec: &mut Vec<u8>,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F, _buffer: &mut [u8]) {}
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        _draw_fn: F,
+        _buffer: &mut [u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 }
 
 #[derive(Copy, Clone, Default)]
