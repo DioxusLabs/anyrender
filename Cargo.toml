@@ -40,7 +40,7 @@ color = "0.3"
 linebender_resource_handle = "0.1"
 peniko = "0.5.0"
 kurbo = "0.12"
-vello = { version = "0.6", features = [ "wgpu" ] }
+vello = { git = "https://github.com/linebender/vello", rev = "f2db765ac84cf1d2426481c6802629afddf43dfa", features = [ "wgpu" ] }
 vello_cpu = { version = "0.0.4", default-features = false, features = ["std", "text"] }
 vello_hybrid = { version = "0.0.4" }
 vello_common = { version = "0.0.4" }
