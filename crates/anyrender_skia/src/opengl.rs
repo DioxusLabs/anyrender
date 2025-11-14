@@ -31,7 +31,7 @@ impl OpenGLBackend {
         window: Arc<dyn anyrender::WindowHandle>,
         width: u32,
         height: u32,
-    ) -> OpenGLBackend {
+    ) -> Result<OpenGLBackend, Box<dyn std::error::Error>> {
         let raw_display_handle = window.display_handle().unwrap().as_raw();
         let raw_window_handle = window.window_handle().unwrap().as_raw();
 
@@ -44,15 +44,13 @@ impl OpenGLBackend {
                 DisplayApiPreference::Wgl(Some(raw_window_handle.clone())),
                 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
                 DisplayApiPreference::Egl,
-            )
-            .unwrap()
+            )?
         };
 
         let gl_config_template = ConfigTemplateBuilder::new().with_transparency(true).build();
         let gl_config = unsafe {
             gl_display
-                .find_configs(gl_config_template)
-                .unwrap()
+                .find_configs(gl_config_template)?
                 .reduce(|accum, config| {
                     let transparency_check = config.supports_transparency().unwrap_or(false)
                         & !accum.supports_transparency().unwrap_or(false);
@@ -63,7 +61,7 @@ impl OpenGLBackend {
                         accum
                     }
                 })
-                .unwrap()
+                .ok_or("No config available")?
         };
 
         let gl_context_attrs = ContextAttributesBuilder::new().build(Some(raw_window_handle));
@@ -73,20 +71,16 @@ impl OpenGLBackend {
             NonZeroU32::new(height).expect("height should be a positive value"),
         );
 
-        let gl_not_current_context = unsafe {
-            gl_display
-                .create_context(&gl_config, &gl_context_attrs)
-                .unwrap()
-        };
+        let gl_not_current_context =
+            unsafe { gl_display.create_context(&gl_config, &gl_context_attrs)? };
 
         let gl_surface = unsafe {
             gl_config
                 .display()
-                .create_window_surface(&gl_config, &gl_surface_attrs)
-                .unwrap()
+                .create_window_surface(&gl_config, &gl_surface_attrs)?
         };
 
-        let gl_context = gl_not_current_context.make_current(&gl_surface).unwrap();
+        let gl_context = gl_not_current_context.make_current(&gl_surface)?;
 
         gl::load_with(|s| {
             gl_config
@@ -113,13 +107,13 @@ impl OpenGLBackend {
             }
 
             skia_safe::gpu::gl::FramebufferInfo {
-                fboid: fboid.try_into().unwrap(),
+                fboid: fboid.try_into()?,
                 format: skia_safe::gpu::gl::Format::RGBA8.into(),
                 ..Default::default()
             }
         };
 
-        OpenGLBackend {
+        Ok(OpenGLBackend {
             surface: Some(Self::create_surface(
                 width,
                 height,
@@ -132,7 +126,7 @@ impl OpenGLBackend {
             gl_surface,
             gl_context,
             fb_info,
-        }
+        })
     }
 
     fn create_surface(

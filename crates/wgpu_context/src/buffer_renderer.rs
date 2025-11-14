@@ -118,13 +118,19 @@ impl BufferRenderer {
         self.texture_view.clone()
     }
 
-    pub fn copy_texture_to_vec(&self, cpu_buffer: &mut Vec<u8>) {
+    pub fn copy_texture_to_vec(
+        &self,
+        cpu_buffer: &mut Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         cpu_buffer.clear();
         cpu_buffer.reserve((self.config.width * self.config.height * 4) as usize);
-        self.copy_texture_to_buffer(&mut *cpu_buffer);
+        self.copy_texture_to_buffer(&mut *cpu_buffer)
     }
 
-    pub fn copy_texture_to_buffer(&self, cpu_buffer: &mut [u8]) {
+    pub fn copy_texture_to_buffer(
+        &self,
+        cpu_buffer: &mut [u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut encoder = self
             .device()
             .create_command_encoder(&CommandEncoderDescriptor {
@@ -153,13 +159,8 @@ impl BufferRenderer {
         let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
         buf_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
 
-        if let Ok(recv_result) =
-            block_on_wgpu(self.device(), receiver.receive()).inspect_err(|err| {
-                panic!("channel inaccessible: {:#}", err);
-            })
-        {
-            let _ = recv_result.unwrap();
-        }
+        block_on_wgpu(self.device(), receiver.receive())?
+            .ok_or("No value available in channel")??;
 
         let data = buf_slice.get_mapped_range();
 
@@ -175,5 +176,6 @@ impl BufferRenderer {
         // Unmap buffer
         drop(data);
         self.gpu_buffer.unmap();
+        Ok(())
     }
 }

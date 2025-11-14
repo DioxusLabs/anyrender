@@ -162,7 +162,9 @@ impl App {
             Arc::new(event_loop.create_window(attr).unwrap())
         });
 
-        renderer.resume(window.clone(), self.width, self.height);
+        renderer
+            .resume(window.clone(), self.width, self.height)
+            .unwrap();
         let renderer = renderer.into();
         self.render_state = RenderState::Active { window, renderer };
         self.request_redraw();
@@ -213,7 +215,8 @@ impl ApplicationHandler for App {
                     r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 255)))
                 }
                 Renderer::Null(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0))),
-            },
+            }
+            .unwrap(),
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
