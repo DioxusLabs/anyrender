@@ -52,6 +52,6 @@ impl ImageRenderer for VelloCpuImageRenderer {
         let width = self.scene.0.width();
         let height = self.scene.0.height();
         buffer.resize(width as usize * height as usize * 4, 0);
-        self.render(draw_fn, &mut *buffer);
+        self.render(draw_fn, buffer);
     }
 }

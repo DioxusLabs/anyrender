@@ -64,8 +64,7 @@ impl ImageRenderer for VelloImageRenderer {
         cpu_buffer: &mut Vec<u8>,
     ) {
         let size = self.buffer_renderer.size();
-        cpu_buffer.clear();
-        cpu_buffer.reserve((size.width * size.height * 4) as usize);
+        cpu_buffer.resize((size.width * size.height * 4) as usize, 0);
         self.render(draw_fn, cpu_buffer);
     }
 
