@@ -112,7 +112,7 @@ impl OpenGLBackend {
                 gl::GetIntegerv(gl::FRAMEBUFFER_BINDING, &mut fboid);
             }
 
-            skia_safe::gpu::gl::FramebufferInfo {
+            FramebufferInfo {
                 fboid: fboid.try_into().unwrap(),
                 format: skia_safe::gpu::gl::Format::RGBA8.into(),
                 ..Default::default()

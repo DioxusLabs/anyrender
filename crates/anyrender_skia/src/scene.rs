@@ -835,6 +835,7 @@ mod sk_kurbo {
     use skia_safe::M44 as SkM44;
     use skia_safe::Matrix as SkMatrix;
     use skia_safe::Path as SkPath;
+    use skia_safe::PathBuilder as SkPathBuilder;
     use skia_safe::Point as SkPoint;
     use skia_safe::RRect as SkRRect;
     use skia_safe::Rect as SkRect;
@@ -915,7 +916,7 @@ mod sk_kurbo {
     }
 
     pub(super) fn path_from_shape(shape: &impl Shape) -> SkPath {
-        let mut sk_path = SkPath::new();
+        let mut sk_path = SkPathBuilder::new();
 
         if let Some(path_els) = shape.as_path_slice() {
             for path_el in path_els {
@@ -927,10 +928,10 @@ mod sk_kurbo {
             }
         }
 
-        sk_path
+        sk_path.detach()
     }
 
-    fn append_path_el_to_sk_path(path_el: &PathEl, sk_path: &mut SkPath) {
+    fn append_path_el_to_sk_path(path_el: &PathEl, sk_path: &mut SkPathBuilder) {
         match path_el {
             PathEl::MoveTo(p) => _ = sk_path.move_to(pt_from(*p)),
             PathEl::LineTo(p) => _ = sk_path.line_to(pt_from(*p)),
