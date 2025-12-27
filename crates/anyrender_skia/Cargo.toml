@@ -1,7 +1,7 @@
 [package]
 name = "anyrender_skia"
 description = "Skia backend for anyrender"
-version = "0.2.0"
+version = "0.3.0"
 documentation = "https://docs.rs/anyrender_skia"
 homepage.workspace = true
 repository.workspace = true
