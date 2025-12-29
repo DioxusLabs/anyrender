@@ -38,11 +38,11 @@ impl OpenGLBackend {
         let gl_display = unsafe {
             Display::new(
                 raw_display_handle,
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "ios"))]
                 DisplayApiPreference::Cgl,
                 #[cfg(target_os = "windows")]
                 DisplayApiPreference::Wgl(Some(raw_window_handle.clone())),
-                #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+                #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
                 DisplayApiPreference::Egl,
             )
             .unwrap()

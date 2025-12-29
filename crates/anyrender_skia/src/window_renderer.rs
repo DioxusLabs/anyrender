@@ -54,9 +54,9 @@ impl WindowRenderer for SkiaWindowRenderer {
         graphics::set_typeface_cache_count_limit(100);
         graphics::set_resource_cache_total_bytes_limit(10485760);
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         let backend = crate::metal::MetalBackend::new(window, width, height);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
         let backend = crate::opengl::OpenGLBackend::new(window, width, height);
 
         self.render_state = RenderState::Active(Box::new(ActiveRenderState {

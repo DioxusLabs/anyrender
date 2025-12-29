@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
 use objc2::{rc::Retained, runtime::ProtocolObject};
+#[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+#[cfg(target_os = "ios")]
+use objc2_ui_kit::UIView;
 use skia_safe::{
     ColorType, Surface,
     gpu::{self, DirectContext, SurfaceOrigin, backend_render_targets, mtl},
@@ -32,18 +35,35 @@ impl MetalBackend {
             // Disabling this option allows Skia's Blend Mode to work.
             // More about: https://developer.apple.com/documentation/quartzcore/cametallayer/1478168-framebufferonly
             layer.setFramebufferOnly(false);
+            layer.setDrawableSize(CGSize::new(width as f64, height as f64));
 
             let view_ptr = match window.window_handle().unwrap().as_raw() {
+                #[cfg(target_os = "macos")]
                 raw_window_handle::RawWindowHandle::AppKit(appkit) => {
                     appkit.ns_view.as_ptr() as *mut NSView
+                }
+                #[cfg(target_os = "ios")]
+                raw_window_handle::RawWindowHandle::UiKit(uikit) => {
+                    uikit.ui_view.as_ptr() as *mut UIView
                 }
                 _ => panic!("Wrong window handle type"),
             };
             let view = unsafe { view_ptr.as_ref().unwrap() };
 
-            view.setWantsLayer(true);
-            view.setLayer(Some(&layer.clone().into_super()));
-            layer.setDrawableSize(CGSize::new(width as f64, height as f64));
+            #[cfg(target_os = "macos")]
+            {
+                view.setWantsLayer(true);
+                view.setLayer(Some(&layer.clone().into_super()));
+            }
+
+            #[cfg(target_os = "ios")]
+            {
+                // TODO: consider using raw-window-metal crate. It synchronises some properties
+                // from the parent UIView layer to the child metal layer when they change
+                layer.setFrame(view.layer().frame());
+                view.layer().addSublayer(&layer)
+            }
+
             layer
         };
 

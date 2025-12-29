@@ -24,16 +24,23 @@ softbuffer_window_renderer = { workspace = true, optional = true }
 pixels_window_renderer = { workspace = true, optional = true }
 skia-safe = { version = "0.91.0", features = ["gl", "pdf", "textlayout"]}
 oaty = "0.1"
+hashbrown = "0.16.0"
+
+[target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
 gl = "0.14.0"
 ash = "^0.38.0"
 ash-window = "0.13.0"
-glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
-hashbrown = "0.16.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "UIView", "UIResponder"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc2 = { version = "0.6.3", default-features = false }
 objc2-core-foundation = { version = "0.3.2", default-features = false }
 objc2-metal = { version = "0.3.2", default-features = false, features = ["MTLCommandBuffer", "MTLCommandQueue", "MTLDrawable", "MTLPixelFormat"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "NSView"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["objc2-core-foundation", "objc2-metal", "CAMetalLayer"] }
 skia-safe = { version = "0.91.0", features = ["metal"] }

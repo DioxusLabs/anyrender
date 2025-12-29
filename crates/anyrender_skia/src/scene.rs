@@ -14,7 +14,7 @@ use crate::cache::{
 
 pub(crate) struct SkiaSceneCache {
     paint: Paint,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
@@ -38,7 +38,7 @@ impl Default for SkiaSceneCache {
     fn default() -> Self {
         Self {
             paint: Paint::default(),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             extracted_font_data: GenerationalCache::new(10),
             typeface: GenerationalCache::new(1),
             normalized_typeface: GenerationalCache::new(1),
@@ -309,7 +309,7 @@ impl SkiaScenePainter<'_> {
     ) -> Option<Typeface> {
         let cache_key = (font.data.id(), font.index);
 
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
         {
             use peniko::Blob;
