@@ -60,6 +60,7 @@ impl PaintScene for VelloCpuScenePainter {
             Some(blend.into()),
             Some(alpha),
             None,
+            None,
         );
     }
 

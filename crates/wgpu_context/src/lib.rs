@@ -160,6 +160,7 @@ impl WGPUContext {
             required_limits,
             memory_hints: MemoryHints::MemoryUsage,
             trace: wgpu::Trace::default(),
+            experimental_features: wgpu::ExperimentalFeatures::default(),
         };
         let (device, queue) = adapter.request_device(&descripter).await?;
 

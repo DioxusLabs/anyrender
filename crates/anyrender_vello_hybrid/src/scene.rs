@@ -100,6 +100,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             Some(blend.into()),
             Some(alpha),
             None,
+            None,
         );
     }
 
