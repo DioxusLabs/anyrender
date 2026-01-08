@@ -248,7 +248,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         render_surface.maybe_blit_and_present();
         timer.record_time("present");
 
-        render_surface.device().poll(wgpu::PollType::Wait).unwrap();
+        render_surface
+            .device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
 
         timer.record_time("wait");
         timer.print_times("vello_hybrid: ");
