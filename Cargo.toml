@@ -21,7 +21,7 @@ homepage = "https://github.com/dioxuslabs/anyrender"
 repository = "https://github.com/dioxuslabs/anyrender"
 categories = ["gui"]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.88.0"
 
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
