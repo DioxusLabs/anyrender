@@ -90,16 +90,16 @@ dependencies = [
 
 [[package]]
 name = "anyrender"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "raw-window-handle",
 ]
 
 [[package]]
 name = "anyrender_skia"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyrender",
  "ash 0.38.0+1.3.281",
@@ -107,8 +107,8 @@ dependencies = [
  "debug_timer",
  "gl",
  "glutin",
- "hashbrown 0.16.0",
- "kurbo 0.12.0",
+ "hashbrown 0.16.1",
+ "kurbo",
  "oaty",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
@@ -125,11 +125,11 @@ dependencies = [
 
 [[package]]
 name = "anyrender_svg"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyrender",
  "image",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "thiserror 2.0.17",
  "usvg",
@@ -141,7 +141,7 @@ version = "0.7.0"
 dependencies = [
  "anyrender",
  "debug_timer",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "pollster 0.4.0",
  "rustc-hash 2.1.1",
@@ -156,7 +156,7 @@ version = "0.9.0"
 dependencies = [
  "anyrender",
  "debug_timer",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "pixels_window_renderer",
  "softbuffer_window_renderer",
@@ -169,7 +169,7 @@ version = "0.2.0"
 dependencies = [
  "anyrender",
  "debug_timer",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "pollster 0.4.0",
  "rustc-hash 2.1.1",
@@ -338,7 +338,7 @@ dependencies = [
  "anyrender_vello_hybrid",
  "fastrand",
  "image",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "winit",
 ]
@@ -940,6 +940,12 @@ name = "font-types"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "511e2c18a516c666d27867d2f9821f76e7d591f762e9fc41dd6cc5c90fe54b0b"
+
+[[package]]
+name = "font-types"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1e4d2d0cf79d38430cc9dc9aadec84774bff2e1ba30ae2bf6c16cfce9385a23"
 dependencies = [
  "bytemuck",
 ]
@@ -1278,16 +1284,14 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.1.5",
 ]
 
 [[package]]
 name = "hashbrown"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -1368,7 +1372,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.16.1",
 ]
 
 [[package]]
@@ -1444,17 +1448,6 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
-
-[[package]]
-name = "kurbo"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce9729cc38c18d86123ab736fd2e7151763ba226ac2490ec092d1dd148825e32"
-dependencies = [
- "arrayvec",
- "euclid",
- "smallvec",
-]
 
 [[package]]
 name = "kurbo"
@@ -1668,7 +1661,7 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "codespan-reporting 0.12.0",
  "half",
- "hashbrown 0.16.0",
+ "hashbrown 0.16.1",
  "hexf-parse",
  "indexmap",
  "libm",
@@ -1768,7 +1761,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd7890d4a4c9205ee57a5e200658e78ed7d51c9cd48d0f7066596a19cc20e5d2"
 dependencies = [
- "font-types",
+ "font-types 0.10.0",
 ]
 
 [[package]]
@@ -2146,13 +2139,13 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "peniko"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3c76095c9a636173600478e0373218c7b955335048c2bcd12dc6a79657649d8"
+checksum = "9a2b6aadb221872732e87d465213e9be5af2849b0e8cc5300a8ba98fffa2e00a"
 dependencies = [
  "bytemuck",
  "color",
- "kurbo 0.12.0",
+ "kurbo",
  "linebender_resource_handle",
  "smallvec",
 ]
@@ -2211,7 +2204,7 @@ dependencies = [
 
 [[package]]
 name = "pixels_window_renderer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyrender",
  "debug_timer",
@@ -2416,12 +2409,12 @@ dependencies = [
 
 [[package]]
 name = "read-fonts"
-version = "0.35.0"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6717cf23b488adf64b9d711329542ba34de147df262370221940dfabc2c91358"
+checksum = "7b634fabf032fab15307ffd272149b622260f55974d9fad689292a5d33df02e5"
 dependencies = [
  "bytemuck",
- "font-types",
+ "font-types 0.11.0",
 ]
 
 [[package]]
@@ -2711,9 +2704,9 @@ dependencies = [
 
 [[package]]
 name = "skrifa"
-version = "0.37.0"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c31071dedf532758ecf3fed987cdb4bd9509f900e026ab684b4ecb81ea49841"
+checksum = "7fbdfe3d2475fbd7ddd1f3e5cf8288a30eb3e5f95832829570cd88115a7434ac"
 dependencies = [
  "bytemuck",
  "read-fonts",
@@ -2808,7 +2801,7 @@ dependencies = [
 
 [[package]]
 name = "softbuffer_window_renderer"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyrender",
  "debug_timer",
@@ -2851,7 +2844,7 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "695b5790b3131dafa99b3bbfd25a216edb3d216dad9ca208d4657bfb8f2abc3d"
 dependencies = [
- "kurbo 0.13.0",
+ "kurbo",
  "siphasher",
 ]
 
@@ -3161,7 +3154,7 @@ dependencies = [
  "flate2",
  "fontdb",
  "imagesize",
- "kurbo 0.13.0",
+ "kurbo",
  "log",
  "pico-args",
  "roxmltree 0.21.1",
@@ -3180,7 +3173,7 @@ dependencies = [
 [[package]]
 name = "vello"
 version = "0.7.0"
-source = "git+https://github.com/linebender/vello?rev=49910dee0942#49910dee0942eb9b022a126d3a726fe1bc793999"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "futures-intrusive",
@@ -3198,12 +3191,11 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dc01cc9e1e2511e5e77024e8d4c2287b9272cafc05ba669ed1056579219dd73"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "fearless_simd",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "log",
  "peniko",
  "png 0.17.16",
@@ -3214,12 +3206,11 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9228d8ed0f1f030de9a09b66b4750012194c0f171030ec74214ba1ca3b9eed23"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "crossbeam-channel",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "ordered-channel",
  "rayon",
  "thread_local",
@@ -3229,7 +3220,7 @@ dependencies = [
 [[package]]
 name = "vello_encoding"
 version = "0.7.0"
-source = "git+https://github.com/linebender/vello?rev=49910dee0942#49910dee0942eb9b022a126d3a726fe1bc793999"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "guillotiere",
@@ -3241,12 +3232,11 @@ dependencies = [
 [[package]]
 name = "vello_hybrid"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d4b46101e73a30aba9cea3535e41a1ee987c0a150b43ee96b5559fc2883cced"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "guillotiere",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "log",
  "thiserror 2.0.17",
  "vello_common",
@@ -3257,7 +3247,7 @@ dependencies = [
 [[package]]
 name = "vello_shaders"
 version = "0.7.0"
-source = "git+https://github.com/linebender/vello?rev=49910dee0942#49910dee0942eb9b022a126d3a726fe1bc793999"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 dependencies = [
  "bytemuck",
  "log",
@@ -3269,8 +3259,7 @@ dependencies = [
 [[package]]
 name = "vello_sparse_shaders"
 version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "064365020eff6fd86deece3aa6979f38be3e094673977e317be4e17f7c803b8a"
+source = "git+https://github.com/linebender/vello?rev=5779e81#5779e8111dc1b609c5d0c9f8ec0e8661cc507131"
 
 [[package]]
 name = "version_check"
@@ -3526,7 +3515,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "document-features",
- "hashbrown 0.16.0",
+ "hashbrown 0.16.1",
  "js-sys",
  "log",
  "naga 27.0.3",
@@ -3583,7 +3572,7 @@ dependencies = [
  "bytemuck",
  "cfg_aliases 0.2.1",
  "document-features",
- "hashbrown 0.16.0",
+ "hashbrown 0.16.1",
  "indexmap",
  "log",
  "naga 27.0.3",
@@ -3695,7 +3684,7 @@ dependencies = [
  "gpu-alloc",
  "gpu-allocator 0.27.0",
  "gpu-descriptor 0.3.2",
- "hashbrown 0.16.0",
+ "hashbrown 0.16.1",
  "js-sys",
  "khronos-egl",
  "libc",
@@ -4184,7 +4173,7 @@ dependencies = [
  "anyrender_vello",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "kurbo 0.12.0",
+ "kurbo",
  "peniko",
  "winit",
 ]
