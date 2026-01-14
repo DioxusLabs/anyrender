@@ -9,6 +9,7 @@ members = [
   "crates/wgpu_context",
   "crates/pixels_window_renderer",
   "crates/softbuffer_window_renderer",
+  "crates/rough_anyrender",
   "examples/winit",
   "examples/bunnymark",
 ]
