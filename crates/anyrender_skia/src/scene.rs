@@ -385,13 +385,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.set_matrix(transform);
         self.clip(clip);
 
-        #[allow(deprecated)] // Mix::Clip
-        if blend.mix == peniko::Mix::Clip && alpha == 1f32 {
-            self.inner.save();
-        } else {
-            self.inner
-                .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
-        }
+        self.inner
+            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
     }
 
     fn push_clip_layer(&mut self, transform: kurbo::Affine, clip: &impl kurbo::Shape) {
@@ -786,9 +781,8 @@ mod sk_peniko {
         }
     }
 
-    #[allow(deprecated)] // We need to support Mix::Clip
     pub(super) fn blend_mode_from(blend_mode: BlendMode) -> SkBlendMode {
-        if blend_mode.mix == Mix::Normal || blend_mode.mix == Mix::Clip {
+        if blend_mode.mix == Mix::Normal {
             match blend_mode.compose {
                 Compose::Clear => SkBlendMode::Clear,
                 Compose::Copy => SkBlendMode::Src,
@@ -823,7 +817,6 @@ mod sk_peniko {
                 Mix::Saturation => SkBlendMode::Saturation,
                 Mix::Color => SkBlendMode::Color,
                 Mix::Luminosity => SkBlendMode::Luminosity,
-                Mix::Clip => unreachable!(), // Handled above
             }
         }
     }

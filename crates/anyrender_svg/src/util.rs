@@ -43,16 +43,9 @@ pub(crate) fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
     conv_stroke
 }
 
-pub(crate) fn to_mix(blend_mode: usvg::BlendMode, is_fully_opaque: bool) -> Mix {
+pub(crate) fn to_mix(blend_mode: usvg::BlendMode) -> Mix {
     match blend_mode {
-        usvg::BlendMode::Normal => {
-            if is_fully_opaque {
-                #[allow(deprecated)]
-                Mix::Clip
-            } else {
-                Mix::Normal
-            }
-        }
+        usvg::BlendMode::Normal => Mix::Normal,
         usvg::BlendMode::Multiply => Mix::Multiply,
         usvg::BlendMode::Screen => Mix::Screen,
         usvg::BlendMode::Overlay => Mix::Overlay,

@@ -21,38 +21,38 @@ homepage = "https://github.com/dioxuslabs/anyrender"
 repository = "https://github.com/dioxuslabs/anyrender"
 categories = ["gui"]
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.88.0"
 
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
-anyrender = { version = "0.6.1", path = "./crates/anyrender" }
-anyrender_skia = { version = "0.3.0", path = "./crates/anyrender_skia" }
-anyrender_vello = { version = "0.6.1", path = "./crates/anyrender_vello" }
-anyrender_vello_cpu = { version = "0.8.1", path = "./crates/anyrender_vello_cpu" }
-anyrender_vello_hybrid = { version = "0.1.1", path = "./crates/anyrender_vello_hybrid" }
-anyrender_svg = { version = "0.6.0", path = "./crates/anyrender_svg" }
-wgpu_context = { version = "0.1.1", path = "./crates/wgpu_context" }
-pixels_window_renderer = { version = "0.1.0", path = "./crates/pixels_window_renderer" }
-softbuffer_window_renderer = { version = "0.1.0", path = "./crates/softbuffer_window_renderer" }
+anyrender = { version = "0.7.0", path = "./crates/anyrender" }
+anyrender_skia = { version = "0.4.0", path = "./crates/anyrender_skia" }
+anyrender_vello = { version = "0.7.0", path = "./crates/anyrender_vello" }
+anyrender_vello_cpu = { version = "0.9.0", path = "./crates/anyrender_vello_cpu" }
+anyrender_vello_hybrid = { version = "0.2.0", path = "./crates/anyrender_vello_hybrid" }
+anyrender_svg = { version = "0.8.0", path = "./crates/anyrender_svg" }
+wgpu_context = { version = "0.2.0", path = "./crates/wgpu_context" }
+pixels_window_renderer = { version = "0.2.0", path = "./crates/pixels_window_renderer" }
+softbuffer_window_renderer = { version = "0.2.0", path = "./crates/softbuffer_window_renderer" }
 
 # Linebender
 color = "0.3"
 linebender_resource_handle = "0.1"
-peniko = "0.5.0"
-kurbo = "0.12"
-vello = { version = "0.6", features = [ "wgpu" ] }
-vello_cpu = { version = "0.0.4", default-features = false, features = ["std", "text"] }
-vello_hybrid = { version = "0.0.4" }
-vello_common = { version = "0.0.4" }
+peniko = "0.6"
+kurbo = "0.13"
+vello = { git = "https://github.com/linebender/vello", rev = "5779e81", features = [ "wgpu" ] }
+vello_cpu = { git = "https://github.com/linebender/vello", rev = "5779e81", default-features = false, features = ["std", "text", "u8_pipeline"] }
+vello_hybrid = {git = "https://github.com/linebender/vello", rev = "5779e81" }
+vello_common = {git = "https://github.com/linebender/vello", rev = "5779e81" }
 
 # Rendering
-wgpu = "26"
+wgpu = "27"
 raw-window-handle = "0.6.0"
 softbuffer = "0.4"
 pixels = "0.15"
 
 # SVG
-usvg = { version = "0.45.1", default-features = false }
+usvg = { version = "0.46.0", default-features = false }
 image = { version = "0.25", default-features = false }
 
 # Other dependencies

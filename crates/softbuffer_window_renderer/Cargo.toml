@@ -1,7 +1,7 @@
 [package]
 name = "softbuffer_window_renderer"
 description = "AnyRender WindowRenderer backed by the softbuffer crate"
-version = "0.1.0"
+version = "0.2.0"
 documentation = "https://docs.rs/softbuffer_window_renderer"
 homepage.workspace = true
 repository.workspace = true

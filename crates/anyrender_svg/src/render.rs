@@ -20,7 +20,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             usvg::Node::Group(g) => {
                 let alpha = g.opacity().get();
                 let is_fully_opaque = alpha >= 1.0;
-                let mix = util::to_mix(g.blend_mode(), is_fully_opaque);
+                let mix = util::to_mix(g.blend_mode());
 
                 // Support clip-path with a single path
                 let clip_path = g
@@ -45,7 +45,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     }
                     // Else if there is blending to be done then push a layer with a rectangular clip
                     #[allow(deprecated)]
-                    _ if mix != peniko::Mix::Clip => {
+                    _ if mix != peniko::Mix::Normal || !is_fully_opaque => {
                         // Use bounding box as the clip path.
                         let bounding_box = g.layer_bounding_box();
                         let rect = kurbo::Rect::from_origin_size(
