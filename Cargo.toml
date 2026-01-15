@@ -40,10 +40,10 @@ color = "0.3"
 linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13"
-vello = { git = "https://github.com/linebender/vello", rev = "5779e81", features = [ "wgpu" ] }
-vello_cpu = { git = "https://github.com/linebender/vello", rev = "5779e81", default-features = false, features = ["std", "text", "u8_pipeline"] }
-vello_hybrid = {git = "https://github.com/linebender/vello", rev = "5779e81" }
-vello_common = {git = "https://github.com/linebender/vello", rev = "5779e81" }
+vello = { version = "0.7", features = [ "wgpu" ] }
+vello_cpu = { version = "0.0.6", default-features = false, features = ["std", "text", "u8_pipeline"] }
+vello_hybrid = { version = "0.0.6" }
+vello_common = { version = "0.0.6" }
 
 # Rendering
 wgpu = "27"
