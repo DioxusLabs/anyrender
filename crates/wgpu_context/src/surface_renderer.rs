@@ -213,9 +213,19 @@ impl<'s> SurfaceRenderer<'s> {
             .surface
             .get_current_texture()
             .expect("failed to get surface texture");
+        let texture_view = surface_texture
+            .texture
+            .create_view(&TextureViewDescriptor::default());
+        self.maybe_blit_and_present_ext(surface_texture, &texture_view);
+    }
 
+    pub fn maybe_blit_and_present_ext(
+        &self,
+        surface_texture: SurfaceTexture,
+        texture_view: &TextureView,
+    ) {
         if let Some(its) = &self.intermediate_texture {
-            self.blit_from_intermediate_texture_to_surface(&surface_texture, its);
+            self.blit_from_intermediate_texture_to_surface(texture_view, its);
         }
 
         surface_texture.present();
@@ -224,7 +234,7 @@ impl<'s> SurfaceRenderer<'s> {
     /// Blit from the intermediate texture to the surface texture
     fn blit_from_intermediate_texture_to_surface(
         &self,
-        surface_texture: &SurfaceTexture,
+        texture_view: &TextureView,
         intermediate_texture_stuff: &IntermediateTextureStuff,
     ) {
         // TODO: verify that handling of SurfaceError::Outdated is no longer required
@@ -249,9 +259,7 @@ impl<'s> SurfaceRenderer<'s> {
             &self.device_handle.device,
             &mut encoder,
             &intermediate_texture_stuff.texture_view,
-            &surface_texture
-                .texture
-                .create_view(&TextureViewDescriptor::default()),
+            texture_view,
         );
         self.device_handle.queue.submit([encoder.finish()]);
     }
