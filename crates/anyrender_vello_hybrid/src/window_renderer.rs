@@ -242,10 +242,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         render_surface.queue().submit([encoder.finish()]);
         timer.record_time("render");
 
-        // drop(texture_view);
-        // drop(surface_texture);
-
-        render_surface.maybe_blit_and_present_ext(surface_texture, &texture_view);
+        surface_texture.present();
         timer.record_time("present");
 
         render_surface
