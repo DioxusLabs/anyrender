@@ -21,6 +21,7 @@ pub struct Resource {
 #[derive(Clone)]
 pub enum RenderCommand {
     PushLayer(LayerCmd),
+    PushClipLayer(ClipCmd),
     PopLayer,
     Stroke(StrokeCmd),
     Fill(FillCmd),
@@ -42,6 +43,12 @@ pub enum RecordedPaint {
 pub struct LayerCmd {
     pub blend: BlendMode,
     pub alpha: f32,
+    pub transform: Affine,
+    pub clip: BezPath, // TODO: more shape options
+}
+
+#[derive(Clone)]
+pub struct ClipCmd {
     pub transform: Affine,
     pub clip: BezPath, // TODO: more shape options
 }
@@ -177,6 +184,12 @@ impl PaintScene for Recording {
             clip,
         };
         self.cmds.push(RenderCommand::PushLayer(layer));
+    }
+
+    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+        let clip = clip.into_path(self.tolerance);
+        let layer = ClipCmd { transform, clip };
+        self.cmds.push(RenderCommand::PushClipLayer(layer));
     }
 
     fn pop_layer(&mut self) {
