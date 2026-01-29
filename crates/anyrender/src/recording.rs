@@ -95,13 +95,13 @@ pub struct BoxShadowCommand {
     pub std_dev: f64,
 }
 
-pub struct Recording {
+pub struct Scene {
     pub tolerance: f64,
     pub resources: HashMap<u64, Resource>,
     pub commands: Vec<RenderCommand>,
 }
 
-impl Default for Recording {
+impl Default for Scene {
     fn default() -> Self {
         Self {
             tolerance: DEFAULT_TOLERANCE,
@@ -111,7 +111,7 @@ impl Default for Recording {
     }
 }
 
-impl Recording {
+impl Scene {
     pub fn new() -> Self {
         Self::default()
     }
@@ -163,7 +163,7 @@ impl Recording {
     }
 }
 
-impl PaintScene for Recording {
+impl PaintScene for Scene {
     fn reset(&mut self) {
         self.commands.clear()
     }
