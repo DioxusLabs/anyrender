@@ -155,17 +155,22 @@ pub trait PaintScene {
     // --- Provided methods
 
     /// Append a recorded Scene Fragment to the current scene
-    fn append_scene(&mut self, scene: Scene) {
+    fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
         for cmd in scene.commands {
             match cmd {
-                RenderCommand::PushLayer(cmd) => {
-                    self.push_layer(cmd.blend, cmd.alpha, cmd.transform, &cmd.clip)
+                RenderCommand::PushLayer(cmd) => self.push_layer(
+                    cmd.blend,
+                    cmd.alpha,
+                    scene_transform * cmd.transform,
+                    &cmd.clip,
+                ),
+                RenderCommand::PushClipLayer(cmd) => {
+                    self.push_clip_layer(scene_transform * cmd.transform, &cmd.clip)
                 }
-                RenderCommand::PushClipLayer(cmd) => self.push_clip_layer(cmd.transform, &cmd.clip),
                 RenderCommand::PopLayer => self.pop_layer(),
                 RenderCommand::Stroke(cmd) => self.stroke(
                     &cmd.style,
-                    cmd.transform,
+                    scene_transform * cmd.transform,
                     match cmd.brush {
                         Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
                         Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
@@ -176,7 +181,7 @@ pub trait PaintScene {
                 ),
                 RenderCommand::Fill(cmd) => self.fill(
                     cmd.fill,
-                    cmd.transform,
+                    scene_transform * cmd.transform,
                     match cmd.brush {
                         Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
                         Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
@@ -197,12 +202,12 @@ pub trait PaintScene {
                         Brush::Image(ref image) => Brush::Image(image.as_ref()),
                     },
                     cmd.brush_alpha,
-                    cmd.transform,
+                    scene_transform * cmd.transform,
                     cmd.glyph_transform,
                     cmd.glyphs.into_iter(),
                 ),
                 RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
-                    cmd.transform,
+                    scene_transform * cmd.transform,
                     cmd.rect,
                     cmd.brush,
                     cmd.radius,
