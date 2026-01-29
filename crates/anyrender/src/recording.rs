@@ -15,6 +15,23 @@ pub enum RenderCommand {
     BoxShadow(BoxShadowCommand),
 }
 
+impl RenderCommand {
+    /// Apply the specific transform to the command
+    fn apply_transform(mut self, transform: Affine) -> Self {
+        match &mut self {
+            RenderCommand::PushLayer(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::PushClipLayer(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::PopLayer => {}
+            RenderCommand::Stroke(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::Fill(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::GlyphRun(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::BoxShadow(cmd) => cmd.transform = transform * cmd.transform,
+        };
+
+        self
+    }
+}
+
 #[derive(Clone)]
 pub struct LayerCommand {
     pub blend: BlendMode,
@@ -235,5 +252,14 @@ impl PaintScene for Scene {
             std_dev,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
+    }
+
+    fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
+        self.commands.extend(
+            scene
+                .commands
+                .into_iter()
+                .map(|cmd| cmd.apply_transform(scene_transform)),
+        );
     }
 }
