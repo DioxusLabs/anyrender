@@ -41,6 +41,9 @@ pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
 
+#[cfg(feature = "serialize")]
+mod serialize;
+
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene

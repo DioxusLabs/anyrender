@@ -8,7 +8,20 @@ repository.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = ["serialize"]
+serialize = [
+  "dep:serde",
+  "dep:serde-jsonlines",
+  "kurbo/serde",
+  "peniko/serde",
+]
+
 [dependencies]
 kurbo = { workspace = true }
 peniko = { workspace = true }
 raw-window-handle = { workspace = true }
+
+# Serialization
+serde = { workspace = true, features = ["derive"], optional = true }
+serde-jsonlines = { workspace = true, optional = true }
