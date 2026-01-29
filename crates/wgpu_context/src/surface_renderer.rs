@@ -259,7 +259,7 @@ impl<'s> SurfaceRenderer<'s> {
             &self.device_handle.device,
             &mut encoder,
             &intermediate_texture_stuff.texture_view,
-            &texture_view,
+            texture_view,
         );
         self.device_handle.queue.submit([encoder.finish()]);
     }
