@@ -4,10 +4,6 @@ use peniko::{BlendMode, Brush, Color, Fill, FontData, Style, StyleRef};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
-pub trait Drawable {
-    fn draw(&self, scene: &mut impl PaintScene);
-}
-
 #[derive(Clone)]
 pub enum RenderCommand {
     PushLayer(LayerCommand),
