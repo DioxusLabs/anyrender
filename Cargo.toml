@@ -35,6 +35,10 @@ wgpu_context = { version = "0.3.0", path = "./crates/wgpu_context" }
 pixels_window_renderer = { version = "0.2.0", path = "./crates/pixels_window_renderer" }
 softbuffer_window_renderer = { version = "0.2.0", path = "./crates/softbuffer_window_renderer" }
 
+# Serialization
+serde = "1.0.228"
+serde-jsonlines = "0.7"
+
 # Linebender
 color = "0.3"
 linebender_resource_handle = "0.1"

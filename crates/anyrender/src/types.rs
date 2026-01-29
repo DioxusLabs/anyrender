@@ -3,10 +3,14 @@
 use peniko::{Brush, BrushRef, Color, Gradient, ImageBrush, ImageBrushRef};
 use std::{any::Any, sync::Arc};
 
+#[cfg(feature = "serialize")]
+use serde::{Deserialize, Serialize};
+
 pub type NormalizedCoord = i16;
 
 /// A positioned glyph.
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Glyph {
     pub id: u32,
     pub x: f32,
@@ -14,6 +18,7 @@ pub struct Glyph {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct CustomPaint {
     pub source_id: u64,
     pub width: u32,
@@ -22,6 +27,7 @@ pub struct CustomPaint {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
     /// Solid color brush.
     Solid(Color),
