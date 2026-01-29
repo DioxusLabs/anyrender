@@ -20,13 +20,13 @@ pub struct Resource {
 
 #[derive(Clone)]
 pub enum RenderCommand {
-    PushLayer(LayerCmd),
-    PushClipLayer(ClipCmd),
+    PushLayer(LayerCommand),
+    PushClipLayer(ClipCommand),
     PopLayer,
-    Stroke(StrokeCmd),
-    Fill(FillCmd),
-    GlyphRun(GlyphRunCmd),
-    BoxShadow(BoxShadowCmd),
+    Stroke(StrokeCommand),
+    Fill(FillCommand),
+    GlyphRun(GlyphRunCommand),
+    BoxShadow(BoxShadowCommand),
 }
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ pub enum RecordedPaint {
 }
 
 #[derive(Clone)]
-pub struct LayerCmd {
+pub struct LayerCommand {
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
@@ -48,13 +48,13 @@ pub struct LayerCmd {
 }
 
 #[derive(Clone)]
-pub struct ClipCmd {
+pub struct ClipCommand {
     pub transform: Affine,
     pub clip: BezPath, // TODO: more shape options
 }
 
 #[derive(Clone)]
-pub struct StrokeCmd {
+pub struct StrokeCommand {
     pub style: Stroke,
     pub transform: Affine,
     pub brush: RecordedPaint, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
@@ -63,7 +63,7 @@ pub struct StrokeCmd {
 }
 
 #[derive(Clone)]
-pub struct FillCmd {
+pub struct FillCommand {
     pub fill: Fill,
     pub transform: Affine,
     pub brush: RecordedPaint, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
@@ -72,7 +72,7 @@ pub struct FillCmd {
 }
 
 #[derive(Clone)]
-pub struct GlyphRunCmd {
+pub struct GlyphRunCommand {
     pub font_data: ResourceId,
     pub font_index: u32,
     pub font_size: f32,
@@ -87,7 +87,7 @@ pub struct GlyphRunCmd {
 }
 
 #[derive(Clone)]
-pub struct BoxShadowCmd {
+pub struct BoxShadowCommand {
     pub transform: Affine,
     pub rect: Rect,
     pub brush: Color,
@@ -98,7 +98,7 @@ pub struct BoxShadowCmd {
 pub struct Recording {
     pub tolerance: f64,
     pub resources: HashMap<u64, Resource>,
-    pub cmds: Vec<RenderCommand>,
+    pub commands: Vec<RenderCommand>,
 }
 
 impl Default for Recording {
@@ -106,7 +106,7 @@ impl Default for Recording {
         Self {
             tolerance: DEFAULT_TOLERANCE,
             resources: HashMap::new(),
-            cmds: Vec::new(),
+            commands: Vec::new(),
         }
     }
 }
@@ -120,7 +120,7 @@ impl Recording {
         Self {
             tolerance,
             resources: HashMap::new(),
-            cmds: Vec::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -165,7 +165,7 @@ impl Recording {
 
 impl PaintScene for Recording {
     fn reset(&mut self) {
-        self.cmds.clear()
+        self.commands.clear()
     }
 
     fn push_layer(
@@ -177,23 +177,23 @@ impl PaintScene for Recording {
     ) {
         let blend = blend.into();
         let clip = clip.into_path(self.tolerance);
-        let layer = LayerCmd {
+        let layer = LayerCommand {
             blend,
             alpha,
             transform,
             clip,
         };
-        self.cmds.push(RenderCommand::PushLayer(layer));
+        self.commands.push(RenderCommand::PushLayer(layer));
     }
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
         let clip = clip.into_path(self.tolerance);
-        let layer = ClipCmd { transform, clip };
-        self.cmds.push(RenderCommand::PushClipLayer(layer));
+        let layer = ClipCommand { transform, clip };
+        self.commands.push(RenderCommand::PushClipLayer(layer));
     }
 
     fn pop_layer(&mut self) {
-        self.cmds.push(RenderCommand::PopLayer);
+        self.commands.push(RenderCommand::PopLayer);
     }
 
     fn stroke<'a>(
@@ -206,14 +206,14 @@ impl PaintScene for Recording {
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paintref(paint_ref.into());
-        let stroke = StrokeCmd {
+        let stroke = StrokeCommand {
             style: style.clone(),
             transform,
             brush,
             brush_transform,
             shape,
         };
-        self.cmds.push(RenderCommand::Stroke(stroke));
+        self.commands.push(RenderCommand::Stroke(stroke));
     }
 
     fn fill<'a>(
@@ -226,14 +226,14 @@ impl PaintScene for Recording {
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paintref(paint.into());
-        let fill = FillCmd {
+        let fill = FillCommand {
             fill: style,
             transform,
             brush,
             brush_transform,
             shape,
         };
-        self.cmds.push(RenderCommand::Fill(fill));
+        self.commands.push(RenderCommand::Fill(fill));
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -252,7 +252,7 @@ impl PaintScene for Recording {
         let font_index = font.index;
         let font_data = self.store_resource_ref(&font.data);
         let brush = self.convert_paintref(paint_ref.into());
-        let glyph_run = GlyphRunCmd {
+        let glyph_run = GlyphRunCommand {
             font_data,
             font_index,
             font_size,
@@ -265,7 +265,7 @@ impl PaintScene for Recording {
             glyph_transform,
             glyphs: glyphs.into_iter().collect(),
         };
-        self.cmds.push(RenderCommand::GlyphRun(glyph_run));
+        self.commands.push(RenderCommand::GlyphRun(glyph_run));
     }
 
     fn draw_box_shadow(
@@ -276,13 +276,13 @@ impl PaintScene for Recording {
         radius: f64,
         std_dev: f64,
     ) {
-        let box_shadow = BoxShadowCmd {
+        let box_shadow = BoxShadowCommand {
             transform,
             rect,
             brush,
             radius,
             std_dev,
         };
-        self.cmds.push(RenderCommand::BoxShadow(box_shadow));
+        self.commands.push(RenderCommand::BoxShadow(box_shadow));
     }
 }
