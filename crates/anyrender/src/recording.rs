@@ -1,21 +1,11 @@
-use std::collections::HashMap;
-
 use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
-use peniko::{BlendMode, Blob, BrushRef, Color, Fill, FontData, Gradient, Style, StyleRef};
+use peniko::{BlendMode, BrushRef, Color, Fill, FontData, Gradient, ImageBrush, Style, StyleRef};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
 pub trait Drawable {
     fn draw(&self, scene: &mut impl PaintScene);
-}
-
-#[derive(Clone)]
-pub struct ResourceId(pub u64);
-
-#[derive(Clone)]
-pub struct Resource {
-    pub blob: Blob<u8>,
 }
 
 #[derive(Clone)]
@@ -36,7 +26,7 @@ pub enum RecordedPaint {
     /// Gradient brush.
     Gradient(Gradient),
     /// Image brush.
-    Image(ResourceId),
+    Image(ImageBrush),
 }
 
 #[derive(Clone)]
@@ -73,7 +63,7 @@ pub struct FillCommand {
 
 #[derive(Clone)]
 pub struct GlyphRunCommand {
-    pub font_data: ResourceId,
+    pub font_data: FontData,
     pub font_index: u32,
     pub font_size: f32,
     pub hint: bool,
@@ -97,7 +87,6 @@ pub struct BoxShadowCommand {
 
 pub struct Scene {
     pub tolerance: f64,
-    pub resources: HashMap<u64, Resource>,
     pub commands: Vec<RenderCommand>,
 }
 
@@ -105,7 +94,6 @@ impl Default for Scene {
     fn default() -> Self {
         Self {
             tolerance: DEFAULT_TOLERANCE,
-            resources: HashMap::new(),
             commands: Vec::new(),
         }
     }
@@ -119,33 +107,15 @@ impl Scene {
     pub fn with_tolerance(tolerance: f64) -> Self {
         Self {
             tolerance,
-            resources: HashMap::new(),
             commands: Vec::new(),
         }
-    }
-
-    pub fn store_resource(&mut self, blob: Blob<u8>) -> ResourceId {
-        let id = blob.id();
-        self.resources.entry(id).or_insert(Resource { blob });
-        ResourceId(id)
-    }
-
-    pub fn store_resource_ref(&mut self, blob: &Blob<u8>) -> ResourceId {
-        let id = blob.id();
-        self.resources
-            .entry(id)
-            .or_insert_with(|| Resource { blob: blob.clone() });
-        ResourceId(id)
     }
 
     pub fn convert_brushref(&mut self, brush_ref: BrushRef<'_>) -> RecordedPaint {
         match brush_ref {
             BrushRef::Solid(color) => RecordedPaint::Solid(color),
             BrushRef::Gradient(gradient) => RecordedPaint::Gradient(gradient.clone()),
-            BrushRef::Image(image) => {
-                let id = self.store_resource_ref(&image.image.data);
-                RecordedPaint::Image(id)
-            }
+            BrushRef::Image(image) => RecordedPaint::Image(image.to_owned()),
         }
     }
 
@@ -153,10 +123,7 @@ impl Scene {
         match paint_ref {
             Paint::Solid(color) => RecordedPaint::Solid(color),
             Paint::Gradient(gradient) => RecordedPaint::Gradient(gradient.clone()),
-            Paint::Image(image) => {
-                let id = self.store_resource_ref(&image.image.data);
-                RecordedPaint::Image(id)
-            }
+            Paint::Image(image) => RecordedPaint::Image(image.to_owned()),
             // TODO: handle this somehow
             Paint::Custom(_) => RecordedPaint::Solid(Color::TRANSPARENT),
         }
@@ -250,10 +217,9 @@ impl PaintScene for Scene {
         glyphs: impl Iterator<Item = Glyph>,
     ) {
         let font_index = font.index;
-        let font_data = self.store_resource_ref(&font.data);
         let brush = self.convert_paintref(paint_ref.into());
         let glyph_run = GlyphRunCommand {
-            font_data,
+            font_data: font.clone(),
             font_index,
             font_size,
             hint,
