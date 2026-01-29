@@ -37,7 +37,8 @@ pub mod types;
 pub use types::*;
 mod null_backend;
 pub use null_backend::*;
-mod recording;
+pub mod recording;
+pub use recording::Scene;
 
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
