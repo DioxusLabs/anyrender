@@ -1,6 +1,6 @@
 use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
-use peniko::{BlendMode, BrushRef, Color, Fill, FontData, Gradient, ImageBrush, Style, StyleRef};
+use peniko::{BlendMode, Brush, Color, Fill, FontData, Style, StyleRef};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
@@ -17,16 +17,6 @@ pub enum RenderCommand {
     Fill(FillCommand),
     GlyphRun(GlyphRunCommand),
     BoxShadow(BoxShadowCommand),
-}
-
-#[derive(Clone)]
-pub enum RecordedPaint {
-    /// Solid color brush.
-    Solid(Color),
-    /// Gradient brush.
-    Gradient(Gradient),
-    /// Image brush.
-    Image(ImageBrush),
 }
 
 #[derive(Clone)]
@@ -47,7 +37,7 @@ pub struct ClipCommand {
 pub struct StrokeCommand {
     pub style: Stroke,
     pub transform: Affine,
-    pub brush: RecordedPaint, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     pub shape: BezPath, // TODO: more shape options
 }
@@ -56,7 +46,7 @@ pub struct StrokeCommand {
 pub struct FillCommand {
     pub fill: Fill,
     pub transform: Affine,
-    pub brush: RecordedPaint, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     pub shape: BezPath, // TODO: more shape options
 }
@@ -69,7 +59,7 @@ pub struct GlyphRunCommand {
     pub hint: bool,
     pub normalized_coords: Vec<NormalizedCoord>,
     pub style: Style,
-    pub brush: RecordedPaint,
+    pub brush: Brush,
     pub brush_alpha: f32,
     pub transform: Affine,
     pub glyph_transform: Option<Affine>,
@@ -111,21 +101,13 @@ impl Scene {
         }
     }
 
-    pub fn convert_brushref(&mut self, brush_ref: BrushRef<'_>) -> RecordedPaint {
-        match brush_ref {
-            BrushRef::Solid(color) => RecordedPaint::Solid(color),
-            BrushRef::Gradient(gradient) => RecordedPaint::Gradient(gradient.clone()),
-            BrushRef::Image(image) => RecordedPaint::Image(image.to_owned()),
-        }
-    }
-
-    pub fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> RecordedPaint {
+    fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> Brush {
         match paint_ref {
-            Paint::Solid(color) => RecordedPaint::Solid(color),
-            Paint::Gradient(gradient) => RecordedPaint::Gradient(gradient.clone()),
-            Paint::Image(image) => RecordedPaint::Image(image.to_owned()),
+            Paint::Solid(color) => Brush::Solid(color),
+            Paint::Gradient(gradient) => Brush::Gradient(gradient.clone()),
+            Paint::Image(image) => Brush::Image(image.to_owned()),
             // TODO: handle this somehow
-            Paint::Custom(_) => RecordedPaint::Solid(Color::TRANSPARENT),
+            Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }
     }
 }
