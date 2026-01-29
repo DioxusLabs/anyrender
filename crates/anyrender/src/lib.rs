@@ -28,7 +28,8 @@
 //!  - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu)
 
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use recording::RenderCommand;
 use std::sync::Arc;
 
 pub mod wasm_send_sync;
@@ -37,6 +38,8 @@ pub mod types;
 pub use types::*;
 mod null_backend;
 pub use null_backend::*;
+pub mod recording;
+pub use recording::Scene;
 
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
@@ -123,7 +126,7 @@ pub trait PaintScene {
         shape: &impl Shape,
     );
 
-    /// Returns a builder for encoding a glyph run.
+    /// Draws a run of glyphs
     #[allow(clippy::too_many_arguments)]
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
@@ -150,6 +153,69 @@ pub trait PaintScene {
     );
 
     // --- Provided methods
+
+    /// Append a recorded Scene Fragment to the current scene
+    fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
+        for cmd in scene.commands {
+            match cmd {
+                RenderCommand::PushLayer(cmd) => self.push_layer(
+                    cmd.blend,
+                    cmd.alpha,
+                    scene_transform * cmd.transform,
+                    &cmd.clip,
+                ),
+                RenderCommand::PushClipLayer(cmd) => {
+                    self.push_clip_layer(scene_transform * cmd.transform, &cmd.clip)
+                }
+                RenderCommand::PopLayer => self.pop_layer(),
+                RenderCommand::Stroke(cmd) => self.stroke(
+                    &cmd.style,
+                    scene_transform * cmd.transform,
+                    match cmd.brush {
+                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
+                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
+                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    },
+                    cmd.brush_transform,
+                    &cmd.shape,
+                ),
+                RenderCommand::Fill(cmd) => self.fill(
+                    cmd.fill,
+                    scene_transform * cmd.transform,
+                    match cmd.brush {
+                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
+                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
+                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    },
+                    cmd.brush_transform,
+                    &cmd.shape,
+                ),
+                RenderCommand::GlyphRun(cmd) => self.draw_glyphs(
+                    &cmd.font_data,
+                    cmd.font_size,
+                    cmd.hint,
+                    &cmd.normalized_coords,
+                    &cmd.style,
+                    match cmd.brush {
+                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
+                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
+                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    },
+                    cmd.brush_alpha,
+                    scene_transform * cmd.transform,
+                    cmd.glyph_transform,
+                    cmd.glyphs.into_iter(),
+                ),
+                RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
+                    scene_transform * cmd.transform,
+                    cmd.rect,
+                    cmd.brush,
+                    cmd.radius,
+                    cmd.std_dev,
+                ),
+            }
+        }
+    }
 
     /// Utility method to draw an image at it's natural size. For more advanced image drawing use the `fill` method
     fn draw_image(&mut self, image: ImageBrushRef, transform: Affine) {
