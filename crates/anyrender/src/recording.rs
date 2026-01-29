@@ -6,12 +6,23 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 #[derive(Clone)]
 pub enum RenderCommand {
+    /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
+    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
+    /// However, the transforms are not saved or modified by the layer stack.
     PushLayer(LayerCommand),
+    /// Pushes a new clip layer clipped by the specified shape.
+    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
+    /// However, the transforms are not saved or modified by the layer stack.
     PushClipLayer(ClipCommand),
+    /// Pops the current layer.
     PopLayer,
+    /// Strokes a shape using the specified style and brush.
     Stroke(StrokeCommand),
+    /// Fills a shape using the specified style and brush.
     Fill(FillCommand),
+    /// Draws a run of glyphs
     GlyphRun(GlyphRunCommand),
+    /// Draw a rounded rectangle blurred with a gaussian filter.
     BoxShadow(BoxShadowCommand),
 }
 
@@ -32,6 +43,9 @@ impl RenderCommand {
     }
 }
 
+/// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
+/// Every drawing command after this call will be clipped by the shape until the layer is popped.
+/// However, the transforms are not saved or modified by the layer stack.
 #[derive(Clone)]
 pub struct LayerCommand {
     pub blend: BlendMode,
@@ -40,12 +54,16 @@ pub struct LayerCommand {
     pub clip: BezPath, // TODO: more shape options
 }
 
+/// Pushes a new clip layer clipped by the specified shape.
+/// Every drawing command after this call will be clipped by the shape until the layer is popped.
+/// However, the transforms are not saved or modified by the layer stack.
 #[derive(Clone)]
 pub struct ClipCommand {
     pub transform: Affine,
     pub clip: BezPath, // TODO: more shape options
 }
 
+/// Strokes a shape using the specified style and brush.
 #[derive(Clone)]
 pub struct StrokeCommand {
     pub style: Stroke,
@@ -55,6 +73,7 @@ pub struct StrokeCommand {
     pub shape: BezPath, // TODO: more shape options
 }
 
+/// Fills a shape using the specified style and brush.
 #[derive(Clone)]
 pub struct FillCommand {
     pub fill: Fill,
@@ -64,6 +83,7 @@ pub struct FillCommand {
     pub shape: BezPath, // TODO: more shape options
 }
 
+/// Draws a run of glyphs
 #[derive(Clone)]
 pub struct GlyphRunCommand {
     pub font_data: FontData,
@@ -79,6 +99,7 @@ pub struct GlyphRunCommand {
     pub glyphs: Vec<Glyph>,
 }
 
+/// Draw a box shadow around a box
 #[derive(Clone)]
 pub struct BoxShadowCommand {
     pub transform: Affine,
@@ -88,6 +109,8 @@ pub struct BoxShadowCommand {
     pub std_dev: f64,
 }
 
+/// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
+/// and passed around.
 #[derive(Clone)]
 pub struct Scene {
     pub tolerance: f64,

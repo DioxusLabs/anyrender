@@ -126,7 +126,7 @@ pub trait PaintScene {
         shape: &impl Shape,
     );
 
-    /// Returns a builder for encoding a glyph run.
+    /// Draws a run of glyphs
     #[allow(clippy::too_many_arguments)]
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
