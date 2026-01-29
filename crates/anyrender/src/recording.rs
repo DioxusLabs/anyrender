@@ -71,6 +71,7 @@ pub struct BoxShadowCommand {
     pub std_dev: f64,
 }
 
+#[derive(Clone)]
 pub struct Scene {
     pub tolerance: f64,
     pub commands: Vec<RenderCommand>,
@@ -86,6 +87,7 @@ impl Default for Scene {
 }
 
 impl Scene {
+    /// Create a new empty
     pub fn new() -> Self {
         Self::default()
     }
@@ -95,6 +97,11 @@ impl Scene {
             tolerance,
             commands: Vec::new(),
         }
+    }
+
+    /// Clear all content from the `Scene` so that it can be reused
+    pub fn clear(&mut self) {
+        self.commands.clear();
     }
 
     fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> Brush {
