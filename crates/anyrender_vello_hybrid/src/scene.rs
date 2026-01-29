@@ -68,8 +68,14 @@ impl ImageManager<'_> {
     }
 }
 
+pub(crate) enum LayerKind {
+    Layer,
+    Clip,
+}
+
 pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_hybrid::Scene,
+    pub(crate) layer_stack: Vec<LayerKind>,
     pub(crate) image_manager: Option<ImageManager<'s>>,
 }
 
@@ -77,6 +83,7 @@ impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(scene: &'s mut vello_hybrid::Scene) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             scene,
+            layer_stack: Vec::with_capacity(16),
             image_manager: None,
         }
     }
@@ -95,6 +102,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         clip: &impl Shape,
     ) {
         self.scene.set_transform(transform);
+        self.layer_stack.push(LayerKind::Layer);
         self.scene.push_layer(
             Some(&clip.into_path(DEFAULT_TOLERANCE)),
             Some(blend.into()),
@@ -106,12 +114,18 @@ impl PaintScene for VelloHybridScenePainter<'_> {
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
         self.scene.set_transform(transform);
+        self.layer_stack.push(LayerKind::Clip);
         self.scene
-            .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+            .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
     }
 
     fn pop_layer(&mut self) {
-        self.scene.pop_layer();
+        if let Some(kind) = self.layer_stack.pop() {
+            match kind {
+                LayerKind::Layer => self.scene.pop_layer(),
+                LayerKind::Clip => self.scene.pop_clip_path(),
+            }
+        }
     }
 
     fn stroke<'a>(

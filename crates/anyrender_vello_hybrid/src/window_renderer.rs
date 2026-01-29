@@ -216,6 +216,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         // Regenerate the vello scene
         draw_fn(&mut VelloHybridScenePainter {
             scene: &mut self.scene,
+            layer_stack: Vec::new(),
             image_manager: Some(image_manager),
         });
         timer.record_time("cmd");
