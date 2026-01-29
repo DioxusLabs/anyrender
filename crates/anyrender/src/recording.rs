@@ -139,11 +139,6 @@ impl Scene {
         }
     }
 
-    /// Clear all content from the `Scene` so that it can be reused
-    pub fn clear(&mut self) {
-        self.commands.clear();
-    }
-
     fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> Brush {
         match paint_ref {
             Paint::Solid(color) => Brush::Solid(color),
