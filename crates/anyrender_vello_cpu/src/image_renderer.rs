@@ -12,7 +12,7 @@ impl ImageRenderer for VelloCpuImageRenderer {
 
     fn new(width: u32, height: u32) -> Self {
         Self {
-            scene: VelloCpuScenePainter(RenderContext::new(width as u16, height as u16)),
+            scene: VelloCpuScenePainter::new(RenderContext::new(width as u16, height as u16)),
         }
     }
 

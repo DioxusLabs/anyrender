@@ -32,7 +32,18 @@ fn convert_image_cached(image: &ImageData) -> ImageSource {
         .clone()
 }
 
-pub struct VelloCpuScenePainter(pub vello_cpu::RenderContext);
+pub(crate) enum LayerKind {
+    Layer,
+    Clip,
+}
+
+pub struct VelloCpuScenePainter(pub vello_cpu::RenderContext, Vec<LayerKind>);
+
+impl VelloCpuScenePainter {
+    pub fn new(ctx: vello_cpu::RenderContext) -> Self {
+        Self(ctx, Vec::with_capacity(16))
+    }
+}
 
 impl VelloCpuScenePainter {
     pub fn finish(self) -> Pixmap {
@@ -55,6 +66,7 @@ impl PaintScene for VelloCpuScenePainter {
         clip: &impl Shape,
     ) {
         self.0.set_transform(transform);
+        self.1.push(LayerKind::Layer);
         self.0.push_layer(
             Some(&clip.into_path(DEFAULT_TOLERANCE)),
             Some(blend.into()),
@@ -66,11 +78,17 @@ impl PaintScene for VelloCpuScenePainter {
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
         self.0.set_transform(transform);
-        self.0.push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+        self.1.push(LayerKind::Clip);
+        self.0.push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
     }
 
     fn pop_layer(&mut self) {
-        self.0.pop_layer();
+        if let Some(kind) = self.1.pop() {
+            match kind {
+                LayerKind::Layer => self.0.pop_layer(),
+                LayerKind::Clip => self.0.pop_clip_path(),
+            }
+        }
     }
 
     fn stroke<'a>(
