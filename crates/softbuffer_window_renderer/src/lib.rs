@@ -25,6 +25,7 @@ pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
     renderer: Renderer,
+    buffer: Vec<u8>,
 }
 
 impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
@@ -38,6 +39,7 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer,
+            buffer: Vec::new(),
         }
     }
 }
@@ -94,18 +96,16 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         timer.record_time("buffer_mut");
 
         // Paint
-        let mut vec = Vec::new();
-        self.renderer.render_to_vec(draw_fn, &mut vec);
+        self.renderer.render_to_vec(draw_fn, &mut self.buffer);
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();
 
-        // TODO: replace chunk_exacts with as_chunks once MSRV hits 1.88
-        let chunks = vec.chunks_exact(4);
-        assert_eq!(chunks.size_hint().0, out.len());
-        assert_eq!(chunks.remainder().len(), 0);
+        let (chunks, remainder) = self.buffer.as_chunks::<4>();
+        assert_eq!(chunks.len(), out.len());
+        assert_eq!(remainder.len(), 0);
 
-        for (src, dest) in chunks.zip(out.iter_mut()) {
+        for (&src, dest) in chunks.into_iter().zip(out.iter_mut()) {
             let [r, g, b, a]: [u8; 4] = src.try_into().unwrap();
             if a == 0 {
                 *dest = u32::MAX;
