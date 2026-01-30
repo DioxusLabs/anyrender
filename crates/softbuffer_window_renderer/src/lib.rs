@@ -106,7 +106,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         assert_eq!(remainder.len(), 0);
 
         for (&src, dest) in chunks.into_iter().zip(out.iter_mut()) {
-            let [r, g, b, a]: [u8; 4] = src.try_into().unwrap();
+            let [r, g, b, a] = src;
             if a == 0 {
                 *dest = u32::MAX;
             } else {
