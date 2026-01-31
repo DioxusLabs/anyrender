@@ -10,9 +10,7 @@ use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
 };
-use wgpu::{
-    CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat, TextureViewDescriptor,
-};
+use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
@@ -194,7 +192,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             return;
         };
 
-        let render_surface = &state.render_surface;
+        let render_surface = &mut state.render_surface;
 
         debug_timer!(timer, feature = "log_frame_times");
 
@@ -220,10 +218,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         });
         timer.record_time("cmd");
 
-        let surface_texture = render_surface.current_surface_texture();
-        let texture_view = surface_texture
-            .texture
-            .create_view(&TextureViewDescriptor::default());
+        let texture_view = render_surface.target_texture_view();
 
         state
             .renderer
@@ -243,7 +238,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         timer.record_time("render");
 
         drop(texture_view);
-        drop(surface_texture);
 
         render_surface.maybe_blit_and_present();
         timer.record_time("present");
