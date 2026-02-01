@@ -121,6 +121,7 @@ impl PaintScene for NullScenePainter {
         _font_size: f32,
         _hint: bool,
         _normalized_coords: &'a [crate::NormalizedCoord],
+        _embolden: kurbo::Vec2,
         _style: impl Into<peniko::StyleRef<'a>>,
         _brush: impl Into<crate::PaintRef<'a>>,
         _brush_alpha: f32,
