@@ -2,7 +2,8 @@ use crate::{DeviceHandle, WgpuContextError, util::create_texture};
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Device, PresentMode, Queue, Surface,
     SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor, util::TextureBlitter,
+    TextureViewDescriptor,
+    util::{TextureBlitter, TextureBlitterBuilder},
 };
 
 #[derive(Clone)]
@@ -126,6 +127,22 @@ impl<'s> SurfaceRenderer<'s> {
             view_formats: surface_renderer_config.view_formats,
         };
 
+        // `TextureBlitter::new` only does post-multiplied alpha
+        let blitter = if surface_renderer_config.alpha_mode == CompositeAlphaMode::PreMultiplied {
+            TextureBlitterBuilder::new(&device_handle.device, surface_config.format)
+                .blend_state(wgpu::BlendState {
+                    alpha: wgpu::BlendComponent::REPLACE,
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::Zero,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                })
+                .build()
+        } else {
+            TextureBlitter::new(&device_handle.device, surface_config.format)
+        };
+
         let intermediate_texture = intermediate_texture_config.map(|texture_config| {
             Box::new(IntermediateTextureStuff {
                 config: texture_config.clone(),
@@ -136,7 +153,7 @@ impl<'s> SurfaceRenderer<'s> {
                     texture_config.usage,
                     &device_handle.device,
                 ),
-                blitter: TextureBlitter::new(&device_handle.device, surface_config.format),
+                blitter,
             })
         });
 
