@@ -195,7 +195,7 @@ impl WindowRenderer for VelloWindowRenderer {
             return;
         };
 
-        let render_surface = &state.render_surface;
+        let render_surface = &mut state.render_surface;
 
         debug_timer!(timer, feature = "log_frame_times");
 
@@ -207,13 +207,14 @@ impl WindowRenderer for VelloWindowRenderer {
         });
         timer.record_time("cmd");
 
+        let texture_view = render_surface.target_texture_view();
         state
             .renderer
             .render_to_texture(
                 render_surface.device(),
                 render_surface.queue(),
                 &self.scene,
-                &render_surface.target_texture_view(),
+                &texture_view,
                 &RenderParams {
                     base_color: self.config.base_color,
                     width: render_surface.config.width,
@@ -223,6 +224,8 @@ impl WindowRenderer for VelloWindowRenderer {
             )
             .expect("failed to render to texture");
         timer.record_time("render");
+
+        drop(texture_view);
 
         render_surface.maybe_blit_and_present();
         timer.record_time("present");
