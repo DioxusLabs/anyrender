@@ -31,7 +31,7 @@ anyrender_vello = { version = "0.7.0", path = "./crates/anyrender_vello" }
 anyrender_vello_cpu = { version = "0.9.0", path = "./crates/anyrender_vello_cpu" }
 anyrender_vello_hybrid = { version = "0.2.0", path = "./crates/anyrender_vello_hybrid" }
 anyrender_svg = { version = "0.8.0", path = "./crates/anyrender_svg" }
-wgpu_context = { version = "0.2.0", path = "./crates/wgpu_context" }
+wgpu_context = { version = "0.3.0", path = "./crates/wgpu_context" }
 pixels_window_renderer = { version = "0.2.0", path = "./crates/pixels_window_renderer" }
 softbuffer_window_renderer = { version = "0.2.0", path = "./crates/softbuffer_window_renderer" }
 
