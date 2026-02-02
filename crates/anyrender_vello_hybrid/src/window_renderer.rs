@@ -156,6 +156,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         //     source.resume(device_handle)
         // }
 
+        // Create a Scene with the correct dimensions
+        self.scene =
+            VelloHybridScene::new_with(width as u16, height as u16, self.config.render_settings);
+
         // Set state to Active
         self.window_handle = Some(window_handle);
         self.render_state = RenderState::Active(ActiveRenderState {
