@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello_hybrid"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyrender",
  "debug_timer",

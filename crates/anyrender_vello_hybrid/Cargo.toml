@@ -1,7 +1,7 @@
 [package]
 name = "anyrender_vello_hybrid"
 description = "vello_hybrid backend for anyrender"
-version = "0.2.1"
+version = "0.2.2"
 documentation = "https://docs.rs/anyrender_vello_hybrid"
 homepage.workspace = true
 repository.workspace = true
