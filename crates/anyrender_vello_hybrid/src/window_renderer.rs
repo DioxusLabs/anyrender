@@ -106,6 +106,12 @@ impl VelloHybridWindowRenderer {
     // }
 }
 
+// TODO: Make configurable?
+#[cfg(target_os = "android")]
+const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
+#[cfg(not(target_os = "android"))]
+const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
+
 impl WindowRenderer for VelloHybridWindowRenderer {
     type ScenePainter<'a>
         = VelloHybridScenePainter<'a>
@@ -122,9 +128,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             window_handle.clone(),
             SurfaceRendererConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                formats: vec![
-                    /*TextureFormat::Rgba8Unorm, */ TextureFormat::Bgra8Unorm,
-                ],
+                formats: vec![DEFAULT_TEXTURE_FORMAT],
                 width,
                 height,
                 present_mode: PresentMode::AutoVsync,
@@ -143,8 +147,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let renderer = VelloHybridRenderer::new(
             render_surface.device(),
             &RenderTargetConfig {
-                // TODO: Make configurable?
-                format: TextureFormat::Bgra8Unorm,
+                format: DEFAULT_TEXTURE_FORMAT,
                 width,
                 height,
             },
