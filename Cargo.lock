@@ -3746,7 +3746,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu_context"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "futures-intrusive",
  "wgpu 27.0.1",
