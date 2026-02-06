@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub enum RenderCommand<Font = FontData, Image = ImageData> {
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
@@ -25,7 +25,7 @@ pub enum RenderCommand<Font = FontData, Image = ImageData> {
     /// Fills a shape using the specified style and brush.
     Fill(FillCommand<Image>),
     /// Draws a run of glyphs
-    GlyphRun(GlyphRunCommand<Font>),
+    GlyphRun(GlyphRunCommand<Font, Image>),
     /// Draw a rounded rectangle blurred with a gaussian filter.
     BoxShadow(BoxShadowCommand),
 }
@@ -50,7 +50,7 @@ impl RenderCommand {
 /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct LayerCommand {
     pub blend: BlendMode,
@@ -62,7 +62,7 @@ pub struct LayerCommand {
 /// Pushes a new clip layer clipped by the specified shape.
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct ClipCommand {
     pub transform: Affine,
@@ -70,7 +70,7 @@ pub struct ClipCommand {
 }
 
 /// Strokes a shape using the specified style and brush.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct StrokeCommand<Image> {
     pub style: Stroke,
@@ -81,7 +81,7 @@ pub struct StrokeCommand<Image> {
 }
 
 /// Fills a shape using the specified style and brush.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct FillCommand<Image> {
     pub fill: Fill,
@@ -92,16 +92,16 @@ pub struct FillCommand<Image> {
 }
 
 /// Draws a run of glyphs
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
-pub struct GlyphRunCommand<Font = FontData> {
+pub struct GlyphRunCommand<Font = FontData, Image = ImageData> {
     pub font_data: Font,
     pub font_index: u32,
     pub font_size: f32,
     pub hint: bool,
     pub normalized_coords: Vec<NormalizedCoord>,
     pub style: Style,
-    pub brush: Brush,
+    pub brush: Brush<ImageBrush<Image>>,
     pub brush_alpha: f32,
     pub transform: Affine,
     pub glyph_transform: Option<Affine>,
@@ -109,7 +109,7 @@ pub struct GlyphRunCommand<Font = FontData> {
 }
 
 /// Draw a box shadow around a box
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct BoxShadowCommand {
     pub transform: Affine,
@@ -121,7 +121,7 @@ pub struct BoxShadowCommand {
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
 /// and passed around.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub tolerance: f64,
     pub commands: Vec<RenderCommand>,

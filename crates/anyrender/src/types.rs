@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub type NormalizedCoord = i16;
 
 /// A positioned glyph.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct Glyph {
     pub id: u32,

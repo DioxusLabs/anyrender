@@ -42,7 +42,7 @@ pub mod recording;
 pub use recording::Scene;
 
 #[cfg(feature = "serialize")]
-mod serialize;
+pub mod serialize;
 
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
