@@ -1,0 +1,25 @@
+[package]
+name = "anyrender_serialize"
+description = "Serialization of recorded scenes to a portable zip format"
+version = "0.1.0"
+documentation = "https://docs.rs/anyrender"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyrender = { workspace = true, features = ["serde"] }
+peniko = { workspace = true }
+
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+zip = { workspace = true }
+sha2 = { workspace = true }
+image = { workspace = true, features = ["png"] }
+
+[dev-dependencies]
+kurbo = { workspace = true }
+peniko = { workspace = true }
+serde_json = { workspace = true }
+zip = { workspace = true }

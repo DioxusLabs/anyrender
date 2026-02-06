@@ -1,11 +1,15 @@
 use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
-use peniko::{BlendMode, Brush, Color, Fill, FontData, Style, StyleRef};
+use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrush, ImageData, Style, StyleRef};
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
-#[derive(Clone)]
-pub enum RenderCommand {
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum RenderCommand<Font = FontData, Image = ImageData> {
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
@@ -17,11 +21,11 @@ pub enum RenderCommand {
     /// Pops the current layer.
     PopLayer,
     /// Strokes a shape using the specified style and brush.
-    Stroke(StrokeCommand),
+    Stroke(StrokeCommand<Image>),
     /// Fills a shape using the specified style and brush.
-    Fill(FillCommand),
+    Fill(FillCommand<Image>),
     /// Draws a run of glyphs
-    GlyphRun(GlyphRunCommand),
+    GlyphRun(GlyphRunCommand<Font, Image>),
     /// Draw a rounded rectangle blurred with a gaussian filter.
     BoxShadow(BoxShadowCommand),
 }
@@ -46,53 +50,61 @@ impl RenderCommand {
 /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LayerCommand {
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
 }
 
 /// Pushes a new clip layer clipped by the specified shape.
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ClipCommand {
     pub transform: Affine,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
 }
 
 /// Strokes a shape using the specified style and brush.
-#[derive(Clone)]
-pub struct StrokeCommand {
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct StrokeCommand<Image> {
     pub style: Stroke,
     pub transform: Affine,
-    pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
 }
 
 /// Fills a shape using the specified style and brush.
-#[derive(Clone)]
-pub struct FillCommand {
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct FillCommand<Image> {
     pub fill: Fill,
     pub transform: Affine,
-    pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
 }
 
 /// Draws a run of glyphs
-#[derive(Clone)]
-pub struct GlyphRunCommand {
-    pub font_data: FontData,
-    pub font_index: u32,
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GlyphRunCommand<Font = FontData, Image = ImageData> {
+    pub font_data: Font,
     pub font_size: f32,
     pub hint: bool,
     pub normalized_coords: Vec<NormalizedCoord>,
     pub style: Style,
-    pub brush: Brush,
+    pub brush: Brush<ImageBrush<Image>>,
     pub brush_alpha: f32,
     pub transform: Affine,
     pub glyph_transform: Option<Affine>,
@@ -100,7 +112,8 @@ pub struct GlyphRunCommand {
 }
 
 /// Draw a box shadow around a box
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoxShadowCommand {
     pub transform: Affine,
     pub rect: Rect,
@@ -111,7 +124,7 @@ pub struct BoxShadowCommand {
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
 /// and passed around.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub tolerance: f64,
     pub commands: Vec<RenderCommand>,
@@ -236,11 +249,9 @@ impl PaintScene for Scene {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph>,
     ) {
-        let font_index = font.index;
         let brush = self.convert_paintref(paint_ref.into());
         let glyph_run = GlyphRunCommand {
             font_data: font.clone(),
-            font_index,
             font_size,
             hint,
             normalized_coords: normalized_coords.to_vec(),
@@ -279,5 +290,27 @@ impl PaintScene for Scene {
                 .into_iter()
                 .map(|cmd| cmd.apply_transform(scene_transform)),
         );
+    }
+}
+
+/// Serde helper for serializing `BezPath` as an SVG path string.
+#[cfg(feature = "serde")]
+mod svg_path {
+    use kurbo::BezPath;
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(path: &BezPath, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&path.to_svg())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BezPath, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        BezPath::from_svg(&s).map_err(serde::de::Error::custom)
     }
 }

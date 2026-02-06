@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/anyrender",
+  "crates/anyrender_serialize",
   "crates/anyrender_skia",
   "crates/anyrender_vello",
   "crates/anyrender_vello_cpu",
@@ -11,6 +12,7 @@ members = [
   "crates/softbuffer_window_renderer",
   "examples/winit",
   "examples/bunnymark",
+  "examples/serialize",
 ]
 resolver = "2"
 
@@ -26,6 +28,7 @@ rust-version = "1.88.0"
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
 anyrender = { version = "0.7.0", path = "./crates/anyrender" }
+anyrender_serialize = { version = "0.1.0", path = "./crates/anyrender_serialize" }
 anyrender_skia = { version = "0.4.0", path = "./crates/anyrender_skia" }
 anyrender_vello = { version = "0.7.0", path = "./crates/anyrender_vello" }
 anyrender_vello_cpu = { version = "0.9.0", path = "./crates/anyrender_vello_cpu" }
@@ -34,6 +37,12 @@ anyrender_svg = { version = "0.8.0", path = "./crates/anyrender_svg" }
 wgpu_context = { version = "0.3.0", path = "./crates/wgpu_context" }
 pixels_window_renderer = { version = "0.2.0", path = "./crates/pixels_window_renderer" }
 softbuffer_window_renderer = { version = "0.2.0", path = "./crates/softbuffer_window_renderer" }
+
+# Serialization
+serde = "1.0.228"
+serde_json = "1.0"
+zip = { version = "2.1", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
 
 # Linebender
 color = "0.3"
