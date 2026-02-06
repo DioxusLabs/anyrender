@@ -9,7 +9,6 @@ use peniko::{
     BlendMode, BrushRef, Color, Compose, Fill, FontData, GradientKind, ImageBrushRef, Mix,
     StyleRef, color::palette,
 };
-use resvg::tiny_skia::StrokeDash;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -21,7 +20,7 @@ use swash::{
 use tiny_skia::{
     self, FillRule, FilterQuality, GradientStop, LineCap, LineJoin, LinearGradient, Mask, MaskType,
     Paint, Path, PathBuilder, Pattern, Pixmap, PixmapPaint, RadialGradient, Shader, SpreadMode,
-    Stroke, Transform,
+    Stroke, StrokeDash, Transform,
 };
 
 thread_local! {
@@ -900,9 +899,7 @@ enum BlendStrategy {
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
         #[allow(deprecated)]
-        (Mix::Normal, compose) => {
-            BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose))
-        }
+        (Mix::Normal, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
         (mix, compose) => BlendStrategy::MultiPass {
             first_pass: compose_to_tiny_blend_mode(compose),
