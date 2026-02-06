@@ -64,3 +64,9 @@ pollster = "0.4"
 
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
+
+# [patch.crates-io]
+# vello = { path = "../vello/vello" }
+# vello_cpu = { path = "../vello/sparse_strips/vello_cpu" }
+# vello_hybrid = { path = "../vello/sparse_strips/vello_hybrid" }
+# vello_common = { path = "../vello/sparse_strips/vello_common" }
