@@ -1,6 +1,6 @@
 use anyrender::{PaintScene, WindowRenderer};
 use anyrender_skia::SkiaWindowRenderer;
-use anyrender_tiny_skia::{TinySkiaImageRenderer, TinySkiaWindowRenderer};
+use anyrender_tiny_skia::TinySkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
