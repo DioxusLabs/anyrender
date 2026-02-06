@@ -19,7 +19,7 @@ fn test_empty_scene_roundtrip() {
     assert_scene_roundtrip(&Scene::new());
 }
 
-/// Tests that all non-image command types survive a roundtrip.
+/// Tests that all non-image and non-font command types survive a roundtrip.
 #[test]
 fn test_all_command_types_roundtrip() {
     let mut scene = Scene::new();
