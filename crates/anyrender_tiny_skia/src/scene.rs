@@ -25,7 +25,7 @@ use tiny_skia::{
 
 thread_local! {
     #[allow(clippy::type_complexity)]
-    static IMAGE_CACHE: RefCell<HashMap<Vec<u8>, (CacheColor, Rc<Pixmap>)>> = RefCell::new(HashMap::new());
+    static IMAGE_CACHE: RefCell<HashMap<u64, (CacheColor, Rc<Pixmap>)>> = RefCell::new(HashMap::new());
     #[allow(clippy::type_complexity)]
     // The cache key includes: (glyph_id, font_size_bits, coords_hash, hint, fill_rule, transform_hash, offset_hash), color
     static GLYPH_CACHE: RefCell<HashMap<((GlyphId, u32, u64, bool, u8, u64 ), u32), (CacheColor, Option<Rc<Glyph>>)>> = RefCell::new(HashMap::new());
@@ -33,7 +33,7 @@ thread_local! {
 }
 
 fn cache_image(cache_color: CacheColor, image: &ImageBrushRef) -> Option<Rc<Pixmap>> {
-    let data_key = image.image.data.data().to_vec();
+    let data_key = image.image.data.id();
 
     if let Some(cached_pixmap) = IMAGE_CACHE.with_borrow_mut(|ic| {
         if let Some((color, pixmap)) = ic.get_mut(&data_key) {
