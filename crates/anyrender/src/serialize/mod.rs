@@ -340,18 +340,16 @@ fn decode_png_to_rgba(png_data: &[u8]) -> Result<Vec<u8>, ArchiveError> {
 }
 
 /// Convert [`ImageData`] to RGBA8 format.
-fn convert_to_rgba(image: &ImageData) -> Result<Vec<u8>, ArchiveError> {
-    let data = image.data.data();
-
+fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
     match image.format {
-        ImageFormat::Rgba8 => Ok(data.to_vec()),
+        ImageFormat::Rgba8 => Ok(image.data.clone()),
         ImageFormat::Bgra8 => {
             // Swap B and R channels
-            let mut rgba = data.to_vec();
+            let mut rgba = image.data.data().to_vec();
             for chunk in rgba.chunks_exact_mut(4) {
                 chunk.swap(0, 2);
             }
-            Ok(rgba)
+            Ok(Blob::from(rgba))
         }
         // ImageFormat is non_exhaustive, so simply error out if we encounter an unknown format
         other => Err(ArchiveError::InvalidFormat(format!(
@@ -377,9 +375,9 @@ impl SceneArchive {
             .images
             .iter()
             .map(|image| {
-                let rgba_data = convert_to_rgba(image)?;
+                let data = convert_to_rgba(image)?;
                 Ok(ImageData {
-                    data: Blob::from(rgba_data),
+                    data,
                     format: ImageFormat::Rgba8,
                     alpha_type: image.alpha_type,
                     width: image.width,
