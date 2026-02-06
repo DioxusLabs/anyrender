@@ -88,7 +88,7 @@ jobs:
               os: windows-latest,
               cross: false,
               command: "test",
-              args: "--all --tests",
+              args: "--all --tests --all-features",
               setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
             }
           - {
@@ -97,7 +97,7 @@ jobs:
               os: macos-latest,
               cross: false,
               command: "test",
-              args: "--all --tests",
+              args: "--all --tests --all-features",
               setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
             }
           - {
@@ -106,7 +106,7 @@ jobs:
               os: ubuntu-latest,
               cross: false,
               command: "test",
-              args: "--all --tests",
+              args: "--all --tests --all-features",
             }
 
     name: Test (${{ matrix.platform.name }})
