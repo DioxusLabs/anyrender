@@ -859,6 +859,7 @@ fn brush_to_paint<'b>(
                         .unwrap_or_else(Transform::identity);
                     RadialGradient::new(
                         to_point(radial.start_center),
+                        radial.start_radius,
                         to_point(radial.end_center),
                         radial.end_radius,
                         stops,
