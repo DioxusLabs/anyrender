@@ -2750,7 +2750,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "serialize-example"
+name = "serialize"
 version = "0.1.0"
 dependencies = [
  "anyrender",
