@@ -2,14 +2,15 @@
 
 use std::io::{Cursor, Read};
 
-use anyrender::PaintScene;
 use anyrender::recording::{RenderCommand, Scene};
 use anyrender::serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand,
 };
+use anyrender::{Glyph, PaintScene};
 use kurbo::{Affine, Rect, Stroke};
 use peniko::{
-    Blob, Brush, Color, Compose, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
+    Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
+    ImageFormat, Mix,
 };
 use zip::ZipArchive;
 
@@ -200,6 +201,110 @@ fn test_multiple_different_images() {
 }
 
 #[test]
+fn test_glyph_run_roundtrip() {
+    let font = roboto_font();
+    let font_bytes = font.data.data().to_vec();
+
+    let mut scene = Scene::new();
+    let glyphs = [
+        Glyph {
+            id: 43,
+            x: 0.0,
+            y: 0.0,
+        },
+        Glyph {
+            id: 72,
+            x: 10.0,
+            y: 0.0,
+        },
+        Glyph {
+            id: 79,
+            x: 20.0,
+            y: 0.0,
+        },
+    ];
+    let font_size = 16.0;
+    let hint = false;
+    let normalized_coords = [];
+    let style = Fill::NonZero;
+    let brush = Color::from_rgb8(0, 0, 0);
+    let brush_alpha = 1.0;
+    let transform = Affine::translate((10.0, 50.0));
+    let glyph_transform = None;
+    scene.draw_glyphs(
+        &font,
+        font_size,
+        hint,
+        &normalized_coords,
+        style,
+        brush,
+        brush_alpha,
+        transform,
+        glyph_transform,
+        glyphs.into_iter(),
+    );
+
+    let data = serialize_to_vec(&scene).unwrap();
+    let archive = archive_deserialize_from_slice(&data).unwrap();
+
+    // Verify font metadata
+    assert_eq!(archive.manifest.fonts.len(), 1);
+    assert_eq!(archive.manifest.fonts[0].entry.size, font_bytes.len());
+    assert_eq!(archive.manifest.fonts[0].index, 0);
+
+    // Verify font bytes
+    assert_eq!(archive.fonts[0].data.data(), font_bytes.as_slice());
+
+    // Verify the scene roundtrip
+    let restored = archive.to_scene().unwrap();
+    assert_eq!(restored.commands.len(), 1);
+
+    match &restored.commands[0] {
+        RenderCommand::GlyphRun(glyph_run) => {
+            assert_eq!(glyph_run.font_data.data.data(), font_bytes.as_slice());
+            assert_eq!(glyph_run.font_size, font_size);
+            assert_eq!(glyph_run.hint, hint);
+            assert_eq!(glyph_run.brush_alpha, brush_alpha);
+            assert_eq!(glyph_run.transform, transform);
+            assert_eq!(glyph_run.glyph_transform, glyph_transform);
+            assert_eq!(glyph_run.glyphs, glyphs);
+        }
+        other => panic!("Expected GlyphRun command, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_font_deduplication() {
+    let font = roboto_font();
+
+    let mut scene = Scene::new();
+    // Two glyph runs with the same font
+    for x_offset in [0.0, 100.0] {
+        scene.draw_glyphs(
+            &font,
+            12.0,
+            false,
+            &[],
+            Fill::NonZero,
+            Color::from_rgb8(0, 0, 0),
+            1.0,
+            Affine::translate((x_offset, 0.0)),
+            None,
+            [Glyph {
+                id: 1,
+                x: 0.0,
+                y: 0.0,
+            }]
+            .into_iter(),
+        );
+    }
+
+    let archive = SceneArchive::from_scene(&scene).unwrap();
+    assert_eq!(archive.commands.len(), 2);
+    assert_eq!(archive.fonts.len(), 1); // deduplicated
+}
+
+#[test]
 fn test_resource_manifest_version() {
     assert_eq!(ResourceManifest::CURRENT_VERSION, 1);
 }
@@ -285,4 +390,9 @@ fn extract_image_pixels(scene: &Scene, command_index: usize) -> Vec<u8> {
         },
         other => panic!("Expected Fill command, got {other:?}"),
     }
+}
+
+fn roboto_font() -> FontData {
+    static ROBOTO_BYTES: &[u8] = include_bytes!("../../../assets/fonts/roboto/Roboto.ttf");
+    FontData::new(Blob::from(ROBOTO_BYTES.to_vec()), 0)
 }
