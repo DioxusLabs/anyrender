@@ -73,6 +73,9 @@ impl ResourceManifest {
 pub struct ImageMetadata {
     #[serde(flatten)]
     pub entry: ResourceEntry,
+    /// The original image format. Images are stored as RGBA8 in the archive
+    /// and converted back to the original format on reconstruction.
+    pub format: ImageFormat,
     pub alpha_type: ImageAlphaType,
     pub width: u32,
     pub height: u32,
@@ -339,6 +342,24 @@ fn decode_png_to_rgba(png_data: &[u8]) -> Result<Vec<u8>, ArchiveError> {
     Ok(img.into_rgba8().into_raw())
 }
 
+/// Convert RGBA8 data to the target [`ImageFormat`].
+fn convert_from_rgba(rgba_blob: &Blob<u8>, target: ImageFormat) -> Result<Blob<u8>, ArchiveError> {
+    match target {
+        ImageFormat::Rgba8 => Ok(rgba_blob.clone()),
+        ImageFormat::Bgra8 => {
+            // Swap R and B channels
+            let mut bgra = rgba_blob.data().to_vec();
+            for chunk in bgra.chunks_exact_mut(4) {
+                chunk.swap(0, 2);
+            }
+            Ok(Blob::from(bgra))
+        }
+        other => Err(ArchiveError::InvalidFormat(format!(
+            "Unsupported image format: {other:?}"
+        ))),
+    }
+}
+
 /// Convert [`ImageData`] to RGBA8 format.
 fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
     match image.format {
@@ -387,8 +408,9 @@ impl SceneArchive {
             .collect::<Result<Vec<_>, ArchiveError>>()?;
 
         // Add image metadata
-        for (idx, image) in images.iter().enumerate() {
-            let data = image.data.data();
+        for (idx, (original, normalized)) in collector.images.iter().zip(images.iter()).enumerate()
+        {
+            let data = normalized.data.data();
             let hash = sha256_hex(data);
             let path = format!("images/{}.png", hash);
 
@@ -400,9 +422,10 @@ impl SceneArchive {
                     sha256_hash: hash,
                     path,
                 },
-                alpha_type: image.alpha_type,
-                width: image.width,
-                height: image.height,
+                format: original.format,
+                alpha_type: original.alpha_type,
+                width: original.width,
+                height: original.height,
             });
         }
 
@@ -433,7 +456,24 @@ impl SceneArchive {
 
     /// Convert this archive back to a Scene.
     pub fn to_scene(&self) -> Result<Scene, ArchiveError> {
-        let reconstructor = ResourceReconstructor::new(self.fonts.clone(), self.images.clone());
+        // Convert images back to their original format
+        let images: Vec<ImageData> = self
+            .images
+            .iter()
+            .zip(self.manifest.images.iter())
+            .map(|(image, meta)| {
+                let data = convert_from_rgba(&image.data, meta.format)?;
+                Ok(ImageData {
+                    data,
+                    format: meta.format,
+                    alpha_type: image.alpha_type,
+                    width: image.width,
+                    height: image.height,
+                })
+            })
+            .collect::<Result<Vec<_>, ArchiveError>>()?;
+
+        let reconstructor = ResourceReconstructor::new(self.fonts.clone(), images);
 
         let commands: Result<Vec<_>, _> = self
             .commands
