@@ -151,8 +151,6 @@ dependencies = [
  "kurbo",
  "peniko",
  "pixels_window_renderer",
- "raw-window-handle",
- "softbuffer",
  "softbuffer_window_renderer",
  "swash",
  "tiny-skia",
