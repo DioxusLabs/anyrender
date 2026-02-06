@@ -201,7 +201,7 @@ fn create_checkerboard_image(width: u32, height: u32) -> ImageData {
     }
 }
 
-/// Render a scene to an RGBA buffer using the CPU renderer.
+/// Render a scene to an RGBA buffer using Vello CPU.
 fn render_scene_to_buffer(scene: &Scene) -> Vec<u8> {
     render_to_buffer::<VelloCpuImageRenderer, _>(
         |painter| {
