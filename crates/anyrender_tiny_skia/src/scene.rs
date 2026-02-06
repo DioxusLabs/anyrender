@@ -575,7 +575,7 @@ impl PaintScene for TinySkiaScenePainter {
     ) {
         let blend: BlendMode = blend.into();
         #[allow(deprecated)]
-        if alpha == 1. && matches!(blend.mix, Mix::Normal | Mix::Clip) {
+        if alpha == 1. && matches!(blend.mix, Mix::Normal) {
             let layer = self.non_clip_layer();
 
             // Capture the current mask state before applying new clip
@@ -588,6 +588,9 @@ impl PaintScene for TinySkiaScenePainter {
             self.layers.push(LayerOrClip::Layer(layer));
             self.last_non_clip_layer = self.layers.len() - 1;
         }
+    }
+    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+        self.push_layer(Mix::Normal, 1.0, transform, clip);
     }
 
     fn pop_layer(&mut self) {
@@ -897,7 +900,7 @@ enum BlendStrategy {
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
         #[allow(deprecated)]
-        (Mix::Normal | Mix::Clip, compose) => {
+        (Mix::Normal, compose) => {
             BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose))
         }
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
@@ -945,8 +948,6 @@ fn mix_to_tiny_blend_mode(mix: Mix) -> TinyBlendMode {
         Mix::Saturation => TinyBlendMode::Saturation,
         Mix::Color => TinyBlendMode::Color,
         Mix::Luminosity => TinyBlendMode::Luminosity,
-        #[allow(deprecated)]
-        Mix::Clip => TinyBlendMode::SourceOver,
     }
 }
 
