@@ -137,7 +137,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 width,
                 height,
                 present_mode: PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
+                desired_maximum_frame_latency: 1,
                 alpha_mode: wgpu::CompositeAlphaMode::Auto,
                 view_formats: vec![],
             },

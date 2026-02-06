@@ -13,6 +13,7 @@ anyrender = { workspace = true }
 anyrender_vello = { workspace = true }
 anyrender_skia = { workspace = true }
 anyrender_vello_hybrid = { workspace = true }
+anyrender_tiny_skia = { workspace = true }
 anyrender_vello_cpu = { workspace = true, features = [
   "pixels_window_renderer",
   "softbuffer_window_renderer",
