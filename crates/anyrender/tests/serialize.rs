@@ -1,3 +1,5 @@
+#![cfg(feature = "serialize")]
+
 //! Integration tests for scene serialization.
 
 use std::io::{Cursor, Read};
