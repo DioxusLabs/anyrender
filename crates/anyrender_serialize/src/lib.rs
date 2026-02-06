@@ -24,7 +24,7 @@ use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, S
 mod json_formatter;
 
 /// A render command with resources replaced by IDs.
-pub type SerializableRenderCommand = RenderCommand<ResourceId, ResourceId>;
+pub type SerializableRenderCommand = RenderCommand<SerializedFontRef, ResourceId>;
 
 /// A brush with images replaced by IDs.
 pub type SerializableBrush = Brush<ImageBrush<ResourceId>>;
@@ -33,6 +33,16 @@ pub type SerializableBrush = Brush<ImageBrush<ResourceId>>;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ResourceId(pub usize);
+
+/// A reference to a font in a serialized scene.
+///
+/// Pairs a [`ResourceId`] (which identifies the font file) with a collection index
+/// (which identifies a specific face).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerializedFontRef {
+    pub resource_id: ResourceId,
+    pub index: u32,
+}
 
 /// A scene archive that can be serialized to/from a zip file.
 #[derive(Clone)]
@@ -199,11 +209,13 @@ impl ResourceCollector {
                 shape: fill.shape.clone(),
             }),
             RenderCommand::GlyphRun(glyph_run) => {
-                let font_id = self.register_font(&glyph_run.font_data);
+                let resource_id = self.register_font(&glyph_run.font_data);
                 let brush = self.convert_brush(&glyph_run.brush);
                 SerializableRenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: font_id,
-                    font_index: glyph_run.font_index,
+                    font_data: SerializedFontRef {
+                        resource_id,
+                        index: glyph_run.font_data.index,
+                    },
                     font_size: glyph_run.font_size,
                     hint: glyph_run.hint,
                     normalized_coords: glyph_run.normalized_coords.clone(),
@@ -286,11 +298,11 @@ impl ResourceReconstructor {
                 shape: fill.shape.clone(),
             }),
             SerializableRenderCommand::GlyphRun(glyph_run) => {
-                let font_blob = self.get_font_blob(glyph_run.font_data)?;
+                let font_ref = &glyph_run.font_data;
+                let font_blob = self.get_font_blob(font_ref.resource_id)?;
                 let brush = self.convert_brush(&glyph_run.brush)?;
                 RenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: FontData::new(font_blob.clone(), glyph_run.font_index),
-                    font_index: glyph_run.font_index,
+                    font_data: FontData::new(font_blob.clone(), font_ref.index),
                     font_size: glyph_run.font_size,
                     hint: glyph_run.hint,
                     normalized_coords: glyph_run.normalized_coords.clone(),

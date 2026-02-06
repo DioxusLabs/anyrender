@@ -100,7 +100,6 @@ pub struct FillCommand<Image> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct GlyphRunCommand<Font = FontData, Image = ImageData> {
     pub font_data: Font,
-    pub font_index: u32,
     pub font_size: f32,
     pub hint: bool,
     pub normalized_coords: Vec<NormalizedCoord>,
@@ -250,11 +249,9 @@ impl PaintScene for Scene {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph>,
     ) {
-        let font_index = font.index;
         let brush = self.convert_paintref(paint_ref.into());
         let glyph_run = GlyphRunCommand {
             font_data: font.clone(),
-            font_index,
             font_size,
             hint,
             normalized_coords: normalized_coords.to_vec(),
