@@ -1,6 +1,6 @@
 use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene};
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
 use vello_cpu::{ImageSource, PaintType, Pixmap};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
@@ -10,7 +10,10 @@ fn anyrender_paint_to_vello_cpu_paint<'a>(paint: PaintRef<'a>) -> PaintType {
         Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
         Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
         Paint::Image(image) => PaintType::Image(ImageBrush {
+            #[cfg(not(feature = "experimental_image_cache"))]
             image: ImageSource::from_peniko_image_data(image.image),
+            #[cfg(feature = "experimental_image_cache")]
+            image: convert_image_cached(image.image),
             sampler: image.sampler,
         }),
         // TODO: custom paint
@@ -18,8 +21,8 @@ fn anyrender_paint_to_vello_cpu_paint<'a>(paint: PaintRef<'a>) -> PaintType {
     }
 }
 
-#[allow(unused)]
-fn convert_image_cached(image: &ImageData) -> ImageSource {
+#[cfg(feature = "experimental_image_cache")]
+fn convert_image_cached(image: &peniko::ImageData) -> ImageSource {
     use std::collections::HashMap;
     use std::sync::{LazyLock, Mutex};
     static CACHE: LazyLock<Mutex<HashMap<u64, ImageSource>>> =
