@@ -298,11 +298,13 @@ impl ResourceReconstructor {
                 shape: fill.shape.clone(),
             }),
             SerializableRenderCommand::GlyphRun(glyph_run) => {
-                let font_ref = &glyph_run.font_data;
-                let font_blob = self.get_font_blob(font_ref.resource_id)?;
+                let font_data = FontData::new(
+                    self.get_font_blob(glyph_run.font_data.resource_id)?.clone(),
+                    glyph_run.font_data.index,
+                );
                 let brush = self.convert_brush(&glyph_run.brush)?;
                 RenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: FontData::new(font_blob.clone(), font_ref.index),
+                    font_data,
                     font_size: glyph_run.font_size,
                     hint: glyph_run.hint,
                     normalized_coords: glyph_run.normalized_coords.clone(),
