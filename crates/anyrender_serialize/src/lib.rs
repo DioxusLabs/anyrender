@@ -7,13 +7,17 @@
 //! - `resources.json` - Metadata mapping resource files to IDs
 //! - `draw_commands.json` - Serialized draw commands referencing resources by ID
 //! - `images/<sha256_hash>.png` - Image files (PNG format)
-//! - `fonts/<sha256_hash>.ttf` - Font data files (TTF format)
+//! - `fonts/<sha256_hash>.woff2` - Font data files (WOFF2 format, subsetted)
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, Write};
 
 use image::{ImageBuffer, ImageEncoder, RgbaImage};
+use klippa::{Plan, SubsetFlags};
 use peniko::{Blob, Brush, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
+use read_fonts::FontRef;
+use read_fonts::collections::int_set::IntSet;
+use read_fonts::types::GlyphId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -49,8 +53,13 @@ pub struct FontResourceId {
 pub struct SceneArchive {
     pub manifest: ResourceManifest,
     pub commands: Vec<SerializableRenderCommand>,
-    pub fonts: Vec<Blob<u8>>,
+    pub fonts: Vec<FontData>,
     pub images: Vec<ImageData>,
+    /// Cached WOFF2-encoded font data (parallel to `fonts`).
+    /// Populated during `from_scene()` and `deserialize()` so that
+    /// `serialize()` can write it directly and the manifest hash stays
+    /// consistent.
+    font_woff2: Vec<Vec<u8>>,
 }
 
 /// The resources manifest stored in the archive.
@@ -66,7 +75,7 @@ pub struct ResourceManifest {
 
 impl ResourceManifest {
     /// Current archive format version. Bump this when the format changes.
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 2;
 
     pub fn new(tolerance: f64) -> Self {
         Self {
@@ -94,12 +103,14 @@ pub struct ImageMetadata {
 /// Metadata for a font resource.
 ///
 /// The font resource represents the raw font file data (which may be a font
-/// collection containing multiple faces). The collection index is stored in
-/// the drawing commands.
+/// collection containing multiple faces). After subsetting, TTC fonts are
+/// extracted to standalone fonts (index 0).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FontMetadata {
     #[serde(flatten)]
     pub entry: ResourceEntry,
+    /// Font collection index (0 for standalone fonts after TTC extraction).
+    pub index: u32,
 }
 
 /// Metadata for a resource in the archive.
@@ -125,12 +136,16 @@ pub enum ResourceKind {
 
 /// Collects and deduplicates resources from a scene.
 struct ResourceCollector {
-    /// Maps Blob ID to ResourceId for fonts
-    font_id_map: HashMap<u64, ResourceId>,
+    /// Maps (Blob ID, font index) to ResourceId for fonts.
+    /// Keyed by both blob and index so that different faces from the same TTC
+    /// are treated as separate resources (each will be subsetted independently).
+    font_id_map: HashMap<(u64, u32), ResourceId>,
     /// Maps Blob ID to ResourceId for images
     image_id_map: HashMap<u64, ResourceId>,
-    /// Collected font file blobs
-    fonts: Vec<Blob<u8>>,
+    /// Collected fonts
+    fonts: Vec<FontData>,
+    /// Glyph IDs used for each font resource (parallel to `fonts`)
+    font_glyph_ids: Vec<HashSet<u16>>,
     /// Collected images
     images: Vec<ImageData>,
 }
@@ -141,21 +156,31 @@ impl ResourceCollector {
             font_id_map: HashMap::new(),
             image_id_map: HashMap::new(),
             fonts: Vec::new(),
+            font_glyph_ids: Vec::new(),
             images: Vec::new(),
         }
     }
 
     /// Register a font and return its [`ResourceId`].
     fn register_font(&mut self, font: &FontData) -> ResourceId {
-        let blob_id = font.data.id();
-        if let Some(&id) = self.font_id_map.get(&blob_id) {
+        let key = (font.data.id(), font.index);
+        if let Some(&id) = self.font_id_map.get(&key) {
             return id;
         }
 
         let id = ResourceId(self.fonts.len());
-        self.font_id_map.insert(blob_id, id);
-        self.fonts.push(font.data.clone());
+        self.font_id_map.insert(key, id);
+        self.fonts.push(font.clone());
+        self.font_glyph_ids.push(HashSet::new());
         id
+    }
+
+    /// Record glyph IDs used for a font resource.
+    fn register_glyphs(&mut self, font_id: ResourceId, glyphs: &[anyrender::Glyph]) {
+        let glyph_set = &mut self.font_glyph_ids[font_id.0];
+        for glyph in glyphs {
+            glyph_set.insert(glyph.id as u16);
+        }
     }
 
     /// Register an image and return its [`ResourceId`].
@@ -210,6 +235,7 @@ impl ResourceCollector {
             }),
             RenderCommand::GlyphRun(glyph_run) => {
                 let resource_id = self.register_font(&glyph_run.font_data);
+                self.register_glyphs(resource_id, &glyph_run.glyphs);
                 let brush = self.convert_brush(&glyph_run.brush);
                 SerializableRenderCommand::GlyphRun(GlyphRunCommand {
                     font_data: FontResourceId {
@@ -236,17 +262,17 @@ impl ResourceCollector {
 
 /// Reconstructs resources from deserialized data.
 struct ResourceReconstructor {
-    font_blobs: Vec<Blob<u8>>,
+    fonts: Vec<FontData>,
     images: Vec<ImageData>,
 }
 
 impl ResourceReconstructor {
-    fn new(font_blobs: Vec<Blob<u8>>, images: Vec<ImageData>) -> Self {
-        Self { font_blobs, images }
+    fn new(fonts: Vec<FontData>, images: Vec<ImageData>) -> Self {
+        Self { fonts, images }
     }
 
-    fn get_font_blob(&self, id: ResourceId) -> Result<&Blob<u8>, ArchiveError> {
-        self.font_blobs
+    fn get_font(&self, id: ResourceId) -> Result<&FontData, ArchiveError> {
+        self.fonts
             .get(id.0)
             .ok_or(ArchiveError::ResourceNotFound(id))
     }
@@ -298,10 +324,7 @@ impl ResourceReconstructor {
                 shape: fill.shape.clone(),
             }),
             SerializableRenderCommand::GlyphRun(glyph_run) => {
-                let font_data = FontData::new(
-                    self.get_font_blob(glyph_run.font_data.resource_id)?.clone(),
-                    glyph_run.font_data.index,
-                );
+                let font_data = self.get_font(glyph_run.font_data.resource_id)?.clone();
                 let brush = self.convert_brush(&glyph_run.brush)?;
                 RenderCommand::GlyphRun(GlyphRunCommand {
                     font_data,
@@ -393,17 +416,74 @@ fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
     }
 }
 
+/// Decode a WOFF2 file back to OpenType/TTF using the `wuff` crate.
+fn decode_woff2_to_ttf(woff2_data: &[u8]) -> Result<Vec<u8>, ArchiveError> {
+    wuff::decompress_woff2(woff2_data)
+        .map_err(|e| ArchiveError::FontProcessing(format!("WOFF2 decoding failed: {e}")))
+}
+
 impl SceneArchive {
     /// Create a new SceneArchive from a recorded Scene.
+    ///
+    /// Font processing (powered by [klippa](https://github.com/googlefonts/fontations/tree/main/klippa)):
+    /// - TTC files are extracted to standalone fonts for each face used
+    /// - Fonts are subsetted to include only the glyphs referenced in the scene
+    /// - Original glyph IDs are preserved (RETAIN_GIDS) — unused slots become empty
+    /// - Fonts are stored as WOFF2 for compression
     pub fn from_scene(scene: &Scene) -> Result<Self, ArchiveError> {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new();
 
-        let commands: Vec<_> = scene
+        let mut commands: Vec<_> = scene
             .commands
             .iter()
             .map(|cmd| collector.convert_command(cmd))
             .collect();
+
+        // --- Font subsetting (using klippa from fontations) ---
+        // For each collected font, subset to only the glyphs used and extract
+        // from TTC to standalone TTF. We use RETAIN_GIDS so that original glyph
+        // IDs are preserved (unused slots become empty) — this avoids having to
+        // remap glyph IDs in draw commands.
+        let mut processed_fonts: Vec<FontData> = Vec::with_capacity(collector.fonts.len());
+
+        for (idx, font) in collector.fonts.iter().enumerate() {
+            let glyph_ids = &collector.font_glyph_ids[idx];
+
+            let font_ref = FontRef::from_index(font.data.data(), font.index)
+                .map_err(|e| ArchiveError::FontProcessing(format!("Failed to parse font: {e}")))?;
+
+            let mut input_gids: IntSet<GlyphId> = IntSet::empty();
+            for &gid in glyph_ids {
+                input_gids.insert(GlyphId::new(gid as u32));
+            }
+
+            let plan = Plan::new(
+                &input_gids,
+                &IntSet::empty(), // no unicode input
+                &font_ref,
+                SubsetFlags::SUBSET_FLAGS_RETAIN_GIDS, // keep original glyph IDs
+                &IntSet::empty(),                      // no tables to drop
+                &IntSet::empty(),                      // all scripts
+                &IntSet::empty(),                      // default layout features
+                &IntSet::empty(),                      // no name ID filter
+                &IntSet::empty(),                      // no name language filter
+            );
+
+            let subset_data = klippa::subset_font(&font_ref, &plan).map_err(|e| {
+                ArchiveError::FontProcessing(format!("Font subsetting failed: {e}"))
+            })?;
+
+            processed_fonts.push(FontData::new(Blob::from(subset_data), 0));
+        }
+
+        // Update font index in commands (fonts are now standalone after TTC extraction).
+        // Glyph IDs are preserved thanks to RETAIN_GIDS.
+        for cmd in &mut commands {
+            if let SerializableRenderCommand::GlyphRun(glyph_run) = cmd {
+                glyph_run.font_data.index = 0;
+            }
+        }
 
         // Normalize all images to RGBA8
         let images: Vec<ImageData> = collector
@@ -443,27 +523,37 @@ impl SceneArchive {
             });
         }
 
-        // Add font metadata
-        for (idx, blob) in collector.fonts.iter().enumerate() {
-            let data = blob.data();
-            let hash = sha256_hex(data);
-            let path = format!("fonts/{}.ttf", hash);
+        // WOFF2-encode each font and build metadata.
+        // We hash the WOFF2 bytes (not the TTF bytes) because the WOFF2
+        // encode→decode round-trip does not preserve the exact byte layout
+        // of the original sfnt. Hashing the stored format ensures the hash
+        // can be verified on deserialization.
+        let mut font_woff2 = Vec::with_capacity(processed_fonts.len());
+        for (idx, font) in processed_fonts.iter().enumerate() {
+            let ttf_data = font.data.data();
+            let woff2_data = ttf2woff2::encode(ttf_data, ttf2woff2::BrotliQuality::default())
+                .map_err(|e| ArchiveError::FontProcessing(format!("WOFF2 encoding failed: {e}")))?;
+            let hash = sha256_hex(&woff2_data);
+            let path = format!("fonts/{}.woff2", hash);
 
             manifest.fonts.push(FontMetadata {
                 entry: ResourceEntry {
                     id: ResourceId(idx),
                     kind: ResourceKind::Font,
-                    size: data.len(),
+                    size: ttf_data.len(),
                     sha256_hash: hash,
                     path,
                 },
+                index: 0, // Standalone after TTC extraction + subsetting
             });
+            font_woff2.push(woff2_data);
         }
 
         Ok(Self {
             manifest,
             commands,
-            fonts: collector.fonts,
+            fonts: processed_fonts,
+            font_woff2,
             images,
         })
     }
@@ -528,11 +618,11 @@ impl SceneArchive {
             zip.write_all(&png_data)?;
         }
 
-        // Write font files
-        for (idx, blob) in self.fonts.iter().enumerate() {
+        // Write font files as WOFF2
+        for (idx, woff2_data) in self.font_woff2.iter().enumerate() {
             let path = &self.manifest.fonts[idx].entry.path;
             zip.start_file(path, options)?;
-            zip.write_all(blob.data())?;
+            zip.write_all(woff2_data)?;
         }
 
         zip.finish()?;
@@ -590,29 +680,50 @@ impl SceneArchive {
             });
         }
 
-        // Read fonts
+        // Read fonts (v1: raw TTF, v2+: WOFF2 compressed)
         let mut fonts = Vec::with_capacity(manifest.fonts.len());
+        let mut font_woff2 = Vec::with_capacity(manifest.fonts.len());
         for meta in &manifest.fonts {
             let mut file = zip.by_name(&meta.entry.path)?;
-            let mut data = Vec::with_capacity(meta.entry.size);
-            file.read_to_end(&mut data)?;
+            let mut raw_data = Vec::new();
+            file.read_to_end(&mut raw_data)?;
 
-            // Verify hash
-            let hash = sha256_hex(&data);
-            if hash != meta.entry.sha256_hash {
-                return Err(ArchiveError::InvalidFormat(format!(
-                    "Hash mismatch for {}: expected {}, got {}",
-                    meta.entry.path, meta.entry.sha256_hash, hash
-                )));
+            if manifest.version >= 2 {
+                // v2+: data is WOFF2 — verify hash against stored WOFF2 bytes
+                let hash = sha256_hex(&raw_data);
+                if hash != meta.entry.sha256_hash {
+                    return Err(ArchiveError::InvalidFormat(format!(
+                        "Hash mismatch for {}: expected {}, got {}",
+                        meta.entry.path, meta.entry.sha256_hash, hash
+                    )));
+                }
+                let ttf_data = decode_woff2_to_ttf(&raw_data)?;
+                fonts.push(FontData::new(Blob::from(ttf_data), meta.index));
+                font_woff2.push(raw_data);
+            } else {
+                // v1: data is raw TTF — verify hash against TTF bytes
+                let hash = sha256_hex(&raw_data);
+                if hash != meta.entry.sha256_hash {
+                    return Err(ArchiveError::InvalidFormat(format!(
+                        "Hash mismatch for {}: expected {}, got {}",
+                        meta.entry.path, meta.entry.sha256_hash, hash
+                    )));
+                }
+                // Re-encode to WOFF2 for the cache so serialize() works
+                let woff2_data = ttf2woff2::encode(&raw_data, ttf2woff2::BrotliQuality::default())
+                    .map_err(|e| {
+                        ArchiveError::FontProcessing(format!("WOFF2 encoding failed: {e}"))
+                    })?;
+                font_woff2.push(woff2_data);
+                fonts.push(FontData::new(Blob::from(raw_data), meta.index));
             }
-
-            fonts.push(Blob::from(data));
         }
 
         Ok(Self {
             manifest,
             commands,
             fonts,
+            font_woff2,
             images,
         })
     }
@@ -624,6 +735,7 @@ pub enum ArchiveError {
     Json(serde_json::Error),
     Zip(zip::result::ZipError),
     Image(image::ImageError),
+    FontProcessing(String),
     InvalidFormat(String),
     ResourceNotFound(ResourceId),
     UnsupportedVersion(u32),
@@ -636,6 +748,7 @@ impl std::fmt::Display for ArchiveError {
             ArchiveError::Json(e) => write!(f, "JSON error: {}", e),
             ArchiveError::Zip(e) => write!(f, "Zip error: {}", e),
             ArchiveError::Image(e) => write!(f, "Image error: {}", e),
+            ArchiveError::FontProcessing(msg) => write!(f, "Font processing error: {}", msg),
             ArchiveError::InvalidFormat(msg) => write!(f, "Invalid format: {}", msg),
             ArchiveError::ResourceNotFound(id) => write!(f, "Resource not found: {:?}", id),
             ArchiveError::UnsupportedVersion(v) => write!(f, "Unsupported version: {}", v),

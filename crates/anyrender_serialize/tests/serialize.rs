@@ -203,7 +203,7 @@ fn test_multiple_different_images() {
 #[test]
 fn test_glyph_run_roundtrip() {
     let font = roboto_font();
-    let font_bytes = font.data.data().to_vec();
+    let original_font_size = font.data.data().len();
 
     let mut scene = Scene::new();
     let glyphs = [
@@ -249,10 +249,22 @@ fn test_glyph_run_roundtrip() {
 
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
-    assert_eq!(archive.manifest.fonts[0].entry.size, font_bytes.len());
+    assert_eq!(archive.manifest.fonts[0].index, 0); // Subsetted to standalone
+    assert!(
+        archive.manifest.fonts[0].entry.size < original_font_size,
+        "Subsetted font ({} bytes) should be smaller than original ({} bytes)",
+        archive.manifest.fonts[0].entry.size,
+        original_font_size
+    );
 
-    // Verify font bytes
-    assert_eq!(archive.fonts[0].data(), font_bytes.as_slice());
+    // Verify font is subsetted (smaller than original)
+    assert!(archive.fonts[0].data.data().len() < original_font_size);
+
+    // Verify the WOFF2 file path
+    assert!(
+        archive.manifest.fonts[0].entry.path.ends_with(".woff2"),
+        "Font path should use .woff2 extension"
+    );
 
     // Verify the scene roundtrip
     let restored = archive.to_scene().unwrap();
@@ -260,14 +272,21 @@ fn test_glyph_run_roundtrip() {
 
     match &restored.commands[0] {
         RenderCommand::GlyphRun(glyph_run) => {
-            assert_eq!(glyph_run.font_data.data.data(), font.data.data());
-            assert_eq!(glyph_run.font_data.index, font.index);
             assert_eq!(glyph_run.font_size, font_size);
             assert_eq!(glyph_run.hint, hint);
             assert_eq!(glyph_run.brush_alpha, brush_alpha);
             assert_eq!(glyph_run.transform, transform);
             assert_eq!(glyph_run.glyph_transform, glyph_transform);
-            assert_eq!(glyph_run.glyphs, glyphs);
+            assert_eq!(glyph_run.font_data.index, 0); // Standalone after subsetting
+            assert_eq!(glyph_run.glyphs.len(), 3);
+            // Glyph positions are preserved
+            assert_eq!(glyph_run.glyphs[0].x, 0.0);
+            assert_eq!(glyph_run.glyphs[1].x, 10.0);
+            assert_eq!(glyph_run.glyphs[2].x, 20.0);
+            // Glyph IDs are preserved (RETAIN_GIDS keeps original IDs)
+            assert_eq!(glyph_run.glyphs[0].id, 43);
+            assert_eq!(glyph_run.glyphs[1].id, 72);
+            assert_eq!(glyph_run.glyphs[2].id, 79);
         }
         other => panic!("Expected GlyphRun command, got {other:?}"),
     }
@@ -306,7 +325,7 @@ fn test_font_deduplication() {
 
 #[test]
 fn test_resource_manifest_version() {
-    assert_eq!(ResourceManifest::CURRENT_VERSION, 1);
+    assert_eq!(ResourceManifest::CURRENT_VERSION, 2);
 }
 
 #[test]
@@ -330,7 +349,7 @@ fn test_archive_contains_expected_files() {
         .read_to_string(&mut resources_json)
         .unwrap();
     let manifest: ResourceManifest = serde_json::from_str(&resources_json).unwrap();
-    assert_eq!(manifest.version, 1);
+    assert_eq!(manifest.version, 2);
     assert!(manifest.images.is_empty());
     assert!(manifest.fonts.is_empty());
 
