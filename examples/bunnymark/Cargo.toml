@@ -15,4 +15,5 @@ anyrender_vello = { workspace = true, features = ["log_frame_times"] }
 anyrender_vello_hybrid = { workspace = true, features = ["log_frame_times"] }
 anyrender_vello_cpu = { workspace = true, features = ["pixels_window_renderer", "multithreading", "log_frame_times"] }
 anyrender_skia = { workspace = true, features = ["log_frame_times"] }
+pixels_window_renderer = { workspace = true }
 fastrand = "2.3"
