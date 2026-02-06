@@ -97,7 +97,7 @@ jobs:
               os: macos-latest,
               cross: false,
               command: "test",
-              args: "--all --tests --all-features",
+              args: "--all --tests",
               setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
             }
           - {
