@@ -40,7 +40,6 @@ mod null_backend;
 pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
-
 #[cfg(feature = "serialize")]
 pub mod serialize;
 

@@ -9,7 +9,7 @@ license.workspace = true
 edition.workspace = true
 
 [features]
-default = ["serialize"]
+default = []
 serialize = [
   "dep:serde",
   "dep:serde_json",

@@ -39,7 +39,6 @@ softbuffer_window_renderer = { version = "0.2.0", path = "./crates/softbuffer_wi
 # Serialization
 serde = "1.0.228"
 serde_json = "1.0"
-serde-jsonlines = "0.7"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
