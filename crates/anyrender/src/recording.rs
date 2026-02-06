@@ -56,6 +56,7 @@ pub struct LayerCommand {
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
+    #[cfg_attr(feature = "serialize", serde(with = "crate::serialize::svg_path"))]
     pub clip: BezPath, // TODO: more shape options
 }
 
@@ -66,6 +67,7 @@ pub struct LayerCommand {
 #[cfg_attr(feature = "serialize", derive(Serialize, Deserialize))]
 pub struct ClipCommand {
     pub transform: Affine,
+    #[cfg_attr(feature = "serialize", serde(with = "crate::serialize::svg_path"))]
     pub clip: BezPath, // TODO: more shape options
 }
 
@@ -77,6 +79,7 @@ pub struct StrokeCommand<Image> {
     pub transform: Affine,
     pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
+    #[cfg_attr(feature = "serialize", serde(with = "crate::serialize::svg_path"))]
     pub shape: BezPath, // TODO: more shape options
 }
 
@@ -88,6 +91,7 @@ pub struct FillCommand<Image> {
     pub transform: Affine,
     pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
+    #[cfg_attr(feature = "serialize", serde(with = "crate::serialize::svg_path"))]
     pub shape: BezPath, // TODO: more shape options
 }
 

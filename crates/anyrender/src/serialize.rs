@@ -650,3 +650,24 @@ impl From<image::ImageError> for ArchiveError {
         ArchiveError::Image(e)
     }
 }
+
+/// Serde helper for serializing `BezPath` as an SVG path string.
+pub(crate) mod svg_path {
+    use kurbo::BezPath;
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(path: &BezPath, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&path.to_svg())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<BezPath, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        BezPath::from_svg(&s).map_err(serde::de::Error::custom)
+    }
+}
