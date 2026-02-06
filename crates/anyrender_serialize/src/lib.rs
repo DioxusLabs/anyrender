@@ -24,7 +24,7 @@ use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, S
 mod json_formatter;
 
 /// A render command with resources replaced by IDs.
-pub type SerializableRenderCommand = RenderCommand<SerializedFontRef, ResourceId>;
+pub type SerializableRenderCommand = RenderCommand<SerializedFontData, ResourceId>;
 
 /// A brush with images replaced by IDs.
 pub type SerializableBrush = Brush<ImageBrush<ResourceId>>;
@@ -39,7 +39,7 @@ pub struct ResourceId(pub usize);
 /// Pairs a [`ResourceId`] (which identifies the font file) with a collection index
 /// (which identifies a specific face).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SerializedFontRef {
+pub struct SerializedFontData {
     pub resource_id: ResourceId,
     pub index: u32,
 }
@@ -212,7 +212,7 @@ impl ResourceCollector {
                 let resource_id = self.register_font(&glyph_run.font_data);
                 let brush = self.convert_brush(&glyph_run.brush);
                 SerializableRenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: SerializedFontRef {
+                    font_data: SerializedFontData {
                         resource_id,
                         index: glyph_run.font_data.index,
                     },
