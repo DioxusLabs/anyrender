@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use crate::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, StrokeCommand};
+use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, StrokeCommand};
 
 mod json_formatter;
 
@@ -604,33 +604,6 @@ impl SceneArchive {
     }
 }
 
-impl Scene {
-    /// Serialize this scene to a zip archive.
-    ///
-    /// For example:
-    ///
-    /// ```rs,ignore
-    /// let mut buffer = Cursor::new(Vec::new());
-    /// scene.serialize(&mut buffer)?;
-    /// let data = buffer.into_inner();
-    /// ```
-    pub fn serialize<W: Write + Seek>(&self, writer: W) -> Result<(), ArchiveError> {
-        SceneArchive::from_scene(self)?.serialize(writer)
-    }
-
-    /// Deserialize a scene from a zip archive.
-    ///
-    /// For example:
-    ///
-    /// ```rs,ignore
-    /// let data = Vec::new();
-    /// let scene = Scene::deserialize(Cursor::new(data))?;
-    /// ```
-    pub fn deserialize<R: Read + Seek>(reader: R) -> Result<Self, ArchiveError> {
-        SceneArchive::deserialize(reader)?.to_scene()
-    }
-}
-
 #[derive(Debug)]
 pub enum ArchiveError {
     Io(std::io::Error),
@@ -689,26 +662,5 @@ impl From<zip::result::ZipError> for ArchiveError {
 impl From<image::ImageError> for ArchiveError {
     fn from(e: image::ImageError) -> Self {
         ArchiveError::Image(e)
-    }
-}
-
-/// Serde helper for serializing `BezPath` as an SVG path string.
-pub(crate) mod svg_path {
-    use kurbo::BezPath;
-    use serde::{self, Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(path: &BezPath, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&path.to_svg())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<BezPath, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        BezPath::from_svg(&s).map_err(serde::de::Error::custom)
     }
 }

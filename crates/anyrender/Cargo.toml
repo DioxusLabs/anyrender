@@ -10,12 +10,8 @@ edition.workspace = true
 
 [features]
 default = []
-serialize = [
+serde = [
   "dep:serde",
-  "dep:serde_json",
-  "dep:zip",
-  "dep:sha2",
-  "dep:image",
   "kurbo/serde",
   "peniko/serde",
 ]
@@ -25,13 +21,5 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 raw-window-handle = { workspace = true }
 
-# Serialization
+# Serde
 serde = { workspace = true, features = ["derive"], optional = true }
-serde_json = { workspace = true, optional = true }
-zip = { workspace = true, optional = true }
-sha2 = { workspace = true, optional = true }
-image = { workspace = true, features = ["png"], optional = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }
-zip = { workspace = true }

@@ -1,14 +1,12 @@
-#![cfg(feature = "serialize")]
-
 //! Integration tests for scene serialization.
 
 use std::io::{Cursor, Read};
 
 use anyrender::recording::{RenderCommand, Scene};
-use anyrender::serialize::{
+use anyrender::{Glyph, PaintScene};
+use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand,
 };
-use anyrender::{Glyph, PaintScene};
 use kurbo::{Affine, Rect, Stroke};
 use peniko::{
     Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
@@ -350,12 +348,12 @@ fn test_archive_contains_expected_files() {
 
 fn serialize_to_vec(scene: &Scene) -> Result<Vec<u8>, ArchiveError> {
     let mut buf = Cursor::new(Vec::new());
-    scene.serialize(&mut buf)?;
+    SceneArchive::from_scene(scene)?.serialize(&mut buf)?;
     Ok(buf.into_inner())
 }
 
 fn deserialize_from_slice(data: &[u8]) -> Result<Scene, ArchiveError> {
-    Scene::deserialize(Cursor::new(data))
+    SceneArchive::deserialize(Cursor::new(data))?.to_scene()
 }
 
 fn archive_serialize_to_vec(archive: &SceneArchive) -> Result<Vec<u8>, ArchiveError> {

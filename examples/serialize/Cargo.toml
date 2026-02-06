@@ -9,5 +9,6 @@ publish = false
 kurbo = { workspace = true }
 peniko = { workspace = true }
 image = { workspace = true, features = ["png"] }
-anyrender = { workspace = true, features = ["serialize"] }
+anyrender = { workspace = true, features = ["serde"] }
+anyrender_serialize = { workspace = true }
 anyrender_vello_cpu = { workspace = true }

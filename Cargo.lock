@@ -92,10 +92,20 @@ dependencies = [
 name = "anyrender"
 version = "0.7.0"
 dependencies = [
- "image",
  "kurbo",
  "peniko",
  "raw-window-handle",
+ "serde",
+]
+
+[[package]]
+name = "anyrender_serialize"
+version = "0.7.0"
+dependencies = [
+ "anyrender",
+ "image",
+ "kurbo",
+ "peniko",
  "serde",
  "serde_json",
  "sha2",
@@ -2754,6 +2764,7 @@ name = "serialize"
 version = "0.1.0"
 dependencies = [
  "anyrender",
+ "anyrender_serialize",
  "anyrender_vello_cpu",
  "image",
  "kurbo",

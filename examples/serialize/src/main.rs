@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyrender::recording::Scene;
 use anyrender::{PaintScene, render_to_buffer};
+use anyrender_serialize::SceneArchive;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
 use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
@@ -29,11 +30,14 @@ fn main() {
     let archive_path = Path::new(OUTPUT_DIR).join("demo_scene.anyrender.zip");
     let file = File::create(&archive_path).unwrap();
     let writer = BufWriter::new(file);
-    original_scene.serialize(writer).unwrap();
+    SceneArchive::from_scene(&original_scene)
+        .unwrap()
+        .serialize(writer)
+        .unwrap();
 
     // Deserialize
     let file = File::open(&archive_path).unwrap();
-    let deserialized_scene = Scene::deserialize(file).unwrap();
+    let deserialized_scene = SceneArchive::deserialize(file).unwrap().to_scene().unwrap();
 
     // Render deserialized scene to verify against original
     let pixels = render_scene_to_buffer(&deserialized_scene);
