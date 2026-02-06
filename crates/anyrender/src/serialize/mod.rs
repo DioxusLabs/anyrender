@@ -39,7 +39,7 @@ pub struct ResourceId(pub usize);
 pub struct SceneArchive {
     pub manifest: ResourceManifest,
     pub commands: Vec<SerializableRenderCommand>,
-    pub fonts: Vec<FontData>,
+    pub fonts: Vec<Blob<u8>>,
     pub images: Vec<ImageData>,
 }
 
@@ -79,12 +79,14 @@ pub struct ImageMetadata {
 }
 
 /// Metadata for a font resource.
+///
+/// The font resource represents the raw font file data (which may be a font
+/// collection containing multiple faces). The collection index is stored in
+/// the drawing commands.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FontMetadata {
     #[serde(flatten)]
     pub entry: ResourceEntry,
-    /// Font collection index
-    pub index: u32,
 }
 
 /// Metadata for a resource in the archive.
@@ -114,8 +116,8 @@ struct ResourceCollector {
     font_id_map: HashMap<u64, ResourceId>,
     /// Maps Blob ID to ResourceId for images
     image_id_map: HashMap<u64, ResourceId>,
-    /// Collected fonts
-    fonts: Vec<FontData>,
+    /// Collected font file blobs
+    fonts: Vec<Blob<u8>>,
     /// Collected images
     images: Vec<ImageData>,
 }
@@ -139,7 +141,7 @@ impl ResourceCollector {
 
         let id = ResourceId(self.fonts.len());
         self.font_id_map.insert(blob_id, id);
-        self.fonts.push(font.clone());
+        self.fonts.push(font.data.clone());
         id
     }
 
@@ -219,17 +221,17 @@ impl ResourceCollector {
 
 /// Reconstructs resources from deserialized data.
 struct ResourceReconstructor {
-    fonts: Vec<FontData>,
+    font_blobs: Vec<Blob<u8>>,
     images: Vec<ImageData>,
 }
 
 impl ResourceReconstructor {
-    fn new(fonts: Vec<FontData>, images: Vec<ImageData>) -> Self {
-        Self { fonts, images }
+    fn new(font_blobs: Vec<Blob<u8>>, images: Vec<ImageData>) -> Self {
+        Self { font_blobs, images }
     }
 
-    fn get_font(&self, id: ResourceId) -> Result<&FontData, ArchiveError> {
-        self.fonts
+    fn get_font_blob(&self, id: ResourceId) -> Result<&Blob<u8>, ArchiveError> {
+        self.font_blobs
             .get(id.0)
             .ok_or(ArchiveError::ResourceNotFound(id))
     }
@@ -281,10 +283,10 @@ impl ResourceReconstructor {
                 shape: fill.shape.clone(),
             }),
             SerializableRenderCommand::GlyphRun(glyph_run) => {
-                let font = self.get_font(glyph_run.font_data)?;
+                let font_blob = self.get_font_blob(glyph_run.font_data)?;
                 let brush = self.convert_brush(&glyph_run.brush)?;
                 RenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: font.clone(),
+                    font_data: FontData::new(font_blob.clone(), glyph_run.font_index),
                     font_index: glyph_run.font_index,
                     font_size: glyph_run.font_size,
                     hint: glyph_run.hint,
@@ -407,8 +409,8 @@ impl SceneArchive {
         }
 
         // Add font metadata
-        for (idx, font) in collector.fonts.iter().enumerate() {
-            let data = font.data.data();
+        for (idx, blob) in collector.fonts.iter().enumerate() {
+            let data = blob.data();
             let hash = sha256_hex(data);
             let path = format!("fonts/{}.ttf", hash);
 
@@ -420,7 +422,6 @@ impl SceneArchive {
                     sha256_hash: hash,
                     path,
                 },
-                index: font.index,
             });
         }
 
@@ -476,10 +477,10 @@ impl SceneArchive {
         }
 
         // Write font files
-        for (idx, font) in self.fonts.iter().enumerate() {
+        for (idx, blob) in self.fonts.iter().enumerate() {
             let path = &self.manifest.fonts[idx].entry.path;
             zip.start_file(path, options)?;
-            zip.write_all(font.data.data())?;
+            zip.write_all(blob.data())?;
         }
 
         zip.finish()?;
@@ -553,7 +554,7 @@ impl SceneArchive {
                 )));
             }
 
-            fonts.push(FontData::new(Blob::from(data), meta.index));
+            fonts.push(Blob::from(data));
         }
 
         Ok(Self {

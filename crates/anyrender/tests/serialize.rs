@@ -252,10 +252,9 @@ fn test_glyph_run_roundtrip() {
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
     assert_eq!(archive.manifest.fonts[0].entry.size, font_bytes.len());
-    assert_eq!(archive.manifest.fonts[0].index, 0);
 
     // Verify font bytes
-    assert_eq!(archive.fonts[0].data.data(), font_bytes.as_slice());
+    assert_eq!(archive.fonts[0].data(), font_bytes.as_slice());
 
     // Verify the scene roundtrip
     let restored = archive.to_scene().unwrap();
@@ -263,7 +262,8 @@ fn test_glyph_run_roundtrip() {
 
     match &restored.commands[0] {
         RenderCommand::GlyphRun(glyph_run) => {
-            assert_eq!(glyph_run.font_data.data.data(), font_bytes.as_slice());
+            assert_eq!(glyph_run.font_data.data.data(), font.data.data());
+            assert_eq!(glyph_run.font_data.index, font.index);
             assert_eq!(glyph_run.font_size, font_size);
             assert_eq!(glyph_run.hint, hint);
             assert_eq!(glyph_run.brush_alpha, brush_alpha);
