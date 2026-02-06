@@ -1,6 +1,6 @@
 [package]
 name = "anyrender_serialize"
-description = "Serialization of recorded scenes to a portable zip archive format"
+description = "Serialization of recorded scenes to a portable zip format"
 version = "0.7.0"
 documentation = "https://docs.rs/anyrender"
 homepage.workspace = true
