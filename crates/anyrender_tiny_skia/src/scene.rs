@@ -573,7 +573,6 @@ impl PaintScene for TinySkiaScenePainter {
         clip: &impl Shape,
     ) {
         let blend: BlendMode = blend.into();
-        #[allow(deprecated)]
         if alpha == 1. && matches!(blend.mix, Mix::Normal) {
             let layer = self.non_clip_layer();
 
@@ -899,7 +898,6 @@ enum BlendStrategy {
 
 fn determine_blend_strategy(peniko_mode: &BlendMode) -> BlendStrategy {
     match (peniko_mode.mix, peniko_mode.compose) {
-        #[allow(deprecated)]
         (Mix::Normal, compose) => BlendStrategy::SinglePass(compose_to_tiny_blend_mode(compose)),
         (mix, Compose::SrcOver) => BlendStrategy::SinglePass(mix_to_tiny_blend_mode(mix)),
         (mix, compose) => BlendStrategy::MultiPass {
