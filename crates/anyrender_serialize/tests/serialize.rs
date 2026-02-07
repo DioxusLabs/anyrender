@@ -249,16 +249,12 @@ fn test_glyph_run_roundtrip() {
 
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
-    assert_eq!(archive.manifest.fonts[0].index, 0); // Subsetted to standalone
     assert!(
         archive.manifest.fonts[0].entry.size < original_font_size,
         "Subsetted font ({} bytes) should be smaller than original ({} bytes)",
         archive.manifest.fonts[0].entry.size,
         original_font_size
     );
-
-    // Verify font is subsetted (smaller than original)
-    assert!(archive.fonts[0].data.data().len() < original_font_size);
 
     // Verify the WOFF2 file path
     assert!(
