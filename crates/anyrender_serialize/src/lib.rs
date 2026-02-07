@@ -97,6 +97,9 @@ pub struct ImageMetadata {
 }
 
 /// Metadata for a font resource.
+///
+/// Fonts are stored as WOFF2 in the archive. During archival, TTC fonts are
+/// extracted to standalone fonts and subsetted to only the glyphs used.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FontMetadata {
     #[serde(flatten)]
@@ -409,11 +412,11 @@ fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
 impl SceneArchive {
     /// Create a new SceneArchive from a recorded Scene.
     ///
-    /// Font processing (powered by [klippa](https://github.com/googlefonts/fontations/tree/main/klippa)):
+    /// Font processing:
     /// - TTC files are extracted to standalone fonts for each face used
-    /// - Fonts are subsetted to include only the glyphs referenced in the scene
+    /// - Fonts are subsetted to include only the glyphs referenced in the scene (using [`klippa`]`)
     /// - Original glyph IDs are preserved (RETAIN_GIDS) — unused slots become empty
-    /// - Fonts are stored as WOFF2 for compression
+    /// - Fonts are stored as WOFF2
     pub fn from_scene(scene: &Scene) -> Result<Self, ArchiveError> {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new();
@@ -424,11 +427,8 @@ impl SceneArchive {
             .map(|cmd| collector.convert_command(cmd))
             .collect();
 
-        // --- Font subsetting (using klippa from fontations) ---
         // For each collected font, subset to only the glyphs used and extract
-        // from TTC to standalone TTF. We use RETAIN_GIDS so that original glyph
-        // IDs are preserved (unused slots become empty) — this avoids having to
-        // remap glyph IDs in draw commands.
+        // from TTC to standalone TTF.
         let mut processed_fonts: Vec<FontData> = Vec::with_capacity(collector.fonts.len());
 
         for (idx, font) in collector.fonts.iter().enumerate() {
@@ -446,7 +446,8 @@ impl SceneArchive {
                 &input_gids,
                 &IntSet::empty(),
                 &font_ref,
-                SubsetFlags::SUBSET_FLAGS_RETAIN_GIDS, // keep original glyph IDs
+                // keep original glyph IDs (so we don't need to remap them in the draw commands)
+                SubsetFlags::SUBSET_FLAGS_RETAIN_GIDS,
                 &IntSet::empty(),
                 &IntSet::empty(),
                 &IntSet::empty(),

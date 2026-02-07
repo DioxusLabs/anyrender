@@ -12,6 +12,7 @@ use peniko::{
     Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
     ImageFormat, Mix,
 };
+use read_fonts::TableProvider;
 use zip::ZipArchive;
 
 #[test]
@@ -257,10 +258,36 @@ fn test_glyph_run_roundtrip() {
     );
 
     // Verify the WOFF2 file path
-    assert!(
-        archive.manifest.fonts[0].entry.path.ends_with(".woff2"),
-        "Font path should use .woff2 extension"
-    );
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".woff2"));
+
+    // Verify subsetting
+    {
+        let ttf_data = wuff::decompress_woff2(archive.fonts[0].data()).unwrap();
+        let font_ref = read_fonts::FontRef::new(&ttf_data).unwrap();
+        let loca = font_ref.loca(None).unwrap();
+        let glyf = font_ref.glyf().unwrap();
+
+        // The used glyph IDs (43, 72, 79) should have outlines in the subsetted font
+        for &gid in &[43u32, 72, 79] {
+            let glyph = loca
+                .get_glyf(read_fonts::types::GlyphId::new(gid), &glyf)
+                .unwrap();
+            assert!(
+                glyph.is_some(),
+                "Glyph {gid} should have an outline in the subsetted font"
+            );
+        }
+
+        // An unused glyph ID should be an empty slot (RETAIN_GIDS preserves IDs
+        // but removes outlines for glyphs not in the subset)
+        let unused_glyph = loca
+            .get_glyf(read_fonts::types::GlyphId::new(50), &glyf)
+            .unwrap();
+        assert!(
+            unused_glyph.is_none(),
+            "Glyph 50 should be an empty slot in the subsetted font"
+        );
+    }
 
     // Verify the scene roundtrip
     let restored = archive.to_scene().unwrap();

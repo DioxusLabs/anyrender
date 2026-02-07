@@ -172,7 +172,7 @@ dependencies = [
  "klippa",
  "kurbo",
  "peniko",
- "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations)",
+ "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
  "serde",
  "serde_json",
  "sha2",
@@ -1193,7 +1193,7 @@ dependencies = [
 [[package]]
 name = "font-types"
 version = "0.11.0"
-source = "git+https://github.com/googlefonts/fontations#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
+source = "git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
 dependencies = [
  "bytemuck",
 ]
@@ -1718,13 +1718,13 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "klippa"
 version = "0.1.0"
-source = "git+https://github.com/googlefonts/fontations#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
+source = "git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
 dependencies = [
  "clap",
  "fnv",
  "hashbrown 0.15.5",
  "regex",
- "skrifa 0.40.0 (git+https://github.com/googlefonts/fontations)",
+ "skrifa 0.40.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
  "thiserror 1.0.69",
  "write-fonts",
 ]
@@ -2712,10 +2712,10 @@ dependencies = [
 [[package]]
 name = "read-fonts"
 version = "0.37.0"
-source = "git+https://github.com/googlefonts/fontations#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
+source = "git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
 dependencies = [
  "bytemuck",
- "font-types 0.11.0 (git+https://github.com/googlefonts/fontations)",
+ "font-types 0.11.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
 ]
 
 [[package]]
@@ -3049,10 +3049,10 @@ dependencies = [
 [[package]]
 name = "skrifa"
 version = "0.40.0"
-source = "git+https://github.com/googlefonts/fontations#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
+source = "git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
 dependencies = [
  "bytemuck",
- "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations)",
+ "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
 ]
 
 [[package]]
@@ -4579,13 +4579,13 @@ checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
 [[package]]
 name = "write-fonts"
 version = "0.45.0"
-source = "git+https://github.com/googlefonts/fontations#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
+source = "git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826#41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826"
 dependencies = [
- "font-types 0.11.0 (git+https://github.com/googlefonts/fontations)",
+ "font-types 0.11.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
  "indexmap",
  "kurbo",
  "log",
- "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations)",
+ "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
 ]
 
 [[package]]

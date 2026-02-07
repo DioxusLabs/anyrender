@@ -25,5 +25,7 @@ wuff = { workspace = true }
 [dev-dependencies]
 kurbo = { workspace = true }
 peniko = { workspace = true }
+read-fonts = { workspace = true }
 serde_json = { workspace = true }
+wuff = { workspace = true }
 zip = { workspace = true }
