@@ -504,8 +504,11 @@ impl SceneArchive {
         let mut fonts: Vec<Blob<u8>> = Vec::with_capacity(processed_fonts.len());
         for (idx, font) in processed_fonts.iter().enumerate() {
             let ttf_data = font.data.data();
-            let woff2_data = ttf2woff2::encode(ttf_data, ttf2woff2::BrotliQuality::default())
-                .map_err(|e| ArchiveError::FontProcessing(format!("WOFF2 encoding failed: {e}")))?;
+            let woff2_data =
+                ttf2woff2::encode_no_transform(ttf_data, ttf2woff2::BrotliQuality::default())
+                    .map_err(|e| {
+                        ArchiveError::FontProcessing(format!("WOFF2 encoding failed: {e}"))
+                    })?;
             let hash = sha256_hex(&woff2_data);
             let path = format!("fonts/{}.woff2", hash);
 
