@@ -196,22 +196,20 @@ fn draw_text_with_parley(scene: &mut Scene) {
     let font_blob = Blob::from(include_bytes!("../../../assets/fonts/roboto/Roboto.ttf").to_vec());
     font_cx.collection.register_fonts(font_blob.clone(), None);
 
-    let title_text = "Hello World!";
-    let display_scale = 1.0;
-    let mut builder = layout_cx.ranged_builder(&mut font_cx, title_text, display_scale, true);
-    builder.push_default(StyleProperty::FontSize(18.0));
-    builder.push_default(StyleProperty::FontStack(FontStack::Single(
-        FontFamily::Named("Roboto".into()),
-    )));
-
     // Title
     {
-        let mut title_layout: Layout<()> = builder.build(title_text);
-        title_layout.break_all_lines(Some(140.0));
-        title_layout.align(Some(140.0), Alignment::Start, AlignmentOptions::default());
+        let text = "Hello World!";
+        let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(18.0));
+        builder.push_default(StyleProperty::FontStack(FontStack::Single(
+            FontFamily::Named("Roboto".into()),
+        )));
+        let mut layout: Layout<()> = builder.build(text);
+        layout.break_all_lines(Some(140.0));
+        layout.align(Some(140.0), Alignment::Start, AlignmentOptions::default());
         render_layout(
             scene,
-            &title_layout,
+            &layout,
             &font_blob,
             Affine::translate((32.0, 50.0)),
             Color::from_rgb8(40, 40, 60),
@@ -219,21 +217,19 @@ fn draw_text_with_parley(scene: &mut Scene) {
     }
     // Paragraph
     {
-        let paragraph_text =
+        let text =
             "Serialization roundtrip test: fonts are subsetted, compressed to WOFF2, and restored.";
-        let mut builder =
-            layout_cx.ranged_builder(&mut font_cx, paragraph_text, display_scale, true);
+        let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
         builder.push_default(StyleProperty::FontSize(13.0));
         builder.push_default(StyleProperty::FontStack(FontStack::Single(
             FontFamily::Named("Roboto".into()),
         )));
-        let mut para_layout: Layout<()> = builder.build(paragraph_text);
-        para_layout.break_all_lines(Some(150.0));
-        para_layout.align(Some(150.0), Alignment::Start, AlignmentOptions::default());
-
+        let mut layout: Layout<()> = builder.build(text);
+        layout.break_all_lines(Some(150.0));
+        layout.align(Some(150.0), Alignment::Start, AlignmentOptions::default());
         render_layout(
             scene,
-            &para_layout,
+            &layout,
             &font_blob,
             Affine::translate((32.0, 76.0)),
             Color::from_rgb8(80, 80, 100),
