@@ -196,7 +196,7 @@ fn draw_text_with_parley(scene: &mut Scene) {
     let font_blob = Blob::from(include_bytes!("../../../assets/fonts/roboto/Roboto.ttf").to_vec());
     font_cx.collection.register_fonts(font_blob.clone(), None);
 
-    let title_text = "Hello, AnyRender!";
+    let title_text = "Hello World!";
     let display_scale = 1.0;
     let mut builder = layout_cx.ranged_builder(&mut font_cx, title_text, display_scale, true);
     builder.push_default(StyleProperty::FontSize(18.0));
