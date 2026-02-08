@@ -391,7 +391,7 @@ impl SceneArchive {
             .map(|cmd| collector.convert_command(cmd))
             .collect();
 
-        // Process fonts (subset, encode) via FontWriter.
+        // Process fonts.
         let mut fonts = Vec::new();
         for (idx, result) in collector.fonts.into_processed().enumerate() {
             let font = result?;
