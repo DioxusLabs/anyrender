@@ -12,6 +12,7 @@ use peniko::{
     Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
     ImageFormat, Mix,
 };
+#[cfg(all(feature = "subsetting", feature = "woff2"))]
 use read_fonts::TableProvider;
 use zip::ZipArchive;
 
@@ -204,6 +205,7 @@ fn test_multiple_different_images() {
 #[test]
 fn test_glyph_run_roundtrip() {
     let font = roboto_font();
+    #[cfg(feature = "subsetting")]
     let original_font_size = font.data.data().len();
 
     let mut scene = Scene::new();
@@ -250,6 +252,8 @@ fn test_glyph_run_roundtrip() {
 
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
+
+    #[cfg(feature = "subsetting")]
     assert!(
         archive.manifest.fonts[0].entry.size < original_font_size,
         "Subsetted font ({} bytes) should be smaller than original ({} bytes)",
@@ -258,9 +262,13 @@ fn test_glyph_run_roundtrip() {
     );
 
     // Verify the WOFF2 file path
+    #[cfg(feature = "woff2")]
     assert!(archive.manifest.fonts[0].entry.path.ends_with(".woff2"));
+    #[cfg(not(feature = "woff2"))]
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".ttf"));
 
     // Verify subsetting
+    #[cfg(all(feature = "subsetting", feature = "woff2"))]
     {
         let ttf_data = wuff::decompress_woff2(archive.fonts[0].data()).unwrap();
         let font_ref = read_fonts::FontRef::new(&ttf_data).unwrap();
@@ -348,7 +356,7 @@ fn test_font_deduplication() {
 
 #[test]
 fn test_resource_manifest_version() {
-    assert_eq!(ResourceManifest::CURRENT_VERSION, 2);
+    assert_eq!(ResourceManifest::CURRENT_VERSION, 1);
 }
 
 #[test]

@@ -8,6 +8,11 @@ repository.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+subsetting = ["dep:klippa", "dep:read-fonts"]
+woff2 = ["dep:ttf2woff2"]
+
 [dependencies]
 anyrender = { workspace = true, features = ["serde"] }
 peniko = { workspace = true }
@@ -17,9 +22,9 @@ serde_json = { workspace = true }
 zip = { workspace = true }
 sha2 = { workspace = true }
 image = { workspace = true, features = ["png"] }
-klippa = { workspace = true }
-read-fonts = { workspace = true }
-ttf2woff2 = { workspace = true }
+klippa = { workspace = true, optional = true }
+read-fonts = { workspace = true, optional = true }
+ttf2woff2 = { workspace = true, optional = true }
 wuff = { workspace = true }
 
 [dev-dependencies]
