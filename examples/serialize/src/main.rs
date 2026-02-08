@@ -5,12 +5,16 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use anyrender::recording::Scene;
-use anyrender::{PaintScene, render_to_buffer};
+use anyrender::{Glyph, PaintScene, render_to_buffer};
 use anyrender_serialize::SceneArchive;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
 use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
-use peniko::{Blob, Color, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix};
+use parley::style::{FontFamily, FontStack};
+use parley::{Alignment, AlignmentOptions, FontContext, Layout, LayoutContext, StyleProperty};
+use peniko::{
+    Blob, Color, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
+};
 
 const WIDTH: u32 = 400;
 const HEIGHT: u32 = 300;
@@ -90,6 +94,9 @@ fn create_demo_scene() -> Scene {
         None,
         &rounded_card,
     );
+
+    // Text
+    draw_text_with_parley(&mut scene);
 
     // Draw some circles using layers with blend modes
     scene.push_layer(
@@ -179,6 +186,93 @@ fn create_demo_scene() -> Scene {
     );
 
     scene
+}
+
+/// Lay out text with parley using the Roboto font and draw it onto the scene.
+fn draw_text_with_parley(scene: &mut Scene) {
+    let mut font_cx = FontContext::new();
+    let mut layout_cx = LayoutContext::new();
+
+    let font_blob = Blob::from(include_bytes!("../../../assets/fonts/roboto/Roboto.ttf").to_vec());
+    font_cx.collection.register_fonts(font_blob.clone(), None);
+
+    // Title
+    {
+        let text = "Hello World!";
+        let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(18.0));
+        builder.push_default(StyleProperty::FontStack(FontStack::Single(
+            FontFamily::Named("Roboto".into()),
+        )));
+        let mut layout: Layout<()> = builder.build(text);
+        layout.break_all_lines(Some(140.0));
+        layout.align(Some(140.0), Alignment::Start, AlignmentOptions::default());
+        render_layout(
+            scene,
+            &layout,
+            &font_blob,
+            Affine::translate((32.0, 50.0)),
+            Color::from_rgb8(40, 40, 60),
+        );
+    }
+    // Paragraph
+    {
+        let text =
+            "Serialization roundtrip test: fonts are subsetted, compressed to WOFF2, and restored.";
+        let mut builder = layout_cx.ranged_builder(&mut font_cx, text, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(13.0));
+        builder.push_default(StyleProperty::FontStack(FontStack::Single(
+            FontFamily::Named("Roboto".into()),
+        )));
+        let mut layout: Layout<()> = builder.build(text);
+        layout.break_all_lines(Some(150.0));
+        layout.align(Some(150.0), Alignment::Start, AlignmentOptions::default());
+        render_layout(
+            scene,
+            &layout,
+            &font_blob,
+            Affine::translate((32.0, 76.0)),
+            Color::from_rgb8(80, 80, 100),
+        );
+    }
+}
+
+fn render_layout(
+    scene: &mut Scene,
+    layout: &Layout<()>,
+    font_blob: &Blob<u8>,
+    transform: Affine,
+    color: Color,
+) {
+    for line in layout.lines() {
+        for item in line.items() {
+            if let parley::PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                let run = glyph_run.run();
+                let parley_font = run.font();
+                let font_data = FontData::new(font_blob.clone(), parley_font.index);
+                let font_size = run.font_size();
+                let normalized_coords = run.normalized_coords();
+                let glyphs = glyph_run.positioned_glyphs().map(|g| Glyph {
+                    id: g.id,
+                    x: g.x,
+                    y: g.y,
+                });
+
+                scene.draw_glyphs(
+                    &font_data,
+                    font_size,
+                    false,
+                    normalized_coords,
+                    Fill::NonZero,
+                    color,
+                    1.0,
+                    transform,
+                    None,
+                    glyphs.into_iter(),
+                );
+            }
+        }
+    }
 }
 
 /// Create a checkerboard image for demonstrating image brushes.

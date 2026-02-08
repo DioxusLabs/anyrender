@@ -12,6 +12,8 @@ use peniko::{
     Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
     ImageFormat, Mix,
 };
+#[cfg(all(feature = "subsetting", feature = "woff2"))]
+use read_fonts::TableProvider;
 use zip::ZipArchive;
 
 #[test]
@@ -203,7 +205,8 @@ fn test_multiple_different_images() {
 #[test]
 fn test_glyph_run_roundtrip() {
     let font = roboto_font();
-    let font_bytes = font.data.data().to_vec();
+    #[cfg(feature = "subsetting")]
+    let original_font_size = font.data.data().len();
 
     let mut scene = Scene::new();
     let glyphs = [
@@ -249,10 +252,50 @@ fn test_glyph_run_roundtrip() {
 
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
-    assert_eq!(archive.manifest.fonts[0].entry.size, font_bytes.len());
 
-    // Verify font bytes
-    assert_eq!(archive.fonts[0].data(), font_bytes.as_slice());
+    #[cfg(feature = "subsetting")]
+    assert!(
+        archive.manifest.fonts[0].entry.size < original_font_size,
+        "Subsetted font ({} bytes) should be smaller than original ({} bytes)",
+        archive.manifest.fonts[0].entry.size,
+        original_font_size
+    );
+
+    // Verify the WOFF2 file path
+    #[cfg(feature = "woff2")]
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".woff2"));
+    #[cfg(not(feature = "woff2"))]
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".ttf"));
+
+    // Verify subsetting
+    #[cfg(all(feature = "subsetting", feature = "woff2"))]
+    {
+        let ttf_data = wuff::decompress_woff2(archive.fonts[0].data()).unwrap();
+        let font_ref = read_fonts::FontRef::new(&ttf_data).unwrap();
+        let loca = font_ref.loca(None).unwrap();
+        let glyf = font_ref.glyf().unwrap();
+
+        // The used glyph IDs (43, 72, 79) should have outlines in the subsetted font
+        for &gid in &[43u32, 72, 79] {
+            let glyph = loca
+                .get_glyf(read_fonts::types::GlyphId::new(gid), &glyf)
+                .unwrap();
+            assert!(
+                glyph.is_some(),
+                "Glyph {gid} should have an outline in the subsetted font"
+            );
+        }
+
+        // An unused glyph ID should be an empty slot (RETAIN_GIDS preserves IDs
+        // but removes outlines for glyphs not in the subset)
+        let unused_glyph = loca
+            .get_glyf(read_fonts::types::GlyphId::new(50), &glyf)
+            .unwrap();
+        assert!(
+            unused_glyph.is_none(),
+            "Glyph 50 should be an empty slot in the subsetted font"
+        );
+    }
 
     // Verify the scene roundtrip
     let restored = archive.to_scene().unwrap();
@@ -260,14 +303,21 @@ fn test_glyph_run_roundtrip() {
 
     match &restored.commands[0] {
         RenderCommand::GlyphRun(glyph_run) => {
-            assert_eq!(glyph_run.font_data.data.data(), font.data.data());
-            assert_eq!(glyph_run.font_data.index, font.index);
             assert_eq!(glyph_run.font_size, font_size);
             assert_eq!(glyph_run.hint, hint);
             assert_eq!(glyph_run.brush_alpha, brush_alpha);
             assert_eq!(glyph_run.transform, transform);
             assert_eq!(glyph_run.glyph_transform, glyph_transform);
-            assert_eq!(glyph_run.glyphs, glyphs);
+            assert_eq!(glyph_run.font_data.index, 0); // Standalone after subsetting
+            assert_eq!(glyph_run.glyphs.len(), 3);
+            // Glyph positions are preserved
+            assert_eq!(glyph_run.glyphs[0].x, 0.0);
+            assert_eq!(glyph_run.glyphs[1].x, 10.0);
+            assert_eq!(glyph_run.glyphs[2].x, 20.0);
+            // Glyph IDs are preserved (RETAIN_GIDS keeps original IDs)
+            assert_eq!(glyph_run.glyphs[0].id, 43);
+            assert_eq!(glyph_run.glyphs[1].id, 72);
+            assert_eq!(glyph_run.glyphs[2].id, 79);
         }
         other => panic!("Expected GlyphRun command, got {other:?}"),
     }
