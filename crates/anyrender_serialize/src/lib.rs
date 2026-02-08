@@ -391,22 +391,6 @@ impl SceneArchive {
             .map(|cmd| collector.convert_command(cmd))
             .collect();
 
-        // Process fonts.
-        let mut fonts = Vec::new();
-        for (idx, result) in collector.fonts.into_processed().enumerate() {
-            let font = result?;
-            manifest.fonts.push(FontMetadata {
-                entry: ResourceEntry {
-                    id: ResourceId(idx),
-                    kind: ResourceKind::Font,
-                    size: font.raw_size,
-                    sha256_hash: font.hash,
-                    path: font.path,
-                },
-            });
-            fonts.push(Blob::from(font.stored_data));
-        }
-
         // Normalize all images to RGBA8
         let images: Vec<ImageData> = collector
             .images
@@ -443,6 +427,22 @@ impl SceneArchive {
                 width: original.width,
                 height: original.height,
             });
+        }
+
+        // Process fonts.
+        let mut fonts = Vec::new();
+        for (idx, result) in collector.fonts.into_processed().enumerate() {
+            let font = result?;
+            manifest.fonts.push(FontMetadata {
+                entry: ResourceEntry {
+                    id: ResourceId(idx),
+                    kind: ResourceKind::Font,
+                    size: font.raw_size,
+                    sha256_hash: font.hash,
+                    path: font.path,
+                },
+            });
+            fonts.push(Blob::from(font.stored_data));
         }
 
         Ok(Self {
