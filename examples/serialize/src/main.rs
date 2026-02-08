@@ -34,10 +34,9 @@ fn main() {
     let archive_path = Path::new(OUTPUT_DIR).join("demo_scene.anyrender.zip");
     let file = File::create(&archive_path).unwrap();
     let writer = BufWriter::new(file);
-    let config = SerializeConfig {
-        subset_fonts: true,
-        woff2_fonts: true,
-    };
+    let config = SerializeConfig::new()
+        .with_subset_fonts(true)
+        .with_woff2_fonts(true);
     SceneArchive::from_scene(&original_scene, &config)
         .unwrap()
         .serialize(writer)
