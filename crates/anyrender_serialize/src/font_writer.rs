@@ -13,7 +13,6 @@ use read_fonts::FontRef;
 use read_fonts::collections::int_set::IntSet;
 #[cfg(feature = "subsetting")]
 use read_fonts::types::GlyphId;
-use sha2::{Digest, Sha256};
 
 use crate::{ArchiveError, ResourceId, sha256_hex};
 

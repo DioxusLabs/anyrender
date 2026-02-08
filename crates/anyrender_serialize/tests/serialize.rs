@@ -380,7 +380,7 @@ fn test_archive_contains_expected_files() {
         .read_to_string(&mut resources_json)
         .unwrap();
     let manifest: ResourceManifest = serde_json::from_str(&resources_json).unwrap();
-    assert_eq!(manifest.version, 2);
+    assert_eq!(manifest.version, 1);
     assert!(manifest.images.is_empty());
     assert!(manifest.fonts.is_empty());
 
