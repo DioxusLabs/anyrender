@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyrender::recording::Scene;
 use anyrender::{Glyph, PaintScene, render_to_buffer};
-use anyrender_serialize::SceneArchive;
+use anyrender_serialize::{SceneArchive, SerializeConfig};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
 use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
@@ -34,7 +34,11 @@ fn main() {
     let archive_path = Path::new(OUTPUT_DIR).join("demo_scene.anyrender.zip");
     let file = File::create(&archive_path).unwrap();
     let writer = BufWriter::new(file);
-    SceneArchive::from_scene(&original_scene)
+    let config = SerializeConfig {
+        subset_fonts: true,
+        woff2_fonts: true,
+    };
+    SceneArchive::from_scene(&original_scene, &config)
         .unwrap()
         .serialize(writer)
         .unwrap();
