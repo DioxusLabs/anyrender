@@ -44,6 +44,15 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev
       - run: cargo build --workspace
 
+  build-features-powerset:
+    name: "Build [anyrender_serialize with all feature combinations]"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack check --feature-powerset -p anyrender_serialize
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

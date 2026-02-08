@@ -43,6 +43,10 @@ serde = "1.0.228"
 serde_json = "1.0"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+klippa = { git = "https://github.com/googlefonts/fontations", rev = "41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826" }
+read-fonts = { git = "https://github.com/googlefonts/fontations", rev = "41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826" }
+ttf2woff2 = "0.11"
+wuff = "0.2"
 
 # Linebender
 color = "0.3"
