@@ -35,7 +35,7 @@ pub(crate) struct ProcessedFont {
 /// When the `subsetting` feature is enabled, each `(blob, face index)` pair is treated
 /// as a distinct resource because subsetting extracts each face into a standalone font.
 ///
-/// When disabled, fonts are deduplicated by blob alone — multiple faces sharing the same TTC
+/// When disabled, fonts are deduplicated by blob alone. Multiple faces sharing the same TTC
 /// are stored together.
 pub(crate) struct FontWriter {
     /// Map `(Blob ID, face index)` to [`ResourceId`].
