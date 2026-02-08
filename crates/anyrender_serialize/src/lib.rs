@@ -429,7 +429,7 @@ impl SceneArchive {
             });
         }
 
-        // Process fonts.
+        // Add font metadata.
         let mut fonts = Vec::new();
         for (idx, result) in collector.fonts.into_processed().enumerate() {
             let font = result?;
