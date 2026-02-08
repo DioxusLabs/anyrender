@@ -33,7 +33,8 @@ pub(crate) struct ProcessedFont {
 pub(crate) struct FontWriter {
     config: SerializeConfig,
     /// Map `(Blob ID, face index)` to [`ResourceId`].
-    /// When subsetting is disabled, the face index component is always 0 (dedup by blob).
+    /// When subsetting is disabled, the face in the `(Blob ID, face index)` tuple is always 0.
+    /// This is because multiple faces sharing the same TTC should be keyed together.
     id_map: HashMap<(u64, u32), ResourceId>,
     fonts: Vec<FontData>,
     glyph_ids: Vec<HashSet<u32>>,
@@ -94,19 +95,16 @@ impl FontWriter {
 
     /// Consume the writer, returning an iterator of processed fonts ready for the archive.
     pub fn into_processed(self) -> impl Iterator<Item = Result<ProcessedFont, ArchiveError>> {
-        let glyph_ids = self.glyph_ids;
-
         self.fonts.into_iter().enumerate().map(move |(idx, font)| {
-            // Conditionally subset.
             let raw_data = if self.config.subset_fonts {
-                let font_glyph_ids = &glyph_ids[idx];
+                let glyph_ids = &self.glyph_ids[idx];
 
                 let font_ref = FontRef::from_index(font.data.data(), font.index).map_err(|e| {
                     ArchiveError::FontProcessing(format!("Failed to parse font: {e}"))
                 })?;
 
                 let mut input_gids: IntSet<GlyphId> = IntSet::empty();
-                for &gid in font_glyph_ids {
+                for &gid in glyph_ids {
                     input_gids.insert(GlyphId::new(gid));
                 }
 
