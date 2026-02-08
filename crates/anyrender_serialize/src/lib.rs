@@ -381,7 +381,6 @@ fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
 
 impl SceneArchive {
     /// Create a new SceneArchive from a recorded Scene.
-    ///
     pub fn from_scene(scene: &Scene) -> Result<Self, ArchiveError> {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new();
