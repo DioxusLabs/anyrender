@@ -15,7 +15,7 @@ use read_fonts::collections::int_set::IntSet;
 use read_fonts::types::GlyphId;
 use sha2::{Digest, Sha256};
 
-use crate::{ArchiveError, ResourceId};
+use crate::{ArchiveError, ResourceId, sha256_hex};
 
 /// A font that has been processed (optionally subsetted and/or WOFF2-encoded) and is
 /// ready to be written into the archive.
@@ -179,21 +179,4 @@ impl FontWriter {
             })
         })
     }
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let result = hasher.finalize();
-    hex_encode(&result)
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
-    let mut hex = String::with_capacity(bytes.len() * 2);
-    for &byte in bytes {
-        hex.push(HEX_CHARS[(byte >> 4) as usize] as char);
-        hex.push(HEX_CHARS[(byte & 0xf) as usize] as char);
-    }
-    hex
 }
