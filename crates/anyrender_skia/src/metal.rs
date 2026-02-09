@@ -135,7 +135,7 @@ impl SkiaBackend for MetalBackend {
         let command_buffer = self
             .command_queue
             .commandBuffer()
-            .expect("unsable to get command buffer");
+            .expect("unable to get command buffer");
 
         // TODO: save drawable
         let drawable = self.prepared_drawable.take().unwrap();
