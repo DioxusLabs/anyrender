@@ -10,22 +10,18 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
     paint: PaintRef<'a>,
-    mut image_manager: &mut Option<&mut ImageManager<'_>>,
+    image_manager: &mut ImageManager<'_>,
 ) -> PaintType {
     match paint {
         Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
         Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
 
         Paint::Image(image_brush) => {
-            if let Some(image_manager) = &mut image_manager {
-                let image_id = image_manager.upload_image(image_brush.image);
-                PaintType::Image(ImageBrush {
-                    image: ImageSource::OpaqueId(image_id),
-                    sampler: image_brush.sampler,
-                })
-            } else {
-                PaintType::Solid(peniko::color::palette::css::TRANSPARENT)
-            }
+            let image_id = image_manager.upload_image(image_brush.image);
+            PaintType::Image(ImageBrush {
+                image: ImageSource::OpaqueId(image_id),
+                sampler: image_brush.sampler,
+            })
         }
 
         // TODO: custom paint
@@ -33,7 +29,7 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
     }
 }
 
-pub(crate) struct ImageManager<'a> {
+pub struct ImageManager<'a> {
     pub(crate) renderer: &'a mut Renderer,
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
@@ -41,7 +37,23 @@ pub(crate) struct ImageManager<'a> {
     pub(crate) cache: &'a mut FxHashMap<u64, ImageId>,
 }
 
-impl ImageManager<'_> {
+impl<'a> ImageManager<'a> {
+    pub fn new(
+        renderer: &'a mut Renderer,
+        device: &'a Device,
+        queue: &'a Queue,
+        encoder: &'a mut CommandEncoder,
+        cache: &'a mut FxHashMap<u64, ImageId>,
+    ) -> Self {
+        Self {
+            renderer,
+            device,
+            queue,
+            encoder,
+            cache,
+        }
+    }
+
     pub(crate) fn upload_image(&mut self, image: &ImageData) -> ImageId {
         let peniko_id = image.data.id();
 
@@ -76,15 +88,18 @@ pub(crate) enum LayerKind {
 pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_hybrid::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
-    pub(crate) image_manager: Option<ImageManager<'s>>,
+    pub(crate) image_manager: ImageManager<'s>,
 }
 
 impl VelloHybridScenePainter<'_> {
-    pub fn new<'s>(scene: &'s mut vello_hybrid::Scene) -> VelloHybridScenePainter<'s> {
+    pub fn new<'s>(
+        scene: &'s mut vello_hybrid::Scene,
+        image_manager: ImageManager<'s>,
+    ) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             scene,
             layer_stack: Vec::with_capacity(16),
-            image_manager: None,
+            image_manager,
         }
     }
 }
@@ -138,8 +153,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
-        let paint =
-            anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager.as_mut());
+        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -156,8 +170,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint =
-            anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager.as_mut());
+        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -177,8 +190,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        let paint =
-            anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager.as_mut());
+        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
