@@ -222,7 +222,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         draw_fn(&mut VelloHybridScenePainter {
             scene: &mut self.scene,
             layer_stack: Vec::new(),
-            image_manager: Some(image_manager),
+            image_manager,
         });
         timer.record_time("cmd");
 
