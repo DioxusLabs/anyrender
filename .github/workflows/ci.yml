@@ -74,6 +74,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc
 
+  check-wasm:
+    name: "Check [wasm32 + webgl]"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: "wasm32-unknown-unknown"
+          cache-all-crates: "true"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy -p anyrender_vello_hybrid --target wasm32-unknown-unknown --features webgl -- -D warnings
+
   # just cargo check for now
   matrix_test:
     runs-on: ${{ matrix.platform.os }}
