@@ -619,7 +619,7 @@ impl SceneArchive {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SerializeConfig {
     subset_fonts: bool,
     woff2_fonts: bool,
@@ -627,10 +627,7 @@ pub struct SerializeConfig {
 
 impl SerializeConfig {
     pub fn new() -> Self {
-        Self {
-            subset_fonts: false,
-            woff2_fonts: false,
-        }
+        Self::default()
     }
 
     /// Subset fonts to only include glyphs used in the scene.
