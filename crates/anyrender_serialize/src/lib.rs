@@ -97,9 +97,9 @@ pub struct ImageMetadata {
 
 /// Metadata for a font resource.
 ///
-/// When the `woff2` feature is enabled, fonts are WOFF2-compressed.
-/// When the `subsetting` feature is enabled, TTC fonts are extracted to
-/// standalone fonts and subsetted to only the glyphs used.
+/// When WOFF2 is enabled via [`SerializeConfig`], fonts are WOFF2-compressed.
+/// When subsetting is enabled, TTC fonts are extracted to standalone fonts and
+/// subsetted to only the glyphs used.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FontMetadata {
     #[serde(flatten)]
@@ -137,9 +137,9 @@ struct ResourceCollector {
 }
 
 impl ResourceCollector {
-    fn new() -> Self {
+    fn new(config: SerializeConfig) -> Self {
         Self {
-            fonts: FontWriter::new(),
+            fonts: FontWriter::new(config),
             image_id_map: HashMap::new(),
             images: Vec::new(),
         }
@@ -381,9 +381,9 @@ fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
 
 impl SceneArchive {
     /// Create a new SceneArchive from a recorded Scene.
-    pub fn from_scene(scene: &Scene) -> Result<Self, ArchiveError> {
+    pub fn from_scene(scene: &Scene, config: &SerializeConfig) -> Result<Self, ArchiveError> {
         let mut manifest = ResourceManifest::new(scene.tolerance);
-        let mut collector = ResourceCollector::new();
+        let mut collector = ResourceCollector::new(config.clone());
 
         let commands: Vec<_> = scene
             .commands
@@ -616,6 +616,30 @@ impl SceneArchive {
             fonts,
             images,
         })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SerializeConfig {
+    subset_fonts: bool,
+    woff2_fonts: bool,
+}
+
+impl SerializeConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Subset fonts to only include glyphs used in the scene.
+    pub fn with_subset_fonts(mut self, subset_fonts: bool) -> Self {
+        self.subset_fonts = subset_fonts;
+        self
+    }
+
+    /// WOFF2-compress font data.
+    pub fn with_woff2_fonts(mut self, woff2_fonts: bool) -> Self {
+        self.woff2_fonts = woff2_fonts;
+        self
     }
 }
 

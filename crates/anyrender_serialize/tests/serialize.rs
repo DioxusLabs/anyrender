@@ -5,14 +5,13 @@ use std::io::{Cursor, Read};
 use anyrender::recording::{RenderCommand, Scene};
 use anyrender::{Glyph, PaintScene};
 use anyrender_serialize::{
-    ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand,
+    ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
 use kurbo::{Affine, Rect, Stroke};
 use peniko::{
     Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
     ImageFormat, Mix,
 };
-#[cfg(all(feature = "subsetting", feature = "woff2"))]
 use read_fonts::TableProvider;
 use zip::ZipArchive;
 
@@ -127,7 +126,7 @@ fn test_image_data_roundtrip() {
         &Rect::new(0.0, 0.0, 100.0, 100.0),
     );
 
-    let data = serialize_to_vec(&scene).unwrap();
+    let data = serialize_to_vec(&scene, &default_config()).unwrap();
     let archive = archive_deserialize_from_slice(&data).unwrap();
 
     // Verify manifest metadata
@@ -162,7 +161,7 @@ fn test_image_deduplication() {
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
 
-    let archive = SceneArchive::from_scene(&scene).unwrap();
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.images.len(), 1); // deduplicated
 }
@@ -188,7 +187,7 @@ fn test_multiple_different_images() {
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
 
-    let archive = SceneArchive::from_scene(&scene).unwrap();
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.images.len(), 2);
 
@@ -205,55 +204,32 @@ fn test_multiple_different_images() {
 #[test]
 fn test_glyph_run_roundtrip() {
     let font = roboto_font();
-    #[cfg(feature = "subsetting")]
-    let original_font_size = font.data.data().len();
 
-    let mut scene = Scene::new();
-    let glyphs = [
-        Glyph {
-            id: 43,
-            x: 0.0,
-            y: 0.0,
-        },
-        Glyph {
-            id: 72,
-            x: 10.0,
-            y: 0.0,
-        },
-        Glyph {
-            id: 79,
-            x: 20.0,
-            y: 0.0,
-        },
-    ];
-    let font_size = 16.0;
-    let hint = false;
-    let normalized_coords = [];
-    let style = Fill::NonZero;
-    let brush = Color::from_rgb8(0, 0, 0);
-    let brush_alpha = 1.0;
-    let transform = Affine::translate((10.0, 50.0));
-    let glyph_transform = None;
-    scene.draw_glyphs(
-        &font,
-        font_size,
-        hint,
-        &normalized_coords,
-        style,
-        brush,
-        brush_alpha,
-        transform,
-        glyph_transform,
-        glyphs.into_iter(),
-    );
-
-    let data = serialize_to_vec(&scene).unwrap();
+    let scene = build_glyph_scene(&font);
+    let data = serialize_to_vec(&scene, &default_config()).unwrap();
     let archive = archive_deserialize_from_slice(&data).unwrap();
 
     // Verify font metadata
     assert_eq!(archive.manifest.fonts.len(), 1);
 
-    #[cfg(feature = "subsetting")]
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".ttf"));
+    assert_eq!(archive.manifest.fonts[0].entry.size, font.data.data().len(),);
+    let restored = archive.to_scene().unwrap();
+    assert_glyph_run_preserved(&restored);
+}
+
+#[test]
+fn test_glyph_run_roundtrip_with_subsetting_and_woff2() {
+    let font = roboto_font();
+    let original_font_size = font.data.data().len();
+
+    let scene = build_glyph_scene(&font);
+    let config = subset_and_woff2_config();
+    let data = serialize_to_vec(&scene, &config).unwrap();
+    let archive = archive_deserialize_from_slice(&data).unwrap();
+
+    assert_eq!(archive.manifest.fonts.len(), 1);
+    assert!(archive.manifest.fonts[0].entry.path.ends_with(".woff2"));
     assert!(
         archive.manifest.fonts[0].entry.size < original_font_size,
         "Subsetted font ({} bytes) should be smaller than original ({} bytes)",
@@ -261,14 +237,7 @@ fn test_glyph_run_roundtrip() {
         original_font_size
     );
 
-    // Verify the WOFF2 file path
-    #[cfg(feature = "woff2")]
-    assert!(archive.manifest.fonts[0].entry.path.ends_with(".woff2"));
-    #[cfg(not(feature = "woff2"))]
-    assert!(archive.manifest.fonts[0].entry.path.ends_with(".ttf"));
-
     // Verify subsetting
-    #[cfg(all(feature = "subsetting", feature = "woff2"))]
     {
         let ttf_data = wuff::decompress_woff2(archive.fonts[0].data()).unwrap();
         let font_ref = read_fonts::FontRef::new(&ttf_data).unwrap();
@@ -299,28 +268,7 @@ fn test_glyph_run_roundtrip() {
 
     // Verify the scene roundtrip
     let restored = archive.to_scene().unwrap();
-    assert_eq!(restored.commands.len(), 1);
-
-    match &restored.commands[0] {
-        RenderCommand::GlyphRun(glyph_run) => {
-            assert_eq!(glyph_run.font_size, font_size);
-            assert_eq!(glyph_run.hint, hint);
-            assert_eq!(glyph_run.brush_alpha, brush_alpha);
-            assert_eq!(glyph_run.transform, transform);
-            assert_eq!(glyph_run.glyph_transform, glyph_transform);
-            assert_eq!(glyph_run.font_data.index, 0); // Standalone after subsetting
-            assert_eq!(glyph_run.glyphs.len(), 3);
-            // Glyph positions are preserved
-            assert_eq!(glyph_run.glyphs[0].x, 0.0);
-            assert_eq!(glyph_run.glyphs[1].x, 10.0);
-            assert_eq!(glyph_run.glyphs[2].x, 20.0);
-            // Glyph IDs are preserved (RETAIN_GIDS keeps original IDs)
-            assert_eq!(glyph_run.glyphs[0].id, 43);
-            assert_eq!(glyph_run.glyphs[1].id, 72);
-            assert_eq!(glyph_run.glyphs[2].id, 79);
-        }
-        other => panic!("Expected GlyphRun command, got {other:?}"),
-    }
+    assert_glyph_run_preserved(&restored);
 }
 
 #[test]
@@ -349,7 +297,7 @@ fn test_font_deduplication() {
         );
     }
 
-    let archive = SceneArchive::from_scene(&scene).unwrap();
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.fonts.len(), 1); // deduplicated
 }
@@ -370,7 +318,7 @@ fn test_archive_contains_expected_files() {
         &Rect::new(0.0, 0.0, 100.0, 100.0),
     );
 
-    let data = serialize_to_vec(&scene).unwrap();
+    let data = serialize_to_vec(&scene, &default_config()).unwrap();
     let mut zip = ZipArchive::new(Cursor::new(&data)).unwrap();
 
     // Verify resources.json
@@ -396,9 +344,19 @@ fn test_archive_contains_expected_files() {
 
 // Helpers
 
-fn serialize_to_vec(scene: &Scene) -> Result<Vec<u8>, ArchiveError> {
+fn default_config() -> SerializeConfig {
+    SerializeConfig::new()
+}
+
+fn subset_and_woff2_config() -> SerializeConfig {
+    SerializeConfig::new()
+        .with_subset_fonts(true)
+        .with_woff2_fonts(true)
+}
+
+fn serialize_to_vec(scene: &Scene, config: &SerializeConfig) -> Result<Vec<u8>, ArchiveError> {
     let mut buf = Cursor::new(Vec::new());
-    SceneArchive::from_scene(scene)?.serialize(&mut buf)?;
+    SceneArchive::from_scene(scene, config)?.serialize(&mut buf)?;
     Ok(buf.into_inner())
 }
 
@@ -417,7 +375,7 @@ fn archive_deserialize_from_slice(data: &[u8]) -> Result<SceneArchive, ArchiveEr
 }
 
 fn assert_scene_roundtrip(scene: &Scene) {
-    let data = serialize_to_vec(scene).unwrap();
+    let data = serialize_to_vec(scene, &default_config()).unwrap();
     let restored = deserialize_from_slice(&data).unwrap();
     assert_eq!(*scene, restored);
 }
@@ -445,4 +403,62 @@ fn extract_image_pixels(scene: &Scene, command_index: usize) -> Vec<u8> {
 fn roboto_font() -> FontData {
     static ROBOTO_BYTES: &[u8] = include_bytes!("../../../assets/fonts/roboto/Roboto.ttf");
     FontData::new(Blob::from(ROBOTO_BYTES.to_vec()), 0)
+}
+
+fn build_glyph_scene(font: &FontData) -> Scene {
+    let mut scene = Scene::new();
+    let glyphs = [
+        Glyph {
+            id: 43,
+            x: 0.0,
+            y: 0.0,
+        },
+        Glyph {
+            id: 72,
+            x: 10.0,
+            y: 0.0,
+        },
+        Glyph {
+            id: 79,
+            x: 20.0,
+            y: 0.0,
+        },
+    ];
+    scene.draw_glyphs(
+        font,
+        16.0,
+        false,
+        &[],
+        Fill::NonZero,
+        Color::from_rgb8(0, 0, 0),
+        1.0,
+        Affine::translate((10.0, 50.0)),
+        None,
+        glyphs.into_iter(),
+    );
+    scene
+}
+
+fn assert_glyph_run_preserved(restored: &Scene) {
+    assert_eq!(restored.commands.len(), 1);
+
+    match &restored.commands[0] {
+        RenderCommand::GlyphRun(glyph_run) => {
+            assert_eq!(glyph_run.font_size, 16.0);
+            assert_eq!(glyph_run.hint, false);
+            assert_eq!(glyph_run.brush_alpha, 1.0);
+            assert_eq!(glyph_run.transform, Affine::translate((10.0, 50.0)));
+            assert_eq!(glyph_run.glyph_transform, None);
+            assert_eq!(glyph_run.glyphs.len(), 3);
+            // Glyph positions are preserved
+            assert_eq!(glyph_run.glyphs[0].x, 0.0);
+            assert_eq!(glyph_run.glyphs[1].x, 10.0);
+            assert_eq!(glyph_run.glyphs[2].x, 20.0);
+            // Glyph IDs are preserved (RETAIN_GIDS keeps original IDs)
+            assert_eq!(glyph_run.glyphs[0].id, 43);
+            assert_eq!(glyph_run.glyphs[1].id, 72);
+            assert_eq!(glyph_run.glyphs[2].id, 79);
+        }
+        other => panic!("Expected GlyphRun command, got {other:?}"),
+    }
 }
