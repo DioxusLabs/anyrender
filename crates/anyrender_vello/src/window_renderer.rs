@@ -128,6 +128,12 @@ impl WindowRenderer for VelloWindowRenderer {
     }
 
     fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+        let alpha_mode = if self.config.base_color.components[3] < 1.0 {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else {
+            wgpu::CompositeAlphaMode::Auto
+        };
+
         // Create wgpu_context::SurfaceRenderer
         let render_surface = pollster::block_on(self.wgpu_context.create_surface(
             window_handle.clone(),
@@ -138,7 +144,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 height,
                 present_mode: PresentMode::AutoVsync,
                 desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                alpha_mode,
                 view_formats: vec![],
             },
             Some(TextureConfiguration {

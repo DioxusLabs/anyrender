@@ -25,6 +25,7 @@ struct ActiveRenderState {
 
 pub struct SkiaWindowRenderer {
     render_state: RenderState,
+    base_color: Color,
 }
 
 impl Default for SkiaWindowRenderer {
@@ -37,6 +38,14 @@ impl SkiaWindowRenderer {
     pub fn new() -> Self {
         Self {
             render_state: RenderState::Suspended,
+            base_color: Color::WHITE,
+        }
+    }
+    pub fn with_base_color(base_color: peniko::Color) -> Self {
+        let base_color = base_color.to_rgba8();
+        Self {
+            render_state: RenderState::Suspended,
+            base_color: Color::from_argb(base_color.a, base_color.r, base_color.g, base_color.b),
         }
     }
 }
@@ -92,11 +101,12 @@ impl WindowRenderer for SkiaWindowRenderer {
         };
 
         surface.canvas().restore_to_count(1);
-        surface.canvas().clear(Color::WHITE);
+        surface.canvas().clear(self.base_color);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
             cache: &mut state.scene_cache,
+            base_color: self.base_color,
         });
         timer.record_time("cmd");
 
