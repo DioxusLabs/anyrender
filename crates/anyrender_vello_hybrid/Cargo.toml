@@ -10,6 +10,7 @@ edition.workspace = true
 
 [features]
 log_frame_times = ["debug_timer/enable"]
+webgl = ["vello_hybrid/webgl"]
 
 [dependencies]
 anyrender = { workspace = true }
