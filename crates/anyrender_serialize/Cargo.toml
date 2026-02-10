@@ -17,7 +17,7 @@ serde_json = { workspace = true }
 zip = { workspace = true }
 sha2 = { workspace = true }
 image = { workspace = true, features = ["png"] }
-klippa = { workspace = true }
+skera = { workspace = true }
 read-fonts = { workspace = true }
 ttf2woff2 = { workspace = true }
 wuff = { workspace = true }

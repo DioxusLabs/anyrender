@@ -2,11 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use klippa::{Plan, SubsetFlags};
 use peniko::FontData;
 use read_fonts::FontRef;
 use read_fonts::collections::int_set::IntSet;
 use read_fonts::types::GlyphId;
+use skera::{Plan, SubsetFlags};
 
 use crate::{ArchiveError, ResourceId, SerializeConfig, sha256_hex};
 
@@ -121,7 +121,7 @@ impl FontWriter {
                     &IntSet::empty(),
                 );
 
-                klippa::subset_font(&font_ref, &plan).map_err(|e| {
+                skera::subset_font(&font_ref, &plan).map_err(|e| {
                     ArchiveError::FontProcessing(format!("Font subsetting failed: {e}"))
                 })?
             } else {
