@@ -116,6 +116,7 @@ impl PaintScene for VelloCpuScenePainter {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [NormalizedCoord],
+        _embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         paint: impl Into<PaintRef<'a>>,
         _brush_alpha: f32,

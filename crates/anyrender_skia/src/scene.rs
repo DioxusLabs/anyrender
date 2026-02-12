@@ -440,6 +440,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [anyrender::NormalizedCoord],
+        _embolden: kurbo::Vec2,
         style: impl Into<peniko::StyleRef<'a>>,
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_alpha: f32,
