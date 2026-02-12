@@ -131,7 +131,7 @@ impl BunnyManager {
         for bunny in &self.bunnies {
             let pos = bunny.position();
             scene.draw_image(
-                bunny_image.clone(),
+                *bunny_image,
                 Affine::translate(pos).then_scale(scale_factor),
             );
         }
