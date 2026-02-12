@@ -24,22 +24,6 @@ impl WebGlRenderContext {
             pending_uploads: Vec::new(),
         }
     }
-
-    /// Flush any pending image uploads to the WebGL renderer.
-    ///
-    /// Must be called before creating a [`WebGlScenePainter`] if images have been
-    /// registered since the last flush.
-    pub fn flush_pending_uploads(&mut self, renderer: &mut vello_hybrid::WebGlRenderer) {
-        for (resource_id, image_data) in self.pending_uploads.drain(..) {
-            let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(&image_data)
-            else {
-                unreachable!();
-            };
-
-            let image_id = renderer.upload_image(&pixmap);
-            self.resource_map.insert(resource_id, image_id);
-        }
-    }
 }
 
 impl Default for WebGlRenderContext {
@@ -73,15 +57,21 @@ enum LayerKind {
 }
 
 pub struct WebGlScenePainter<'s> {
-    ctx: &'s WebGlRenderContext,
+    ctx: &'s mut WebGlRenderContext,
+    renderer: &'s mut vello_hybrid::WebGlRenderer,
     scene: &'s mut vello_hybrid::Scene,
     layer_stack: Vec<LayerKind>,
 }
 
 impl<'s> WebGlScenePainter<'s> {
-    pub fn new(ctx: &'s WebGlRenderContext, scene: &'s mut vello_hybrid::Scene) -> Self {
+    pub fn new(
+        ctx: &'s mut WebGlRenderContext,
+        renderer: &'s mut vello_hybrid::WebGlRenderer,
+        scene: &'s mut vello_hybrid::Scene,
+    ) -> Self {
         Self {
             ctx,
+            renderer,
             scene,
             layer_stack: Vec::with_capacity(16),
         }
@@ -89,11 +79,30 @@ impl<'s> WebGlScenePainter<'s> {
 }
 
 impl WebGlScenePainter<'_> {
-    fn convert_paint(&self, paint: PaintRef<'_>) -> PaintType {
+    /// Upload any images that have been registered with the context but not yet
+    /// sent to the WebGL renderer. Called automatically before resolving image paints.
+    fn flush_pending_uploads(&mut self) {
+        if self.ctx.pending_uploads.is_empty() {
+            return;
+        }
+
+        for (resource_id, image_data) in self.ctx.pending_uploads.drain(..) {
+            let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(&image_data)
+            else {
+                unreachable!();
+            };
+
+            let image_id = self.renderer.upload_image(&pixmap);
+            self.ctx.resource_map.insert(resource_id, image_id);
+        }
+    }
+
+    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
         match paint {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
             Paint::Image(image_brush) => {
+                self.flush_pending_uploads();
                 let image_id = self.ctx.resource_map[&image_brush.image.id];
                 PaintType::Image(ImageBrush {
                     image: ImageSource::OpaqueId(image_id),

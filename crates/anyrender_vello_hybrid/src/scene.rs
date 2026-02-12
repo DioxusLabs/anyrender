@@ -7,7 +7,6 @@ use rustc_hash::FxHashMap;
 use vello_common::paint::{ImageId, ImageSource, PaintType};
 use vello_hybrid::Renderer as VelloHybridRenderer;
 use wgpu::CommandEncoderDescriptor;
-use wgpu_context::SurfaceRenderer;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
@@ -15,12 +14,11 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 ///
 /// Image registration is deferred: calling [`register_image`](RenderContext::register_image)
 /// stores the raw [`ImageData`] in a pending queue and returns an [`ImageResource`]
-/// immediately. The actual GPU upload happens transparently when the renderer's
-/// [`render`](WindowRenderer::render) method is called.
+/// immediately.
 pub struct VelloHybridRenderContext {
     pub(crate) resource_map: FxHashMap<ResourceId, ImageId>,
     next_resource_id: u64,
-    pending_uploads: Vec<(ResourceId, ImageData)>,
+    pub(crate) pending_uploads: Vec<(ResourceId, ImageData)>,
 }
 
 impl VelloHybridRenderContext {
@@ -30,44 +28,6 @@ impl VelloHybridRenderContext {
             next_resource_id: 0,
             pending_uploads: Vec::new(),
         }
-    }
-
-    /// Flush any pending image uploads to the GPU.
-    ///
-    /// This must be called before rendering the scene.
-    pub fn flush_pending_uploads(
-        &mut self,
-        renderer: &mut VelloHybridRenderer,
-        render_surface: &mut SurfaceRenderer<'static>,
-    ) {
-        if self.pending_uploads.is_empty() {
-            return;
-        }
-
-        let mut encoder =
-            render_surface
-                .device()
-                .create_command_encoder(&CommandEncoderDescriptor {
-                    label: Some("Image upload"),
-                });
-
-        for (resource_id, image_data) in self.pending_uploads.drain(..) {
-            let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(&image_data)
-            else {
-                unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
-            };
-
-            let image_id = renderer.upload_image(
-                render_surface.device(),
-                render_surface.queue(),
-                &mut encoder,
-                &pixmap,
-            );
-
-            self.resource_map.insert(resource_id, image_id);
-        }
-
-        render_surface.queue().submit([encoder.finish()]);
     }
 }
 
@@ -96,47 +56,84 @@ impl RenderContext for VelloHybridRenderContext {
     }
 }
 
-fn anyrender_paint_to_vello_hybrid_paint(
-    paint: PaintRef<'_>,
-    ctx: &VelloHybridRenderContext,
-) -> PaintType {
-    match paint {
-        Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
-        Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
-
-        Paint::Image(image_brush) => {
-            let image_id = ctx.resource_map[&image_brush.image.id];
-            PaintType::Image(ImageBrush {
-                image: ImageSource::OpaqueId(image_id),
-                sampler: image_brush.sampler,
-            })
-        }
-
-        // TODO: custom paint
-        Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-    }
-}
-
 pub(crate) enum LayerKind {
     Layer,
     Clip,
 }
 
 pub struct VelloHybridScenePainter<'s> {
-    pub(crate) ctx: &'s VelloHybridRenderContext,
+    pub(crate) ctx: &'s mut VelloHybridRenderContext,
+    pub(crate) renderer: &'s mut VelloHybridRenderer,
+    pub(crate) device: &'s wgpu::Device,
+    pub(crate) queue: &'s wgpu::Queue,
     pub(crate) scene: &'s mut vello_hybrid::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
 }
 
 impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(
-        ctx: &'s VelloHybridRenderContext,
+        ctx: &'s mut VelloHybridRenderContext,
+        renderer: &'s mut VelloHybridRenderer,
+        device: &'s wgpu::Device,
+        queue: &'s wgpu::Queue,
         scene: &'s mut vello_hybrid::Scene,
     ) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             ctx,
+            renderer,
+            device,
+            queue,
             scene,
             layer_stack: Vec::with_capacity(16),
+        }
+    }
+
+    /// Upload any images that have been registered with the context but not yet
+    /// sent to the GPU. This is called automatically before resolving image paints.
+    fn flush_pending_uploads(&mut self) {
+        if self.ctx.pending_uploads.is_empty() {
+            return;
+        }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("Image upload"),
+            });
+
+        for (resource_id, image_data) in self.ctx.pending_uploads.drain(..) {
+            let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(&image_data)
+            else {
+                unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
+            };
+
+            let image_id =
+                self.renderer
+                    .upload_image(self.device, self.queue, &mut encoder, &pixmap);
+
+            self.ctx.resource_map.insert(resource_id, image_id);
+        }
+
+        self.queue.submit([encoder.finish()]);
+    }
+
+    /// Convert a [`PaintRef`] to a [`PaintType`], flushing pending image uploads if needed.
+    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
+        match paint {
+            Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
+            Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
+
+            Paint::Image(image_brush) => {
+                self.flush_pending_uploads();
+                let image_id = self.ctx.resource_map[&image_brush.image.id];
+                PaintType::Image(ImageBrush {
+                    image: ImageSource::OpaqueId(image_id),
+                    sampler: image_brush.sampler,
+                })
+            }
+
+            // TODO: custom paint
+            Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
         }
     }
 }
@@ -190,7 +187,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), self.ctx);
+        let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -207,7 +204,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), self.ctx);
+        let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -227,7 +224,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), self.ctx);
+        let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 

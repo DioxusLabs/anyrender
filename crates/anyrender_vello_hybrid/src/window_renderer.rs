@@ -1,9 +1,6 @@
-use anyrender::{ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
+use anyrender::{WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use peniko::ImageData;
-use rustc_hash::FxHashMap;
 use std::sync::Arc;
-use vello_common::paint::{ImageId, ImageSource};
 use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
@@ -164,12 +161,24 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             return;
         };
 
-        // Flush any pending image uploads before drawing
-        ctx.flush_pending_uploads(&mut state.renderer, &mut state.render_surface);
+        debug_timer!(timer, feature = "log_frame_times");
+
+        // Regenerate the vello scene.
+        {
+            let device = state.render_surface.device();
+            let queue = state.render_surface.queue();
+            draw_fn(&mut VelloHybridScenePainter {
+                ctx,
+                renderer: &mut state.renderer,
+                device,
+                queue,
+                scene: &mut self.scene,
+                layer_stack: Vec::new(),
+            });
+        }
+        timer.record_time("cmd");
 
         let render_surface = &mut state.render_surface;
-
-        debug_timer!(timer, feature = "log_frame_times");
 
         let mut encoder =
             render_surface
@@ -177,14 +186,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 .create_command_encoder(&CommandEncoderDescriptor {
                     label: Some("Render scene"),
                 });
-
-        // Regenerate the vello scene
-        draw_fn(&mut VelloHybridScenePainter {
-            ctx,
-            scene: &mut self.scene,
-            layer_stack: Vec::new(),
-        });
-        timer.record_time("cmd");
 
         let texture_view = render_surface.target_texture_view();
 
