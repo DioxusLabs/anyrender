@@ -27,56 +27,93 @@ mod util;
 pub use error::Error;
 pub use usvg;
 
-use anyrender::PaintScene;
+use anyrender::{ImageResource, PaintScene, RenderContext};
 use kurbo::Affine;
 
 /// Append an SVG to an [`anyrender::PaintScene`].
 ///
 /// This will draw a red box over (some) unsupported elements.
-pub fn render_svg_str<S: PaintScene>(
+///
+/// Any raster images embedded in the SVG are registered with `ctx` and their
+/// [`ImageResource`] handles are appended to `images`, so the caller can
+/// later unregister them via [`RenderContext::unregister_resource`].
+pub fn render_svg_str<S: PaintScene, RC: RenderContext>(
+    ctx: &mut RC,
     scene: &mut S,
+    images: &mut Vec<ImageResource>,
     svg: &str,
     transform: Affine,
 ) -> Result<(), Error> {
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_str(svg, &opt)?;
-    render_svg_tree(scene, &tree, transform);
+    render_svg_tree(ctx, scene, images, &tree, transform);
     Ok(())
 }
 
 /// Append an SVG to an [`anyrender::PaintScene`] (with custom error handling).
 ///
 /// See the [module level documentation](crate#unsupported-features) for a list of some unsupported svg features
-pub fn render_svg_str_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+///
+/// Any raster images embedded in the SVG are registered with `ctx` and their
+/// [`ImageResource`] handles are appended to `images`, so that you can
+/// later unregister them via [`RenderContext::unregister_resource`].
+pub fn render_svg_str_with<S: PaintScene, RC: RenderContext, F: FnMut(&mut S, &usvg::Node)>(
+    ctx: &mut RC,
     scene: &mut S,
+    images: &mut Vec<ImageResource>,
     svg: &str,
     transform: Affine,
     error_handler: &mut F,
 ) -> Result<(), Error> {
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_str(svg, &opt)?;
-    render_svg_tree_with(scene, &tree, transform, error_handler);
+    render_svg_tree_with(ctx, scene, images, &tree, transform, error_handler);
     Ok(())
 }
 
 /// Append a [`usvg::Tree`] to an [`anyrender::PaintScene`].
 ///
 /// This will draw a red box over (some) unsupported elements.
-pub fn render_svg_tree<S: PaintScene>(scene: &mut S, svg: &usvg::Tree, transform: Affine) {
-    render_svg_tree_with(scene, svg, transform, &mut util::default_error_handler);
+///
+/// Any raster images embedded in the SVG are registered with `ctx` and their
+/// [`ImageResource`] handles are appended to `images`, so that you can
+/// later unregister them via [`RenderContext::unregister_resource`].
+pub fn render_svg_tree<S: PaintScene, RC: RenderContext>(
+    ctx: &mut RC,
+    scene: &mut S,
+    images: &mut Vec<ImageResource>,
+    svg: &usvg::Tree,
+    transform: Affine,
+) {
+    render_svg_tree_with(
+        ctx,
+        scene,
+        images,
+        svg,
+        transform,
+        &mut util::default_error_handler,
+    );
 }
 
 /// Append a [`usvg::Tree`] to an [`anyrender::PaintScene`] (with custom error handling).
 ///
 /// See the [module level documentation](crate#unsupported-features) for a list of some unsupported svg features
-pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+///
+/// Any raster images embedded in the SVG are registered with `ctx` and their
+/// [`ImageResource`] handles are appended to `images`, so that you can
+/// later unregister them via [`RenderContext::unregister_resource`].
+pub fn render_svg_tree_with<S: PaintScene, RC: RenderContext, F: FnMut(&mut S, &usvg::Node)>(
+    ctx: &mut RC,
     scene: &mut S,
+    images: &mut Vec<ImageResource>,
     svg: &usvg::Tree,
     transform: Affine,
     error_handler: &mut F,
 ) {
     render::render_group(
+        ctx,
         scene,
+        images,
         svg.root(),
         Affine::IDENTITY,
         transform,

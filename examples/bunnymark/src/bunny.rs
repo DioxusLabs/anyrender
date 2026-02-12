@@ -1,6 +1,6 @@
 use std::{io::Cursor, sync::Arc};
 
-use anyrender::PaintScene;
+use anyrender::{ImageResource, PaintScene, RenderContext};
 use image::ImageReader;
 use kurbo::{Affine, Size, Vec2};
 use peniko::{Blob, ImageBrush, ImageData, ImageSampler};
@@ -70,7 +70,8 @@ impl Bunny {
 
 pub struct BunnyManager {
     canvas_size: Size,
-    bunny_image: ImageBrush,
+    bunny_image_data: ImageData,
+    bunny_image: Option<ImageBrush<ImageResource>>,
     bunnies: Vec<Bunny>,
 }
 
@@ -81,9 +82,25 @@ impl BunnyManager {
                 width: canvas_width,
                 height: canvas_height,
             },
-            bunny_image: create_bunny_image(),
+            bunny_image_data: create_bunny_image_data(),
+            bunny_image: None,
             bunnies: Vec::new(),
         }
+    }
+
+    /// Register the bunny image with the given render context.
+    /// Must be called whenever the backend renderer changes.
+    pub fn register_image(&mut self, ctx: &mut impl RenderContext) {
+        let resource = ctx.register_image(self.bunny_image_data.clone());
+        self.bunny_image = Some(ImageBrush {
+            image: resource,
+            sampler: ImageSampler {
+                x_extend: peniko::Extend::Pad,
+                y_extend: peniko::Extend::Pad,
+                quality: peniko::ImageQuality::Medium,
+                alpha: 1.0,
+            },
+        });
     }
 
     pub fn add_bunnies(&mut self, count: usize) {
@@ -108,17 +125,20 @@ impl BunnyManager {
     }
 
     pub fn draw<S: PaintScene>(&self, scene: &mut S, scale_factor: f64) {
+        let Some(bunny_image) = &self.bunny_image else {
+            return;
+        };
         for bunny in &self.bunnies {
             let pos = bunny.position();
             scene.draw_image(
-                self.bunny_image.as_ref(),
+                bunny_image.clone(),
                 Affine::translate(pos).then_scale(scale_factor),
             );
         }
     }
 }
 
-fn create_bunny_image() -> ImageBrush {
+fn create_bunny_image_data() -> ImageData {
     static BUNNY_IMAGE_DATA: &[u8] = include_bytes!("./bunny.png");
     let raw_bunny_image =
         ImageReader::with_format(Cursor::new(BUNNY_IMAGE_DATA), image::ImageFormat::Png)
@@ -127,19 +147,11 @@ fn create_bunny_image() -> ImageBrush {
             .into_rgba8();
     let width = raw_bunny_image.width();
     let height = raw_bunny_image.height();
-    ImageBrush {
-        image: ImageData {
-            data: Blob::new(Arc::new(raw_bunny_image.into_vec())),
-            format: peniko::ImageFormat::Rgba8,
-            alpha_type: peniko::ImageAlphaType::Alpha,
-            width,
-            height,
-        },
-        sampler: ImageSampler {
-            x_extend: peniko::Extend::Pad,
-            y_extend: peniko::Extend::Pad,
-            quality: peniko::ImageQuality::Medium,
-            alpha: 1.0,
-        },
+    ImageData {
+        data: Blob::new(Arc::new(raw_bunny_image.into_vec())),
+        format: peniko::ImageFormat::Rgba8,
+        alpha_type: peniko::ImageAlphaType::Alpha,
+        width,
+        height,
     }
 }

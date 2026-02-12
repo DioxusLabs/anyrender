@@ -160,6 +160,7 @@ dependencies = [
  "kurbo",
  "peniko",
  "raw-window-handle",
+ "rustc-hash 2.1.1",
  "serde",
 ]
 
@@ -171,7 +172,8 @@ dependencies = [
  "image",
  "kurbo",
  "peniko",
- "read-fonts 0.37.0",
+ "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "sha2",
@@ -203,6 +205,7 @@ dependencies = [
  "peniko",
  "pixels_window_renderer",
  "raw-window-handle",
+ "rustc-hash 2.1.1",
  "skia-safe",
  "softbuffer_window_renderer",
 ]

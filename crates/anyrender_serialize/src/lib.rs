@@ -9,17 +9,18 @@
 //! - `images/<sha256_hash>.png` - Image files (PNG format)
 //! - `fonts/<sha256_hash>.{woff2,ttf}` - Font data files (optionally WOFF2-compressed and subsetted)
 
-use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 
 use image::{ImageBuffer, ImageEncoder, RgbaImage};
 use peniko::{Blob, Brush, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
 use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, StrokeCommand};
+use anyrender::{ImageResource, RecordingRenderContext, RenderContext, ResourceId};
 
 mod font_writer;
 mod json_formatter;
@@ -27,23 +28,23 @@ mod json_formatter;
 use font_writer::FontWriter;
 
 /// A render command with resources replaced by IDs.
-pub type SerializableRenderCommand = RenderCommand<FontResourceId, ResourceId>;
+pub type SerializableRenderCommand = RenderCommand<SerializedFontResourceId, SerializedResourceId>;
 
 /// A brush with images replaced by IDs.
-pub type SerializableBrush = Brush<ImageBrush<ResourceId>>;
+pub type SerializableBrush = Brush<ImageBrush<SerializedResourceId>>;
 
 /// A unique identifier for a serialized resource.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ResourceId(pub usize);
+pub struct SerializedResourceId(pub usize);
 
 /// A reference to a font in a serialized scene.
 ///
 /// Pairs a [`ResourceId`] (which identifies the font file) with a collection index
 /// (which identifies a specific face).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FontResourceId {
-    pub resource_id: ResourceId,
+pub struct SerializedFontResourceId {
+    pub resource_id: SerializedResourceId,
     pub index: u32,
 }
 
@@ -109,7 +110,7 @@ pub struct FontMetadata {
 /// Metadata for a resource in the archive.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResourceEntry {
-    pub id: ResourceId,
+    pub id: SerializedResourceId,
     pub kind: ResourceKind,
     /// The size of the raw decompressed resource data in bytes.
     pub size: usize,
@@ -130,8 +131,8 @@ pub enum ResourceKind {
 /// Collects and deduplicates resources from a scene.
 struct ResourceCollector {
     fonts: FontWriter,
-    /// Maps Blob ID to ResourceId for images
-    image_id_map: HashMap<u64, ResourceId>,
+    /// Maps ResourceId to SerializedResourceId for images
+    image_id_map: FxHashMap<ResourceId, SerializedResourceId>,
     /// Collected images
     images: Vec<ImageData>,
 }
@@ -140,31 +141,39 @@ impl ResourceCollector {
     fn new(config: SerializeConfig) -> Self {
         Self {
             fonts: FontWriter::new(config),
-            image_id_map: HashMap::new(),
+            image_id_map: FxHashMap::default(),
             images: Vec::new(),
         }
     }
 
-    /// Register an image and return its [`ResourceId`].
-    fn register_image(&mut self, image: &ImageData) -> ResourceId {
-        let blob_id = image.data.id();
-        if let Some(&id) = self.image_id_map.get(&blob_id) {
+    /// Register an image and return its [`SerializedResourceId`].
+    fn register_image(
+        &mut self,
+        ctx: &RecordingRenderContext,
+        resource: &ImageResource,
+    ) -> SerializedResourceId {
+        if let Some(&id) = self.image_id_map.get(&resource.id) {
             return id;
         }
 
-        let id = ResourceId(self.images.len());
-        self.image_id_map.insert(blob_id, id);
-        self.images.push(image.clone());
+        let image_data = ctx.image_data().get(&resource.id).unwrap();
+        let id = SerializedResourceId(self.images.len());
+        self.image_id_map.insert(resource.id, id);
+        self.images.push(image_data.clone());
         id
     }
 
-    /// Convert a [`Brush`] to a [`SerializableBrush`] by registering images.
-    fn convert_brush(&mut self, brush: &Brush) -> SerializableBrush {
+    /// Convert a [`Brush<ImageBrush<ImageResource>>`] to a [`SerializableBrush`] by registering images.
+    fn convert_brush(
+        &mut self,
+        ctx: &RecordingRenderContext,
+        brush: &Brush<ImageBrush<ImageResource>>,
+    ) -> SerializableBrush {
         match brush {
             Brush::Solid(color) => Brush::Solid(*color),
             Brush::Gradient(gradient) => Brush::Gradient(gradient.clone()),
             Brush::Image(image_brush) => {
-                let id = self.register_image(&image_brush.image);
+                let id = self.register_image(ctx, &image_brush.image);
                 Brush::Image(ImageBrush {
                     image: id,
                     sampler: image_brush.sampler,
@@ -174,7 +183,11 @@ impl ResourceCollector {
     }
 
     /// Convert a [`RenderCommand`] to a [`SerializableRenderCommand`].
-    fn convert_command(&mut self, cmd: &RenderCommand) -> SerializableRenderCommand {
+    fn convert_command(
+        &mut self,
+        ctx: &RecordingRenderContext,
+        cmd: &RenderCommand,
+    ) -> SerializableRenderCommand {
         match cmd {
             RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(layer.clone()),
             RenderCommand::PushClipLayer(clip) => {
@@ -184,23 +197,23 @@ impl ResourceCollector {
             RenderCommand::Stroke(stroke) => SerializableRenderCommand::Stroke(StrokeCommand {
                 style: stroke.style.clone(),
                 transform: stroke.transform,
-                brush: self.convert_brush(&stroke.brush),
+                brush: self.convert_brush(ctx, &stroke.brush),
                 brush_transform: stroke.brush_transform,
                 shape: stroke.shape.clone(),
             }),
             RenderCommand::Fill(fill) => SerializableRenderCommand::Fill(FillCommand {
                 fill: fill.fill,
                 transform: fill.transform,
-                brush: self.convert_brush(&fill.brush),
+                brush: self.convert_brush(ctx, &fill.brush),
                 brush_transform: fill.brush_transform,
                 shape: fill.shape.clone(),
             }),
             RenderCommand::GlyphRun(glyph_run) => {
                 let resource_id = self.fonts.register(&glyph_run.font_data);
                 self.fonts.record_glyphs(resource_id, &glyph_run.glyphs);
-                let brush = self.convert_brush(&glyph_run.brush);
+                let brush = self.convert_brush(ctx, &glyph_run.brush);
                 SerializableRenderCommand::GlyphRun(GlyphRunCommand {
-                    font_data: FontResourceId {
+                    font_data: SerializedFontResourceId {
                         resource_id,
                         index: self.fonts.face_index(&glyph_run.font_data),
                     },
@@ -225,35 +238,47 @@ impl ResourceCollector {
 /// Reconstructs resources from deserialized data.
 struct ResourceReconstructor {
     fonts: Vec<FontData>,
-    images: Vec<ImageData>,
+    image_resources: Vec<ImageResource>,
 }
 
 impl ResourceReconstructor {
-    fn new(fonts: Vec<FontData>, images: Vec<ImageData>) -> Self {
-        Self { fonts, images }
+    fn new(ctx: &mut impl RenderContext, fonts: Vec<FontData>, images: Vec<ImageData>) -> Self {
+        let image_resources: Vec<ImageResource> = images
+            .into_iter()
+            .map(|image| ctx.register_image(image))
+            .collect();
+
+        Self {
+            fonts,
+            image_resources,
+        }
     }
 
-    fn get_font(&self, id: ResourceId) -> Result<&FontData, ArchiveError> {
+    fn get_font(&self, id: SerializedResourceId) -> Result<&FontData, ArchiveError> {
         self.fonts
             .get(id.0)
             .ok_or(ArchiveError::ResourceNotFound(id))
     }
 
-    fn get_image(&self, id: ResourceId) -> Result<&ImageData, ArchiveError> {
-        self.images
+    fn get_image_resource(&self, id: SerializedResourceId) -> Result<ImageResource, ArchiveError> {
+        self.image_resources
             .get(id.0)
+            .copied()
             .ok_or(ArchiveError::ResourceNotFound(id))
     }
 
-    /// Convert a [`SerializableBrush`] back to a [`Brush`].
-    fn convert_brush(&self, brush: &SerializableBrush) -> Result<Brush, ArchiveError> {
+    /// Convert a [`SerializableBrush`] back to a [`Brush<ImageBrush<ImageResource>>`].
+    fn convert_brush(
+        &self,
+        brush: &SerializableBrush,
+    ) -> Result<Brush<ImageBrush<ImageResource>>, ArchiveError> {
         Ok(match brush {
             Brush::Solid(color) => Brush::Solid(*color),
             Brush::Gradient(gradient) => Brush::Gradient(gradient.clone()),
             Brush::Image(image_brush) => {
-                let image = self.get_image(image_brush.image)?;
+                let resource = self.get_image_resource(image_brush.image)?;
                 Brush::Image(ImageBrush {
-                    image: image.clone(),
+                    image: resource,
                     sampler: image_brush.sampler,
                 })
             }
@@ -381,14 +406,18 @@ fn convert_to_rgba(image: &ImageData) -> Result<Blob<u8>, ArchiveError> {
 
 impl SceneArchive {
     /// Create a new SceneArchive from a recorded Scene.
-    pub fn from_scene(scene: &Scene, config: &SerializeConfig) -> Result<Self, ArchiveError> {
+    pub fn from_scene(
+        ctx: &RecordingRenderContext,
+        scene: &Scene,
+        config: &SerializeConfig,
+    ) -> Result<Self, ArchiveError> {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new(config.clone());
 
         let commands: Vec<_> = scene
             .commands
             .iter()
-            .map(|cmd| collector.convert_command(cmd))
+            .map(|cmd| collector.convert_command(ctx, cmd))
             .collect();
 
         // Normalize all images to RGBA8
@@ -416,7 +445,7 @@ impl SceneArchive {
 
             manifest.images.push(ImageMetadata {
                 entry: ResourceEntry {
-                    id: ResourceId(idx),
+                    id: SerializedResourceId(idx),
                     kind: ResourceKind::Image,
                     size: data.len(),
                     sha256_hash: hash,
@@ -435,7 +464,7 @@ impl SceneArchive {
             let font = result?;
             manifest.fonts.push(FontMetadata {
                 entry: ResourceEntry {
-                    id: ResourceId(idx),
+                    id: SerializedResourceId(idx),
                     kind: ResourceKind::Font,
                     size: font.raw_size,
                     sha256_hash: font.hash,
@@ -454,7 +483,7 @@ impl SceneArchive {
     }
 
     /// Convert this archive back to a Scene.
-    pub fn to_scene(&self) -> Result<Scene, ArchiveError> {
+    pub fn to_scene(&self, ctx: &mut impl RenderContext) -> Result<Scene, ArchiveError> {
         // Convert images back to their original format
         let images: Vec<ImageData> = self
             .images
@@ -489,7 +518,7 @@ impl SceneArchive {
             })
             .collect::<Result<Vec<_>, ArchiveError>>()?;
 
-        let reconstructor = ResourceReconstructor::new(fonts_ttf, images);
+        let reconstructor = ResourceReconstructor::new(ctx, fonts_ttf, images);
 
         let commands: Result<Vec<_>, _> = self
             .commands
@@ -651,7 +680,7 @@ pub enum ArchiveError {
     Image(image::ImageError),
     FontProcessing(String),
     InvalidFormat(String),
-    ResourceNotFound(ResourceId),
+    ResourceNotFound(SerializedResourceId),
     UnsupportedVersion(u32),
 }
 

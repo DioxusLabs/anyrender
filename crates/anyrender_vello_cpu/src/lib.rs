@@ -6,7 +6,7 @@ mod scene;
 mod window_renderer;
 
 pub use image_renderer::VelloCpuImageRenderer;
-pub use scene::VelloCpuScenePainter;
+pub use scene::{VelloCpuRenderContext, VelloCpuScenePainter};
 
 #[cfg(any(
     feature = "pixels_window_renderer",

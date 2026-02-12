@@ -15,7 +15,7 @@ use wgpu_context::{
     DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
 };
 
-use crate::{CustomPaintSource, DEFAULT_THREADS, VelloScenePainter};
+use crate::{CustomPaintSource, DEFAULT_THREADS, VelloRenderContext, VelloScenePainter};
 
 static PAINT_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -122,6 +122,7 @@ impl WindowRenderer for VelloWindowRenderer {
         = VelloScenePainter<'a, 'a>
     where
         Self: 'a;
+    type Context = VelloRenderContext;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -190,7 +191,11 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+    ) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -201,6 +206,7 @@ impl WindowRenderer for VelloWindowRenderer {
 
         // Regenerate the vello scene
         draw_fn(&mut VelloScenePainter {
+            ctx,
             inner: &mut self.scene,
             renderer: Some(&mut state.renderer),
             custom_paint_sources: Some(&mut self.custom_paint_sources),
@@ -237,9 +243,6 @@ impl WindowRenderer for VelloWindowRenderer {
 
         timer.record_time("wait");
         timer.print_times("vello: ");
-
-        // static COUNTER: AtomicU64 = AtomicU64::new(0);
-        // println!("FRAME {}", COUNTER.fetch_add(1, atomic::Ordering::Relaxed));
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();

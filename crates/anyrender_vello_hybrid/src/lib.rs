@@ -6,8 +6,7 @@ mod scene;
 mod webgl_scene;
 mod window_renderer;
 
-pub use scene::ImageManager;
-pub use scene::VelloHybridScenePainter;
+pub use scene::{VelloHybridRenderContext, VelloHybridScenePainter};
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use webgl_scene::*;
-pub use window_renderer::*;
+pub use window_renderer::{VelloHybridRendererOptions, VelloHybridWindowRenderer};

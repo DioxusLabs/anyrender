@@ -1,11 +1,9 @@
-use anyrender::{WindowHandle, WindowRenderer};
+use anyrender::{ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
+use peniko::ImageData;
 use rustc_hash::FxHashMap;
-use std::sync::{
-    Arc,
-    // atomic::{AtomicU64},
-};
-use vello_common::paint::ImageId;
+use std::sync::Arc;
+use vello_common::paint::{ImageId, ImageSource};
 use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
@@ -13,10 +11,7 @@ use vello_hybrid::{
 use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use crate::{VelloHybridScenePainter, scene::ImageManager};
-// use crate::CustomPaintSource;
-
-// static PAINT_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
+use crate::{VelloHybridScenePainter, scene::VelloHybridRenderContext};
 
 // Simple struct to hold the state of the renderer
 struct ActiveRenderState {
@@ -56,8 +51,6 @@ pub struct VelloHybridWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
-    // custom_paint_sources: FxHashMap<u64, Box<dyn CustomPaintSource>>,
-    cached_images: FxHashMap<u64, ImageId>,
 }
 impl VelloHybridWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -79,31 +72,12 @@ impl VelloHybridWindowRenderer {
             render_state: RenderState::Suspended,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings),
-            // custom_paint_sources: FxHashMap::default(),
-            cached_images: FxHashMap::default(),
         }
     }
 
     pub fn current_device_handle(&self) -> Option<&DeviceHandle> {
         self.render_state.current_device_handle()
     }
-
-    // pub fn register_custom_paint_source(&mut self, mut source: Box<dyn CustomPaintSource>) -> u64 {
-    //     if let Some(device_handle) = self.render_state.current_device_handle() {
-    //         source.resume(device_handle);
-    //     }
-    //     let id = PAINT_SOURCE_ID.fetch_add(1, atomic::Ordering::SeqCst);
-    //     self.custom_paint_sources.insert(id, source);
-
-    //     id
-    // }
-
-    // pub fn unregister_custom_paint_source(&mut self, id: u64) {
-    //     if let Some(mut source) = self.custom_paint_sources.remove(&id) {
-    //         source.suspend();
-    //         drop(source);
-    //     }
-    // }
 }
 
 // TODO: Make configurable?
@@ -117,6 +91,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         = VelloHybridScenePainter<'a>
     where
         Self: 'a;
+    type Context = VelloHybridRenderContext;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -137,9 +112,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 view_formats: vec![],
             },
             None,
-            // Some(TextureConfiguration {
-            //     usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            // }),
         ))
         .expect("Error creating surface");
 
@@ -152,12 +124,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 height,
             },
         );
-
-        // Resume custom paint sources
-        // let device_handle = &render_surface.device_handle;
-        // for source in self.custom_paint_sources.values_mut() {
-        //     source.resume(device_handle)
-        // }
 
         // Create a Scene with the correct dimensions
         self.scene =
@@ -172,11 +138,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
     }
 
     fn suspend(&mut self) {
-        // Suspend custom paint sources
-        // for source in self.custom_paint_sources.values_mut() {
-        //     source.suspend()
-        // }
-
         // Set state to Suspended
         self.render_state = RenderState::Suspended;
     }
@@ -194,10 +155,17 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+    ) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
+
+        // Flush any pending image uploads before drawing
+        ctx.flush_pending_uploads(&mut state.renderer, &mut state.render_surface);
 
         let render_surface = &mut state.render_surface;
 
@@ -210,19 +178,11 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     label: Some("Render scene"),
                 });
 
-        let image_manager = ImageManager {
-            renderer: &mut state.renderer,
-            device: render_surface.device(),
-            queue: render_surface.queue(),
-            encoder: &mut encoder,
-            cache: &mut self.cached_images,
-        };
-
         // Regenerate the vello scene
         draw_fn(&mut VelloHybridScenePainter {
+            ctx,
             scene: &mut self.scene,
             layer_stack: Vec::new(),
-            image_manager,
         });
         timer.record_time("cmd");
 
@@ -257,9 +217,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         timer.record_time("wait");
         timer.print_times("vello_hybrid: ");
-
-        // static COUNTER: AtomicU64 = AtomicU64::new(0);
-        // println!("FRAME {}", COUNTER.fetch_add(1, atomic::Ordering::Relaxed));
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();

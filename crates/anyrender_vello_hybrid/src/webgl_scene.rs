@@ -1,43 +1,69 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_hybrid::Scene`].
 
-use anyrender::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
+use anyrender::{
+    Glyph, ImageResource, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+};
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
-use vello_common::paint::PaintType;
-
-use peniko::ImageBrush;
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
-use vello_common::paint::{ImageId, ImageSource};
+use vello_common::paint::{ImageId, ImageSource, PaintType};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
-pub struct WebGlImageManager<'a> {
-    pub(crate) renderer: &'a mut vello_hybrid::WebGlRenderer,
-    pub(crate) cache: &'a mut FxHashMap<u64, ImageId>,
+pub struct WebGlRenderContext {
+    resource_map: FxHashMap<ResourceId, ImageId>,
+    next_id: u64,
+    pending_uploads: Vec<(ResourceId, ImageData)>,
 }
 
-impl<'a> WebGlImageManager<'a> {
-    pub fn new(
-        renderer: &'a mut vello_hybrid::WebGlRenderer,
-        cache: &'a mut FxHashMap<u64, ImageId>,
-    ) -> Self {
-        Self { renderer, cache }
+impl WebGlRenderContext {
+    pub fn new() -> Self {
+        Self {
+            resource_map: FxHashMap::default(),
+            next_id: 0,
+            pending_uploads: Vec::new(),
+        }
     }
 
-    pub(crate) fn upload_image(&mut self, image: &peniko::ImageData) -> ImageId {
-        let peniko_id = image.data.id();
+    /// Flush any pending image uploads to the WebGL renderer.
+    ///
+    /// Must be called before creating a [`WebGlScenePainter`] if images have been
+    /// registered since the last flush.
+    pub fn flush_pending_uploads(&mut self, renderer: &mut vello_hybrid::WebGlRenderer) {
+        for (resource_id, image_data) in self.pending_uploads.drain(..) {
+            let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(&image_data)
+            else {
+                unreachable!();
+            };
 
-        if let Some(atlas_id) = self.cache.get(&peniko_id) {
-            return *atlas_id;
+            let image_id = renderer.upload_image(&pixmap);
+            self.resource_map.insert(resource_id, image_id);
         }
+    }
+}
 
-        let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
-            unreachable!();
-        };
+impl Default for WebGlRenderContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-        let atlas_id = self.renderer.upload_image(&pixmap);
-        self.cache.insert(peniko_id, atlas_id);
-        atlas_id
+impl RenderContext for WebGlRenderContext {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        let resource_id = ResourceId(self.next_id);
+        self.next_id += 1;
+        let width = image.width;
+        let height = image.height;
+        self.pending_uploads.push((resource_id, image));
+        ImageResource {
+            id: resource_id,
+            width,
+            height,
+        }
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.resource_map.remove(&id);
     }
 }
 
@@ -47,37 +73,35 @@ enum LayerKind {
 }
 
 pub struct WebGlScenePainter<'s> {
+    ctx: &'s WebGlRenderContext,
     scene: &'s mut vello_hybrid::Scene,
     layer_stack: Vec<LayerKind>,
-    image_manager: WebGlImageManager<'s>,
 }
 
 impl<'s> WebGlScenePainter<'s> {
-    pub fn new(scene: &'s mut vello_hybrid::Scene, image_manager: WebGlImageManager<'s>) -> Self {
+    pub fn new(ctx: &'s WebGlRenderContext, scene: &'s mut vello_hybrid::Scene) -> Self {
         Self {
+            ctx,
             scene,
             layer_stack: Vec::with_capacity(16),
-            image_manager,
         }
     }
 }
 
 impl WebGlScenePainter<'_> {
-    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
+    fn convert_paint(&self, paint: PaintRef<'_>) -> PaintType {
         match paint {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
-            Paint::Image(image_brush) => self.convert_image_paint(image_brush),
+            Paint::Image(image_brush) => {
+                let image_id = self.ctx.resource_map[&image_brush.image.id];
+                PaintType::Image(ImageBrush {
+                    image: ImageSource::OpaqueId(image_id),
+                    sampler: image_brush.sampler,
+                })
+            }
             Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
         }
-    }
-
-    fn convert_image_paint(&mut self, image_brush: peniko::ImageBrushRef<'_>) -> PaintType {
-        let image_id = self.image_manager.upload_image(image_brush.image);
-        PaintType::Image(ImageBrush {
-            image: ImageSource::OpaqueId(image_id),
-            sampler: image_brush.sampler,
-        })
     }
 }
 

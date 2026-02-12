@@ -3,7 +3,7 @@ use debug_timer::debug_timer;
 use skia_safe::{Color, Surface, graphics};
 use std::sync::Arc;
 
-use crate::{SkiaScenePainter, scene::SkiaSceneCache};
+use crate::{SkiaRenderContext, SkiaScenePainter, scene::SkiaSceneCache};
 
 pub(crate) trait SkiaBackend {
     fn set_size(&mut self, width: u32, height: u32);
@@ -41,13 +41,12 @@ impl SkiaWindowRenderer {
     }
 }
 
-impl SkiaWindowRenderer {}
-
 impl WindowRenderer for SkiaWindowRenderer {
     type ScenePainter<'a>
         = SkiaScenePainter<'a>
     where
         Self: 'a;
+    type Context = SkiaRenderContext;
 
     fn resume(&mut self, window: Arc<dyn anyrender::WindowHandle>, width: u32, height: u32) {
         graphics::set_font_cache_count_limit(100);
@@ -79,7 +78,11 @@ impl WindowRenderer for SkiaWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+    ) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -95,6 +98,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         surface.canvas().clear(Color::WHITE);
 
         draw_fn(&mut SkiaScenePainter {
+            ctx,
             inner: surface.canvas(),
             cache: &mut state.scene_cache,
         });

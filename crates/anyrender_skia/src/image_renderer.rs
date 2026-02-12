@@ -2,7 +2,7 @@ use anyrender::ImageRenderer;
 use debug_timer::debug_timer;
 use skia_safe::{AlphaType, Color, ColorType, ImageInfo, SurfaceProps, graphics, surfaces};
 
-use crate::{SkiaScenePainter, scene::SkiaSceneCache};
+use crate::{SkiaRenderContext, SkiaScenePainter, scene::SkiaSceneCache};
 
 pub struct SkiaImageRenderer {
     image_info: ImageInfo,
@@ -15,6 +15,7 @@ impl ImageRenderer for SkiaImageRenderer {
         = SkiaScenePainter<'a>
     where
         Self: 'a;
+    type Context = SkiaRenderContext;
 
     fn new(width: u32, height: u32) -> Self {
         graphics::set_font_cache_count_limit(100);
@@ -46,6 +47,7 @@ impl ImageRenderer for SkiaImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        ctx: &mut Self::Context,
         draw_fn: F,
         buffer: &mut Vec<u8>,
     ) {
@@ -62,6 +64,7 @@ impl ImageRenderer for SkiaImageRenderer {
         surface.canvas().clear(Color::WHITE);
 
         draw_fn(&mut SkiaScenePainter {
+            ctx,
             inner: surface.canvas(),
             cache: &mut self.scene_cache,
         });
@@ -73,7 +76,12 @@ impl ImageRenderer for SkiaImageRenderer {
         timer.print_times("skia_raster: ");
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+        buffer: &mut [u8],
+    ) {
         debug_timer!(timer, feature = "log_frame_times");
 
         let mut surface = surfaces::wrap_pixels(
@@ -87,6 +95,7 @@ impl ImageRenderer for SkiaImageRenderer {
         surface.canvas().clear(Color::WHITE);
 
         draw_fn(&mut SkiaScenePainter {
+            ctx,
             inner: surface.canvas(),
             cache: &mut self.scene_cache,
         });

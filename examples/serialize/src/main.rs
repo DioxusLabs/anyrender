@@ -5,9 +5,9 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use anyrender::recording::Scene;
-use anyrender::{Glyph, PaintScene, render_to_buffer};
+use anyrender::{Glyph, ImageRenderer, PaintScene, RecordingRenderContext, RenderContext};
 use anyrender_serialize::{SceneArchive, SerializeConfig};
-use anyrender_vello_cpu::VelloCpuImageRenderer;
+use anyrender_vello_cpu::{VelloCpuImageRenderer, VelloCpuRenderContext};
 use image::{ImageBuffer, RgbaImage};
 use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
 use parley::style::{FontFamily, FontStack};
@@ -22,13 +22,23 @@ const HEIGHT: u32 = 300;
 const OUTPUT_DIR: &str = "examples/serialize/_output";
 
 fn main() {
-    let original_scene = create_demo_scene();
+    let mut rec_ctx = RecordingRenderContext::new();
+    let original_scene = create_demo_scene(&mut rec_ctx);
 
-    // Render original prior to serialization/deserialization roundtrip
-    let pixels = render_scene_to_buffer(&original_scene);
-    let img: RgbaImage = ImageBuffer::from_raw(WIDTH, HEIGHT, pixels.to_vec()).unwrap();
-    img.save(Path::new(OUTPUT_DIR).join("original.png"))
-        .unwrap();
+    // Render original prior to serialization/deserialization roundtrip.
+    {
+        let mut ctx = VelloCpuRenderContext::new();
+        let mut renderer = VelloCpuImageRenderer::new(WIDTH, HEIGHT);
+        let mut entries: Vec<_> = rec_ctx.image_data().iter().collect();
+        entries.sort_by_key(|(id, _)| id.0);
+        for (_id, data) in entries {
+            ctx.register_image(data.clone());
+        }
+        let pixels = render_to_vec(&mut renderer, &mut ctx, &original_scene);
+        let img: RgbaImage = ImageBuffer::from_raw(WIDTH, HEIGHT, pixels.to_vec()).unwrap();
+        img.save(Path::new(OUTPUT_DIR).join("original.png"))
+            .unwrap();
+    }
 
     // Serialize
     let archive_path = Path::new(OUTPUT_DIR).join("demo_scene.anyrender.zip");
@@ -37,17 +47,21 @@ fn main() {
     let config = SerializeConfig::new()
         .with_subset_fonts(true)
         .with_woff2_fonts(true);
-    SceneArchive::from_scene(&original_scene, &config)
+    SceneArchive::from_scene(&rec_ctx, &original_scene, &config)
         .unwrap()
         .serialize(writer)
         .unwrap();
 
     // Deserialize
+    let mut renderer = VelloCpuImageRenderer::new(WIDTH, HEIGHT);
+    let mut ctx = VelloCpuRenderContext::new();
     let file = File::open(&archive_path).unwrap();
-    let deserialized_scene = SceneArchive::deserialize(file).unwrap().to_scene().unwrap();
+    let deserialized_scene = SceneArchive::deserialize(file)
+        .unwrap()
+        .to_scene(&mut ctx)
+        .unwrap();
 
-    // Render deserialized scene to verify against original
-    let pixels = render_scene_to_buffer(&deserialized_scene);
+    let pixels = render_to_vec(&mut renderer, &mut ctx, &deserialized_scene);
     let img: RgbaImage = ImageBuffer::from_raw(WIDTH, HEIGHT, pixels.to_vec()).unwrap();
     img.save(Path::new(OUTPUT_DIR).join("roundtrip.png"))
         .unwrap();
@@ -58,7 +72,7 @@ fn main() {
     assert_eq!(original_img.to_rgba8(), roundtrip_img.to_rgba8());
 }
 
-fn create_demo_scene() -> Scene {
+fn create_demo_scene(render_ctx: &mut impl RenderContext) -> Scene {
     let mut scene = Scene::new();
 
     scene.fill(
@@ -169,12 +183,16 @@ fn create_demo_scene() -> Scene {
 
     // Draw with an image brush (checkerboard pattern)
     let checkerboard = create_checkerboard_image(8, 8);
-    let image_brush = ImageBrush::new(checkerboard);
+    let resource = render_ctx.register_image(checkerboard);
+    let image_brush: ImageBrush<anyrender::ImageResource> = ImageBrush {
+        image: resource,
+        sampler: Default::default(),
+    };
 
     scene.fill(
         Fill::NonZero,
         Affine::translate((220.0, 180.0)) * Affine::scale(8.0),
-        image_brush.as_ref(),
+        image_brush,
         None,
         &Rect::new(0.0, 0.0, 16.0, 12.0),
     );
@@ -302,13 +320,19 @@ fn create_checkerboard_image(width: u32, height: u32) -> ImageData {
     }
 }
 
-/// Render a scene to an RGBA buffer using Vello CPU.
-fn render_scene_to_buffer(scene: &Scene) -> Vec<u8> {
-    render_to_buffer::<VelloCpuImageRenderer, _>(
+/// Render a scene to an RGBA buffer using an already-configured renderer and context.
+fn render_to_vec(
+    renderer: &mut VelloCpuImageRenderer,
+    ctx: &mut VelloCpuRenderContext,
+    scene: &Scene,
+) -> Vec<u8> {
+    let mut buf = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
+    renderer.render_to_vec(
+        ctx,
         |painter| {
             painter.append_scene(scene.clone(), Affine::IDENTITY);
         },
-        WIDTH,
-        HEIGHT,
-    )
+        &mut buf,
+    );
+    buf
 }
