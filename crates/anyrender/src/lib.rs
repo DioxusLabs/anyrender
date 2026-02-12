@@ -28,7 +28,7 @@
 //!  - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu)
 
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrush, StyleRef};
 use recording::RenderCommand;
 use std::sync::Arc;
 
@@ -39,18 +39,23 @@ pub use types::*;
 mod null_backend;
 pub use null_backend::*;
 pub mod recording;
-pub use recording::Scene;
+pub use recording::{RecordingRenderContext, Scene};
 
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
+    type Context: RenderContext;
     fn resume(&mut self, window: Arc<dyn WindowHandle>, width: u32, height: u32);
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
     fn set_size(&mut self, width: u32, height: u32);
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+    );
 }
 
 /// Abstraction for rendering a scene to an image buffer
@@ -58,26 +63,34 @@ pub trait ImageRenderer {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
+    type Context: RenderContext;
     fn new(width: u32, height: u32) -> Self;
     fn resize(&mut self, width: u32, height: u32);
     fn reset(&mut self);
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        ctx: &mut Self::Context,
         draw_fn: F,
         vec: &mut Vec<u8>,
     );
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]);
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+        buffer: &mut [u8],
+    );
 }
 
 /// Draw a scene to a buffer using an `ImageRenderer`
 pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
+    ctx: &mut R::Context,
     draw_fn: F,
     width: u32,
     height: u32,
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity((width * height * 4) as usize);
     let mut renderer = R::new(width, height);
-    renderer.render_to_vec(draw_fn, &mut buf);
+    renderer.render_to_vec(ctx, draw_fn, &mut buf);
 
     buf
 }
@@ -171,10 +184,10 @@ pub trait PaintScene {
                 RenderCommand::Stroke(cmd) => self.stroke(
                     &cmd.style,
                     scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    match &cmd.brush {
+                        Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
+                        Brush::Gradient(gradient) => Paint::Gradient(gradient),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_transform,
                     &cmd.shape,
@@ -182,10 +195,10 @@ pub trait PaintScene {
                 RenderCommand::Fill(cmd) => self.fill(
                     cmd.fill,
                     scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    match &cmd.brush {
+                        Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
+                        Brush::Gradient(gradient) => Paint::Gradient(gradient),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_transform,
                     &cmd.shape,
@@ -196,10 +209,10 @@ pub trait PaintScene {
                     cmd.hint,
                     &cmd.normalized_coords,
                     &cmd.style,
-                    match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                    match &cmd.brush {
+                        Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
+                        Brush::Gradient(gradient) => Paint::Gradient(gradient),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_alpha,
                     scene_transform * cmd.transform,
@@ -217,19 +230,16 @@ pub trait PaintScene {
         }
     }
 
-    /// Utility method to draw an image at it's natural size. For more advanced image drawing use the `fill` method
-    fn draw_image(&mut self, image: ImageBrushRef, transform: Affine) {
+    /// Utility method to draw an image at its natural size. For more advanced image drawing use the `fill` method
+    fn draw_image(&mut self, image: ImageBrush<ImageResource>, transform: Affine) {
+        let width = image.image.width as f64;
+        let height = image.image.height as f64;
         self.fill(
             Fill::NonZero,
             transform,
             image,
             None,
-            &Rect::new(
-                0.0,
-                0.0,
-                image.image.width as f64,
-                image.image.height as f64,
-            ),
+            &Rect::new(0.0, 0.0, width, height),
         );
     }
 }

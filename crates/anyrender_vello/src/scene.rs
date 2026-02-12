@@ -1,20 +1,67 @@
-use anyrender::{CustomPaint, NormalizedCoord, Paint, PaintRef, PaintScene};
+use anyrender::{
+    CustomPaint, ImageResource, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+    ResourceId,
+};
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, StyleRef};
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 
 use crate::{CustomPaintSource, custom_paint_source::CustomPaintCtx};
 
+pub struct VelloRenderContext {
+    pub(crate) resource_map: FxHashMap<ResourceId, ImageData>,
+    next_resource_id: u64,
+}
+
+impl VelloRenderContext {
+    pub fn new() -> Self {
+        Self {
+            resource_map: FxHashMap::default(),
+            next_resource_id: 0,
+        }
+    }
+}
+
+impl Default for VelloRenderContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderContext for VelloRenderContext {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        let resource_id = ResourceId(self.next_resource_id);
+        self.next_resource_id += 1;
+        let width = image.width;
+        let height = image.height;
+        self.resource_map.insert(resource_id, image);
+        ImageResource {
+            id: resource_id,
+            width,
+            height,
+        }
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.resource_map.remove(&id);
+    }
+}
+
 pub struct VelloScenePainter<'r, 's> {
+    pub(crate) ctx: &'r VelloRenderContext,
     pub(crate) renderer: Option<&'r mut VelloRenderer>,
     pub(crate) custom_paint_sources: Option<&'r mut FxHashMap<u64, Box<dyn CustomPaintSource>>>,
     pub(crate) inner: &'s mut vello::Scene,
 }
 
 impl VelloScenePainter<'_, '_> {
-    pub fn new<'s>(scene: &'s mut vello::Scene) -> VelloScenePainter<'static, 's> {
+    pub fn new<'r, 's>(
+        ctx: &'r VelloRenderContext,
+        scene: &'s mut vello::Scene,
+    ) -> VelloScenePainter<'r, 's> {
         VelloScenePainter {
+            ctx,
             renderer: None,
             custom_paint_sources: None,
             inner: scene,
@@ -42,6 +89,22 @@ impl VelloScenePainter<'_, '_> {
 
         // Return dummy image
         Some(ImageBrush::new(texture_handle.0))
+    }
+
+    /// Convert a PaintRef to an owned peniko::Brush, looking up image resources from the context.
+    fn paint_to_brush(&self, paint: PaintRef<'_>) -> Option<peniko::Brush> {
+        Some(match paint {
+            Paint::Solid(color) => peniko::Brush::Solid(color),
+            Paint::Gradient(gradient) => peniko::Brush::Gradient(gradient.clone()),
+            Paint::Image(image_brush) => {
+                let image_data = self.ctx.resource_map[&image_brush.image.id].clone();
+                peniko::Brush::Image(ImageBrush {
+                    image: image_data,
+                    sampler: image_brush.sampler,
+                })
+            }
+            Paint::Custom(_) => return None,
+        })
     }
 }
 
@@ -77,10 +140,11 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let paint_ref: PaintRef<'_> = paint_ref.into();
-        let brush_ref: BrushRef<'_> = paint_ref.into();
+        let Some(brush) = self.paint_to_brush(paint_ref.into()) else {
+            return;
+        };
         self.inner
-            .stroke(style, transform, brush_ref, brush_transform, shape);
+            .stroke(style, transform, &brush, brush_transform, shape);
     }
 
     fn fill<'a>(
@@ -93,11 +157,16 @@ impl PaintScene for VelloScenePainter<'_, '_> {
     ) {
         let paint: PaintRef<'_> = paint.into();
 
-        let dummy_image: peniko::ImageBrush;
-        let brush_ref: BrushRef<'_> = match paint {
-            Paint::Solid(color) => BrushRef::Solid(color),
-            Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
-            Paint::Image(image) => BrushRef::Image(image),
+        let brush: peniko::Brush = match paint {
+            Paint::Solid(color) => peniko::Brush::Solid(color),
+            Paint::Gradient(gradient) => peniko::Brush::Gradient(gradient.clone()),
+            Paint::Image(image_brush) => {
+                let image_data = self.ctx.resource_map[&image_brush.image.id].clone();
+                peniko::Brush::Image(ImageBrush {
+                    image: image_data,
+                    sampler: image_brush.sampler,
+                })
+            }
             Paint::Custom(custom_paint) => {
                 let Some(custom_paint) = custom_paint.downcast_ref::<CustomPaint>() else {
                     return;
@@ -105,13 +174,12 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                 let Some(image) = self.render_custom_source(*custom_paint) else {
                     return;
                 };
-                dummy_image = image;
-                BrushRef::Image(dummy_image.as_ref())
+                peniko::Brush::Image(image)
             }
         };
 
         self.inner
-            .fill(style, transform, brush_ref, brush_transform, shape);
+            .fill(style, transform, &brush, brush_transform, shape);
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -127,23 +195,44 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
-        self.inner
+        let paint: PaintRef<'_> = paint.into();
+        let resource_map = &self.ctx.resource_map;
+
+        let glyph_iter = glyphs.map(|g: anyrender::Glyph| vello::Glyph {
+            id: g.id,
+            x: g.x,
+            y: g.y,
+        });
+
+        let mut glyph_renderer = self
+            .inner
             .draw_glyphs(font)
             .font_size(font_size)
             .hint(hint)
             .normalized_coords(normalized_coords)
-            .brush(paint.into())
             .brush_alpha(brush_alpha)
             .transform(transform)
-            .glyph_transform(glyph_transform)
-            .draw(
-                style,
-                glyphs.map(|g: anyrender::Glyph| vello::Glyph {
-                    id: g.id,
-                    x: g.x,
-                    y: g.y,
-                }),
-            );
+            .glyph_transform(glyph_transform);
+
+        match paint {
+            Paint::Solid(color) => {
+                glyph_renderer = glyph_renderer.brush(peniko::Brush::Solid(color))
+            }
+            Paint::Gradient(gradient) => {
+                glyph_renderer = glyph_renderer.brush(peniko::Brush::Gradient(gradient))
+            }
+            Paint::Image(image_brush) => {
+                let image_data = &resource_map[&image_brush.image.id];
+                let brush = ImageBrush {
+                    image: image_data,
+                    sampler: image_brush.sampler,
+                };
+                glyph_renderer = glyph_renderer.brush(brush);
+            }
+            Paint::Custom(_) => {}
+        }
+
+        glyph_renderer.draw(style, glyph_iter);
     }
 
     fn draw_box_shadow(

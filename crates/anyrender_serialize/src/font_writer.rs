@@ -1,6 +1,6 @@
 //! Write-side font processing: collection, deduplication, subsetting, and encoding.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use peniko::FontData;
 use read_fonts::FontRef;
@@ -8,7 +8,7 @@ use read_fonts::collections::int_set::IntSet;
 use read_fonts::types::GlyphId;
 use skera::{Plan, SubsetFlags};
 
-use crate::{ArchiveError, ResourceId, SerializeConfig, sha256_hex};
+use crate::{ArchiveError, SerializeConfig, SerializedResourceId, sha256_hex};
 
 /// A font that has been processed (optionally subsetted and/or WOFF2-encoded) and is
 /// ready to be written into the archive.
@@ -35,23 +35,23 @@ pub(crate) struct FontWriter {
     /// Map `(Blob ID, face index)` to [`ResourceId`].
     /// When subsetting is disabled, the face in the `(Blob ID, face index)` tuple is always 0.
     /// This is because multiple faces sharing the same TTC should be keyed together.
-    id_map: HashMap<(u64, u32), ResourceId>,
+    id_map: FxHashMap<(u64, u32), SerializedResourceId>,
     fonts: Vec<FontData>,
-    glyph_ids: Vec<HashSet<u32>>,
+    glyph_ids: Vec<FxHashSet<u32>>,
 }
 
 impl FontWriter {
     pub fn new(config: SerializeConfig) -> Self {
         Self {
             config,
-            id_map: HashMap::new(),
+            id_map: FxHashMap::default(),
             fonts: Vec::new(),
             glyph_ids: Vec::new(),
         }
     }
 
     /// Register a font and return its [`ResourceId`].
-    pub fn register(&mut self, font: &FontData) -> ResourceId {
+    pub fn register(&mut self, font: &FontData) -> SerializedResourceId {
         let key = if self.config.subset_fonts {
             (font.data.id(), font.index)
         } else {
@@ -64,15 +64,15 @@ impl FontWriter {
             return id;
         }
 
-        let id = ResourceId(self.fonts.len());
+        let id = SerializedResourceId(self.fonts.len());
         self.id_map.insert(key, id);
         self.fonts.push(font.clone());
-        self.glyph_ids.push(HashSet::new());
+        self.glyph_ids.push(FxHashSet::default());
         id
     }
 
     /// Record glyph IDs used for a font resource (used for subsetting).
-    pub fn record_glyphs(&mut self, id: ResourceId, glyphs: &[anyrender::Glyph]) {
+    pub fn record_glyphs(&mut self, id: SerializedResourceId, glyphs: &[anyrender::Glyph]) {
         if self.config.subset_fonts {
             let glyph_set = &mut self.glyph_ids[id.0];
             for glyph in glyphs {

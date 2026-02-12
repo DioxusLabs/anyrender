@@ -22,6 +22,7 @@ peniko = { workspace = true }
 raw-window-handle = { workspace = true }
 softbuffer_window_renderer = { workspace = true, optional = true }
 pixels_window_renderer = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
 skia-safe = { version = "0.91.0", features = ["gl", "pdf", "textlayout"]}
 oaty = "0.1"
 hashbrown = "0.16.0"

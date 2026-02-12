@@ -2,8 +2,8 @@
 
 use std::io::{Cursor, Read};
 
-use anyrender::recording::{RenderCommand, Scene};
-use anyrender::{Glyph, PaintScene};
+use anyrender::recording::{RecordingRenderContext, RenderCommand, Scene};
+use anyrender::{Glyph, ImageResource, PaintScene, RenderContext};
 use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
@@ -17,7 +17,7 @@ use zip::ZipArchive;
 
 #[test]
 fn test_empty_scene_roundtrip() {
-    assert_scene_roundtrip(&Scene::new());
+    assert_scene_roundtrip(&RecordingRenderContext::new(), &Scene::new());
 }
 
 /// Tests that all non-image and non-font command types survive a roundtrip.
@@ -98,7 +98,7 @@ fn test_all_command_types_roundtrip() {
 
     scene.pop_layer();
 
-    assert_scene_roundtrip(&scene);
+    assert_scene_roundtrip(&RecordingRenderContext::new(), &scene);
 }
 
 #[test]
@@ -117,16 +117,23 @@ fn test_image_data_roundtrip() {
         height: 2,
     };
 
+    let mut ctx = RecordingRenderContext::new();
+    let resource = ctx.register_image(image_data);
+    let image_brush = ImageBrush {
+        image: resource,
+        sampler: Default::default(),
+    };
+
     let mut scene = Scene::new();
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
-        ImageBrush::new(image_data).as_ref(),
+        image_brush,
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
     );
 
-    let data = serialize_to_vec(&scene, &default_config()).unwrap();
+    let data = serialize_to_vec(&ctx, &scene, &default_config()).unwrap();
     let archive = archive_deserialize_from_slice(&data).unwrap();
 
     // Verify manifest metadata
@@ -136,32 +143,38 @@ fn test_image_data_roundtrip() {
     assert_eq!(archive.manifest.images[0].entry.size, 16);
 
     // Verify pixel data survives the roundtrip
-    let restored = archive.to_scene().unwrap();
-    assert_eq!(extract_image_pixels(&restored, 0), pixels);
+    let mut restore_ctx = RecordingRenderContext::new();
+    let restored = archive.to_scene(&mut restore_ctx).unwrap();
+    assert_eq!(extract_image_pixels(&restored, &restore_ctx, 0), pixels);
 }
 
 #[test]
 fn test_image_deduplication() {
-    let image_brush = ImageBrush::new(make_1x1_image(255, 0, 0, 255));
+    let mut ctx = RecordingRenderContext::new();
+    let resource = ctx.register_image(make_1x1_image(255, 0, 0, 255));
+    let image_brush: ImageBrush<ImageResource> = ImageBrush {
+        image: resource,
+        sampler: Default::default(),
+    };
 
     let mut scene = Scene::new();
     // Same image drawn twice
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
-        image_brush.as_ref(),
+        image_brush.clone(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
     scene.fill(
         Fill::NonZero,
         Affine::translate((50.0, 0.0)),
-        image_brush.as_ref(),
+        image_brush,
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
 
-    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    let archive = SceneArchive::from_scene(&ctx, &scene, &default_config()).unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.images.len(), 1); // deduplicated
 }
@@ -171,34 +184,48 @@ fn test_multiple_different_images() {
     let red_pixels = vec![255, 0, 0, 255];
     let blue_pixels = vec![0, 0, 255, 255];
 
+    let mut ctx = RecordingRenderContext::new();
+    let red_resource = ctx.register_image(make_1x1_image(255, 0, 0, 255));
+    let blue_resource = ctx.register_image(make_1x1_image(0, 0, 255, 255));
+
     let mut scene = Scene::new();
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
-        ImageBrush::new(make_1x1_image(255, 0, 0, 255)).as_ref(),
+        ImageBrush::<ImageResource> {
+            image: red_resource,
+            sampler: Default::default(),
+        },
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
-        ImageBrush::new(make_1x1_image(0, 0, 255, 255)).as_ref(),
+        ImageBrush::<ImageResource> {
+            image: blue_resource,
+            sampler: Default::default(),
+        },
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
     );
 
-    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    let archive = SceneArchive::from_scene(&ctx, &scene, &default_config()).unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.images.len(), 2);
 
     // Verify pixel data survives roundtrip
     let data = archive_serialize_to_vec(&archive).unwrap();
+    let mut restore_ctx = RecordingRenderContext::new();
     let restored = archive_deserialize_from_slice(&data)
         .unwrap()
-        .to_scene()
+        .to_scene(&mut restore_ctx)
         .unwrap();
-    assert_eq!(extract_image_pixels(&restored, 0), red_pixels);
-    assert_eq!(extract_image_pixels(&restored, 1), blue_pixels);
+    assert_eq!(extract_image_pixels(&restored, &restore_ctx, 0), red_pixels);
+    assert_eq!(
+        extract_image_pixels(&restored, &restore_ctx, 1),
+        blue_pixels
+    );
 }
 
 #[test]
@@ -206,7 +233,7 @@ fn test_glyph_run_roundtrip() {
     let font = roboto_font();
 
     let scene = build_glyph_scene(&font);
-    let data = serialize_to_vec(&scene, &default_config()).unwrap();
+    let data = serialize_to_vec(&RecordingRenderContext::new(), &scene, &default_config()).unwrap();
     let archive = archive_deserialize_from_slice(&data).unwrap();
 
     // Verify font metadata
@@ -214,7 +241,9 @@ fn test_glyph_run_roundtrip() {
 
     assert!(archive.manifest.fonts[0].entry.path.ends_with(".ttf"));
     assert_eq!(archive.manifest.fonts[0].entry.size, font.data.data().len(),);
-    let restored = archive.to_scene().unwrap();
+    let restored = archive
+        .to_scene(&mut RecordingRenderContext::new())
+        .unwrap();
     assert_glyph_run_preserved(&restored);
 }
 
@@ -225,7 +254,7 @@ fn test_glyph_run_roundtrip_with_subsetting_and_woff2() {
 
     let scene = build_glyph_scene(&font);
     let config = subset_and_woff2_config();
-    let data = serialize_to_vec(&scene, &config).unwrap();
+    let data = serialize_to_vec(&RecordingRenderContext::new(), &scene, &config).unwrap();
     let archive = archive_deserialize_from_slice(&data).unwrap();
 
     assert_eq!(archive.manifest.fonts.len(), 1);
@@ -267,7 +296,9 @@ fn test_glyph_run_roundtrip_with_subsetting_and_woff2() {
     }
 
     // Verify the scene roundtrip
-    let restored = archive.to_scene().unwrap();
+    let restored = archive
+        .to_scene(&mut RecordingRenderContext::new())
+        .unwrap();
     assert_glyph_run_preserved(&restored);
 }
 
@@ -297,7 +328,9 @@ fn test_font_deduplication() {
         );
     }
 
-    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    let archive =
+        SceneArchive::from_scene(&RecordingRenderContext::new(), &scene, &default_config())
+            .unwrap();
     assert_eq!(archive.commands.len(), 2);
     assert_eq!(archive.fonts.len(), 1); // deduplicated
 }
@@ -318,7 +351,7 @@ fn test_archive_contains_expected_files() {
         &Rect::new(0.0, 0.0, 100.0, 100.0),
     );
 
-    let data = serialize_to_vec(&scene, &default_config()).unwrap();
+    let data = serialize_to_vec(&RecordingRenderContext::new(), &scene, &default_config()).unwrap();
     let mut zip = ZipArchive::new(Cursor::new(&data)).unwrap();
 
     // Verify resources.json
@@ -354,14 +387,14 @@ fn subset_and_woff2_config() -> SerializeConfig {
         .with_woff2_fonts(true)
 }
 
-fn serialize_to_vec(scene: &Scene, config: &SerializeConfig) -> Result<Vec<u8>, ArchiveError> {
+fn serialize_to_vec(
+    ctx: &RecordingRenderContext,
+    scene: &Scene,
+    config: &SerializeConfig,
+) -> Result<Vec<u8>, ArchiveError> {
     let mut buf = Cursor::new(Vec::new());
-    SceneArchive::from_scene(scene, config)?.serialize(&mut buf)?;
+    SceneArchive::from_scene(ctx, scene, config)?.serialize(&mut buf)?;
     Ok(buf.into_inner())
-}
-
-fn deserialize_from_slice(data: &[u8]) -> Result<Scene, ArchiveError> {
-    SceneArchive::deserialize(Cursor::new(data))?.to_scene()
 }
 
 fn archive_serialize_to_vec(archive: &SceneArchive) -> Result<Vec<u8>, ArchiveError> {
@@ -374,9 +407,12 @@ fn archive_deserialize_from_slice(data: &[u8]) -> Result<SceneArchive, ArchiveEr
     SceneArchive::deserialize(Cursor::new(data))
 }
 
-fn assert_scene_roundtrip(scene: &Scene) {
-    let data = serialize_to_vec(scene, &default_config()).unwrap();
-    let restored = deserialize_from_slice(&data).unwrap();
+fn assert_scene_roundtrip(ctx: &RecordingRenderContext, scene: &Scene) {
+    let data = serialize_to_vec(ctx, scene, &default_config()).unwrap();
+    let restored = archive_deserialize_from_slice(&data)
+        .unwrap()
+        .to_scene(&mut RecordingRenderContext::new())
+        .unwrap();
     assert_eq!(*scene, restored);
 }
 
@@ -390,10 +426,20 @@ fn make_1x1_image(r: u8, g: u8, b: u8, a: u8) -> ImageData {
     }
 }
 
-fn extract_image_pixels(scene: &Scene, command_index: usize) -> Vec<u8> {
+fn extract_image_pixels(
+    scene: &Scene,
+    render_ctx: &RecordingRenderContext,
+    command_index: usize,
+) -> Vec<u8> {
     match &scene.commands[command_index] {
         RenderCommand::Fill(f) => match &f.brush {
-            Brush::Image(img) => img.image.data.data().to_vec(),
+            Brush::Image(img) => {
+                let data = render_ctx
+                    .image_data()
+                    .get(&img.image.id)
+                    .expect("Image data not found for resource");
+                data.data.data().to_vec()
+            }
             other => panic!("Expected image brush, got {other:?}"),
         },
         other => panic!("Expected Fill command, got {other:?}"),

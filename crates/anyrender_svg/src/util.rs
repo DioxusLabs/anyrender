@@ -7,7 +7,7 @@ use peniko::color::{self, DynamicColor};
 use peniko::{Color, Fill, Mix};
 
 #[cfg(feature = "image")]
-use peniko::{Blob, ImageBrush};
+use peniko::Blob;
 
 pub(crate) fn to_affine(ts: &usvg::Transform) -> Affine {
     let usvg::Transform {
@@ -115,18 +115,16 @@ pub(crate) fn to_bez_path(path: &usvg::Path) -> BezPath {
 }
 
 #[cfg(feature = "image")]
-pub(crate) fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) -> ImageBrush {
-    use peniko::ImageData;
-
+pub(crate) fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) -> peniko::ImageData {
     let (width, height) = (image.width(), image.height());
     let image_data: Vec<u8> = image.into_vec();
-    ImageBrush::new(ImageData {
+    peniko::ImageData {
         data: Blob::new(std::sync::Arc::new(image_data)),
         format: peniko::ImageFormat::Rgba8,
         alpha_type: peniko::ImageAlphaType::Alpha,
         width,
         height,
-    })
+    }
 }
 
 pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Paint, Affine)> {

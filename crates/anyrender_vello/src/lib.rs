@@ -7,7 +7,7 @@ pub mod custom_paint_source;
 
 pub use custom_paint_source::*;
 pub use image_renderer::VelloImageRenderer;
-pub use scene::VelloScenePainter;
+pub use scene::{VelloRenderContext, VelloScenePainter};
 pub use window_renderer::{VelloRendererOptions, VelloWindowRenderer};
 
 pub use wgpu;

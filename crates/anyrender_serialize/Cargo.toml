@@ -12,6 +12,7 @@ edition.workspace = true
 anyrender = { workspace = true, features = ["serde"] }
 peniko = { workspace = true }
 
+rustc-hash = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 zip = { workspace = true }
@@ -25,6 +26,7 @@ wuff = { workspace = true }
 [dev-dependencies]
 kurbo = { workspace = true }
 peniko = { workspace = true }
+rustc-hash = { workspace = true }
 serde_json = { workspace = true }
 wuff = { workspace = true }
 zip = { workspace = true }

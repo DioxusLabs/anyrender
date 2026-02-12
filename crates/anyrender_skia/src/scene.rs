@@ -1,4 +1,6 @@
-use anyrender::PaintScene;
+use anyrender::{ImageResource, PaintScene, RenderContext, ResourceId};
+use peniko::ImageData;
+use rustc_hash::FxHashMap;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
     MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, Point, RRect, Rect, Shader, Typeface,
@@ -12,13 +14,53 @@ use crate::cache::{
     NormalizedTypefaceCacheKeyBorrowed,
 };
 
+pub struct SkiaRenderContext {
+    pub(crate) resource_map: FxHashMap<ResourceId, skia_safe::Image>,
+    next_resource_id: u64,
+}
+
+impl SkiaRenderContext {
+    pub fn new() -> Self {
+        Self {
+            resource_map: FxHashMap::default(),
+            next_resource_id: 0,
+        }
+    }
+}
+
+impl Default for SkiaRenderContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderContext for SkiaRenderContext {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        let resource_id = ResourceId(self.next_resource_id);
+        self.next_resource_id += 1;
+        let width = image.width;
+        let height = image.height;
+        let sk_image = sk_peniko::skia_image_from_peniko(&image);
+        self.resource_map.insert(resource_id, sk_image);
+        ImageResource {
+            id: resource_id,
+            width,
+            height,
+        }
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.resource_map.remove(&id);
+    }
+}
+
 pub(crate) struct SkiaSceneCache {
     paint: Paint,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
-    image_shader: GenerationalCache<u64, Shader>,
+    image_shader: GenerationalCache<ResourceId, Shader>,
     font: GenerationalCache<FontCacheKey, Font>,
     font_mgr: FontMgr,
     glyph_id_buf: Vec<GlyphId>,
@@ -52,6 +94,7 @@ impl Default for SkiaSceneCache {
 }
 
 pub struct SkiaScenePainter<'a> {
+    pub(crate) ctx: &'a SkiaRenderContext,
     pub(crate) inner: &'a Canvas,
     pub(crate) cache: &'a mut SkiaSceneCache,
 }
@@ -111,17 +154,22 @@ impl SkiaScenePainter<'_> {
                     .set_shader(sk_peniko::shader_from_gradient(gradient, brush_transform));
             }
             anyrender::Paint::Image(image_brush) => {
-                if let Some(shader) = self.cache.image_shader.hit(&image_brush.image.data.id()) {
+                if let Some(shader) = self.cache.image_shader.hit(&image_brush.image.id) {
                     self.cache.paint.set_shader(shader.clone());
                     return;
                 }
 
-                let image_shader = sk_peniko::shader_from_image_brush(image_brush, brush_transform);
+                let sk_image = &self.ctx.resource_map[&image_brush.image.id];
+                let image_shader = sk_peniko::shader_from_skia_image(
+                    sk_image,
+                    image_brush.sampler,
+                    brush_transform,
+                );
 
                 if let Some(shader) = &image_shader {
                     self.cache
                         .image_shader
-                        .insert(image_brush.image.data.id(), shader.clone());
+                        .insert(image_brush.image.id, shader.clone());
                 }
 
                 self.cache.paint.set_shader(image_shader);
@@ -524,11 +572,11 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-mod sk_peniko {
+pub(crate) mod sk_peniko {
     use peniko::color::{AlphaColor, ColorSpaceTag, HueDirection, Srgb};
     use peniko::{
-        BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageBrush, ImageData,
-        ImageFormat, Mix,
+        BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageData, ImageFormat,
+        Mix,
     };
     use peniko::{Fill, color::DynamicColor};
     use skia_safe::AlphaType as SkAlphaType;
@@ -544,12 +592,7 @@ mod sk_peniko {
     use skia_safe::gradient_shader::interpolation::ColorSpace as SkGradientShaderColorSpace;
     use skia_safe::gradient_shader::interpolation::HueMethod as SkGradientShaderHueMethod;
 
-    pub(super) fn shader_from_image_brush(
-        image_brush: ImageBrush<&ImageData>,
-        brush_transform: Option<kurbo::Affine>,
-    ) -> Option<SkShader> {
-        let image_data = image_brush.image;
-
+    pub(crate) fn skia_image_from_peniko(image_data: &ImageData) -> skia_safe::Image {
         let image_info = SkImageInfo::new(
             (image_data.width as i32, image_data.height as i32),
             match image_data.format {
@@ -566,11 +609,17 @@ mod sk_peniko {
         let pixels = unsafe {
             SkData::new_bytes(image_data.data.data()) // We have to ensure the src image data lives long enough
         };
-        let image =
-            skia_safe::images::raster_from_data(&image_info, pixels, image_info.min_row_bytes())
-                .unwrap();
+        skia_safe::images::raster_from_data(&image_info, pixels, image_info.min_row_bytes())
+            .unwrap()
+    }
 
-        let sampling = match image_brush.sampler.quality {
+    /// Create a shader from a pre-created `skia_safe::Image` with the given sampler and transform.
+    pub(super) fn shader_from_skia_image(
+        image: &skia_safe::Image,
+        sampler: peniko::ImageSampler,
+        brush_transform: Option<kurbo::Affine>,
+    ) -> Option<SkShader> {
+        let sampling = match sampler.quality {
             peniko::ImageQuality::Low => {
                 SkSamplingOptions::new(skia_safe::FilterMode::Nearest, skia_safe::MipmapMode::None)
             }
@@ -584,10 +633,10 @@ mod sk_peniko {
         };
 
         skia_safe::shaders::image(
-            image,
+            image.clone(),
             (
-                tile_mode_from_extend(image_brush.sampler.x_extend),
-                tile_mode_from_extend(image_brush.sampler.y_extend),
+                tile_mode_from_extend(sampler.x_extend),
+                tile_mode_from_extend(sampler.y_extend),
             ),
             &sampling,
             &brush_transform.map(super::sk_kurbo::matrix_from_affine),

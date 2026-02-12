@@ -1,6 +1,9 @@
-use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
+use crate::{
+    Glyph, ImageResource, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
 use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrush, ImageData, Style, StyleRef};
+use rustc_hash::FxHashMap;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -9,7 +12,7 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum RenderCommand<Font = FontData, Image = ImageData> {
+pub enum RenderCommand<Font = FontData, Image = ImageResource> {
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
@@ -98,7 +101,7 @@ pub struct FillCommand<Image> {
 /// Draws a run of glyphs
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct GlyphRunCommand<Font = FontData, Image = ImageData> {
+pub struct GlyphRunCommand<Font = FontData, Image = ImageResource> {
     pub font_data: Font,
     pub font_size: f32,
     pub hint: bool,
@@ -152,11 +155,11 @@ impl Scene {
         }
     }
 
-    fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> Brush {
+    fn convert_paintref(&mut self, paint_ref: PaintRef<'_>) -> Brush<ImageBrush<ImageResource>> {
         match paint_ref {
             Paint::Solid(color) => Brush::Solid(color),
             Paint::Gradient(gradient) => Brush::Gradient(gradient.clone()),
-            Paint::Image(image) => Brush::Image(image.to_owned()),
+            Paint::Image(image) => Brush::Image(image),
             // TODO: handle this somehow
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }
@@ -290,6 +293,50 @@ impl PaintScene for Scene {
                 .into_iter()
                 .map(|cmd| cmd.apply_transform(scene_transform)),
         );
+    }
+}
+
+/// A [`RenderContext`] for use with recording scenes.
+///
+/// This context assigns [`ResourceId`]s and stores the associated [`ImageData`] in a
+/// [`FxHashMap`] so that recorded scenes can later be serialized or replayed through a
+/// backend-specific context.
+pub struct RecordingRenderContext {
+    image_data: FxHashMap<ResourceId, ImageData>,
+    next_resource_id: u64,
+}
+
+impl RecordingRenderContext {
+    pub fn new() -> Self {
+        Self {
+            image_data: FxHashMap::default(),
+            next_resource_id: 0,
+        }
+    }
+
+    pub fn image_data(&self) -> &FxHashMap<ResourceId, ImageData> {
+        &self.image_data
+    }
+}
+
+impl Default for RecordingRenderContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderContext for RecordingRenderContext {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        let id = ResourceId(self.next_resource_id);
+        self.next_resource_id += 1;
+        let width = image.width;
+        let height = image.height;
+        self.image_data.insert(id, image);
+        ImageResource { id, width, height }
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.image_data.remove(&id);
     }
 }
 

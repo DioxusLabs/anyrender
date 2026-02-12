@@ -47,6 +47,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         = <Renderer as ImageRenderer>::ScenePainter<'a>
     where
         Renderer: 'a;
+    type Context = Renderer::Context;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -86,7 +87,11 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
+        &mut self,
+        ctx: &mut Self::Context,
+        draw_fn: F,
+    ) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -94,7 +99,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Paint
-        self.renderer.render(draw_fn, state.pixels.frame_mut());
+        self.renderer.render(ctx, draw_fn, state.pixels.frame_mut());
         timer.record_time("render");
 
         state.pixels.render().unwrap();

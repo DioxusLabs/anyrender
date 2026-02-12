@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::util;
-use anyrender::PaintScene;
+use anyrender::{ImageResource, PaintScene, RenderContext};
 use kurbo::{Affine, BezPath};
 use peniko::{BlendMode, Fill};
 use usvg::{Node, Path};
 
-pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+pub(crate) fn render_group<S: PaintScene, RC: RenderContext, F: FnMut(&mut S, &usvg::Node)>(
+    ctx: &mut RC,
     scene: &mut S,
+    images: &mut Vec<ImageResource>,
     group: &usvg::Group,
     transform: Affine,
     global_transform: Affine,
@@ -68,7 +70,15 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     _ => false,
                 };
 
-                render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+                render_group(
+                    ctx,
+                    scene,
+                    images,
+                    g,
+                    Affine::IDENTITY,
+                    global_transform,
+                    error_handler,
+                );
 
                 if did_push_layer {
                     scene.pop_layer();
@@ -108,9 +118,15 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                                 error_handler(scene, node);
                                 continue;
                             };
-                            let image = util::into_image(decoded_image);
+                            let image_data = util::into_image(decoded_image);
+                            let resource = ctx.register_image(image_data);
+                            images.push(resource);
                             let image_ts = global_transform * util::to_affine(&img.abs_transform());
-                            scene.draw_image(image.as_ref(), image_ts);
+                            let brush = peniko::ImageBrush {
+                                image: resource,
+                                sampler: Default::default(),
+                            };
+                            scene.draw_image(brush, image_ts);
                         }
 
                         #[cfg(not(feature = "image"))]
@@ -121,7 +137,9 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     }
                     usvg::ImageKind::SVG(svg) => {
                         render_group(
+                            ctx,
                             scene,
+                            images,
                             svg.root(),
                             transform,
                             global_transform,
@@ -132,7 +150,9 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             }
             usvg::Node::Text(text) => {
                 render_group(
+                    ctx,
                     scene,
+                    images,
                     text.flattened(),
                     transform,
                     global_transform,
