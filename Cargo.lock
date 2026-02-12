@@ -172,7 +172,7 @@ dependencies = [
  "image",
  "kurbo",
  "peniko",
- "read-fonts 0.37.0 (git+https://github.com/googlefonts/fontations?rev=41ec2bdd6dd8589b65eaaaf182b0a2e701d0d826)",
+ "read-fonts 0.37.0",
  "rustc-hash 2.1.1",
  "serde",
  "serde_json",

@@ -76,7 +76,7 @@ pub fn render_svg_str_with<S: PaintScene, RC: RenderContext, F: FnMut(&mut S, &u
 /// This will draw a red box over (some) unsupported elements.
 ///
 /// Any raster images embedded in the SVG are registered with `ctx` and their
-/// [`ImageResource`] handles are appended to `images`, so that you can
+/// [`ImageResource`] handles are appended to `images`, so that you the caller can
 /// later unregister them via [`RenderContext::unregister_resource`].
 pub fn render_svg_tree<S: PaintScene, RC: RenderContext>(
     ctx: &mut RC,
@@ -100,7 +100,7 @@ pub fn render_svg_tree<S: PaintScene, RC: RenderContext>(
 /// See the [module level documentation](crate#unsupported-features) for a list of some unsupported svg features
 ///
 /// Any raster images embedded in the SVG are registered with `ctx` and their
-/// [`ImageResource`] handles are appended to `images`, so that you can
+/// [`ImageResource`] handles are appended to `images`, so that the caller can
 /// later unregister them via [`RenderContext::unregister_resource`].
 pub fn render_svg_tree_with<S: PaintScene, RC: RenderContext, F: FnMut(&mut S, &usvg::Node)>(
     ctx: &mut RC,

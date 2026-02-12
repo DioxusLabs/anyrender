@@ -296,10 +296,10 @@ impl PaintScene for Scene {
     }
 }
 
-/// A simple [`RenderContext`] for use with recording scenes.
+/// A [`RenderContext`] for use with recording scenes.
 ///
 /// This context assigns [`ResourceId`]s and stores the associated [`ImageData`] in a
-/// `HashMap` so that recorded scenes can later be serialized or replayed through a
+/// [`FxHashMap`] so that recorded scenes can later be serialized or replayed through a
 /// backend-specific context.
 pub struct RecordingRenderContext {
     image_data: FxHashMap<ResourceId, ImageData>,
