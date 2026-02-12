@@ -72,7 +72,7 @@ pub struct NullImageRenderer;
 
 impl NullImageRenderer {
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 }
 
@@ -84,7 +84,7 @@ impl ImageRenderer for NullImageRenderer {
     type Context = NullRenderContext;
 
     fn new(_width: u32, _height: u32) -> Self {
-        Self::default()
+        Self
     }
 
     fn resize(&mut self, _width: u32, _height: u32) {}

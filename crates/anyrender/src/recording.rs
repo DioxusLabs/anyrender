@@ -159,7 +159,7 @@ impl Scene {
         match paint_ref {
             Paint::Solid(color) => Brush::Solid(color),
             Paint::Gradient(gradient) => Brush::Gradient(gradient.clone()),
-            Paint::Image(image) => Brush::Image(image.clone()),
+            Paint::Image(image) => Brush::Image(image),
             // TODO: handle this somehow
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }

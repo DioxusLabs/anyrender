@@ -187,7 +187,7 @@ pub trait PaintScene {
                     match &cmd.brush {
                         Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
                         Brush::Gradient(gradient) => Paint::Gradient(gradient),
-                        Brush::Image(image) => Paint::Image(image.clone()),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_transform,
                     &cmd.shape,
@@ -198,7 +198,7 @@ pub trait PaintScene {
                     match &cmd.brush {
                         Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
                         Brush::Gradient(gradient) => Paint::Gradient(gradient),
-                        Brush::Image(image) => Paint::Image(image.clone()),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_transform,
                     &cmd.shape,
@@ -212,7 +212,7 @@ pub trait PaintScene {
                     match &cmd.brush {
                         Brush::Solid(alpha_color) => Paint::Solid(*alpha_color),
                         Brush::Gradient(gradient) => Paint::Gradient(gradient),
-                        Brush::Image(image) => Paint::Image(image.clone()),
+                        Brush::Image(image) => Paint::Image(*image),
                     },
                     cmd.brush_alpha,
                     scene_transform * cmd.transform,

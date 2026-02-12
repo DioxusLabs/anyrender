@@ -75,7 +75,7 @@ impl Paint {
         match self {
             Paint::Solid(color) => Paint::Solid(*color),
             Paint::Gradient(gradient) => Paint::Gradient(gradient),
-            Paint::Image(image) => Paint::Image(image.clone()),
+            Paint::Image(image) => Paint::Image(*image),
 
             // Custom paints are translated into "invisible" where they are not supported
             Paint::Custom(custom) => Paint::Custom(custom.as_ref()),
