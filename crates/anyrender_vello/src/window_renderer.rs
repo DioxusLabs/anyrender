@@ -209,7 +209,10 @@ impl WindowRenderer for VelloWindowRenderer {
 
         match render_surface.ensure_current_surface_texture() {
             Ok(_) => {}
-            Err(SurfaceError::Timeout | SurfaceError::Lost | SurfaceError::Outdated) => return,
+            Err(SurfaceError::Timeout | SurfaceError::Lost | SurfaceError::Outdated) => {
+                render_surface.clear_surface_texture();
+                return;
+            }
             Err(SurfaceError::OutOfMemory) => panic!("Out of memory"),
             Err(SurfaceError::Other) => panic!("Unknown error getting surface"),
         };

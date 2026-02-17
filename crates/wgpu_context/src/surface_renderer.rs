@@ -189,6 +189,10 @@ impl<'s> SurfaceRenderer<'s> {
             .configure(&self.device_handle.device, &self.config);
     }
 
+    pub fn clear_surface_texture(&mut self) {
+        self.current_surface_texture = None;
+    }
+
     pub fn ensure_current_surface_texture(&mut self) -> Result<(), SurfaceError> {
         if self.current_surface_texture.is_none() {
             let tex = self.surface.get_current_texture();
