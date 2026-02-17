@@ -192,6 +192,11 @@ impl<'s> SurfaceRenderer<'s> {
     pub fn ensure_current_surface_texture(&mut self) -> Result<(), SurfaceError> {
         if self.current_surface_texture.is_none() {
             let tex = self.surface.get_current_texture();
+            if let Err(SurfaceError::Lost | SurfaceError::Outdated) = &tex {
+                self.surface
+                    .configure(&self.device_handle.device, &self.config);
+            }
+
             self.current_surface_texture = Some(tex);
         }
 
