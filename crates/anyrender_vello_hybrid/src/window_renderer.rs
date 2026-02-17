@@ -10,7 +10,7 @@ use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
 };
-use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat};
+use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
@@ -226,7 +226,16 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         });
         timer.record_time("cmd");
 
-        let texture_view = render_surface.target_texture_view();
+        match render_surface.ensure_current_surface_texture() {
+            Ok(_) => {}
+            Err(SurfaceError::Timeout | SurfaceError::Lost | SurfaceError::Outdated) => return,
+            Err(SurfaceError::OutOfMemory) => panic!("Out of memory"),
+            Err(SurfaceError::Other) => panic!("Unknown error getting surface"),
+        };
+
+        let texture_view = render_surface
+            .target_texture_view()
+            .expect("handled errorss from ensure_current_surface_texture above");
 
         state
             .renderer
@@ -247,7 +256,9 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         drop(texture_view);
 
-        render_surface.maybe_blit_and_present();
+        render_surface
+            .maybe_blit_and_present()
+            .expect("handled errorss from ensure_current_surface_texture above");
         timer.record_time("present");
 
         render_surface
