@@ -42,40 +42,32 @@ pub mod recording;
 pub use recording::{RecordingRenderContext, Scene};
 
 /// Abstraction for rendering a scene to a window
-pub trait WindowRenderer {
+pub trait WindowRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
-    type Context: RenderContext;
     fn resume(&mut self, window: Arc<dyn WindowHandle>, width: u32, height: u32);
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
     fn set_size(&mut self, width: u32, height: u32);
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    );
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }
 
 /// Abstraction for rendering a scene to an image buffer
-pub trait ImageRenderer {
+pub trait ImageRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
-    type Context: RenderContext;
     fn new(width: u32, height: u32) -> Self;
     fn resize(&mut self, width: u32, height: u32);
     fn reset(&mut self);
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        ctx: &mut Self::Context,
         draw_fn: F,
         vec: &mut Vec<u8>,
     );
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        ctx: &mut Self::Context,
         draw_fn: F,
         buffer: &mut [u8],
     );
@@ -83,14 +75,13 @@ pub trait ImageRenderer {
 
 /// Draw a scene to a buffer using an `ImageRenderer`
 pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
-    ctx: &mut R::Context,
     draw_fn: F,
     width: u32,
     height: u32,
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity((width * height * 4) as usize);
     let mut renderer = R::new(width, height);
-    renderer.render_to_vec(ctx, draw_fn, &mut buf);
+    renderer.render_to_vec(draw_fn, &mut buf);
 
     buf
 }

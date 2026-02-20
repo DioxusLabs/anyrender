@@ -1,5 +1,6 @@
-use anyrender::WindowRenderer;
+use anyrender::{ImageResource, RenderContext, ResourceId, WindowRenderer};
 use debug_timer::debug_timer;
+use peniko::ImageData;
 use skia_safe::{Color, Surface, graphics};
 use std::sync::Arc;
 
@@ -24,6 +25,7 @@ struct ActiveRenderState {
 }
 
 pub struct SkiaWindowRenderer {
+    ctx: SkiaRenderContext,
     render_state: RenderState,
 }
 
@@ -36,8 +38,19 @@ impl Default for SkiaWindowRenderer {
 impl SkiaWindowRenderer {
     pub fn new() -> Self {
         Self {
+            ctx: SkiaRenderContext::new(),
             render_state: RenderState::Suspended,
         }
+    }
+}
+
+impl RenderContext for SkiaWindowRenderer {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.ctx.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.ctx.unregister_resource(id)
     }
 }
 
@@ -46,7 +59,6 @@ impl WindowRenderer for SkiaWindowRenderer {
         = SkiaScenePainter<'a>
     where
         Self: 'a;
-    type Context = SkiaRenderContext;
 
     fn resume(&mut self, window: Arc<dyn anyrender::WindowHandle>, width: u32, height: u32) {
         graphics::set_font_cache_count_limit(100);
@@ -78,11 +90,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    ) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -98,7 +106,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         surface.canvas().clear(Color::WHITE);
 
         draw_fn(&mut SkiaScenePainter {
-            ctx,
+            ctx: &self.ctx,
             inner: surface.canvas(),
             cache: &mut state.scene_cache,
         });

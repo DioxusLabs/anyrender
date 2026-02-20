@@ -1,5 +1,6 @@
-use anyrender::{WindowHandle, WindowRenderer};
+use anyrender::{ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
+use peniko::ImageData;
 use std::sync::Arc;
 use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
@@ -39,6 +40,7 @@ pub struct VelloHybridRendererOptions {
 }
 
 pub struct VelloHybridWindowRenderer {
+    ctx: VelloHybridRenderContext,
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
     render_state: RenderState,
@@ -61,6 +63,7 @@ impl VelloHybridWindowRenderer {
             | Features::PIPELINE_CACHE;
         let render_settings = config.render_settings;
         Self {
+            ctx: VelloHybridRenderContext::new(),
             wgpu_context: WGPUContext::with_features_and_limits(
                 Some(features),
                 config.limits.clone(),
@@ -83,12 +86,21 @@ const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 #[cfg(not(target_os = "android"))]
 const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
 
+impl RenderContext for VelloHybridWindowRenderer {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.ctx.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.ctx.unregister_resource(id)
+    }
+}
+
 impl WindowRenderer for VelloHybridWindowRenderer {
     type ScenePainter<'a>
         = VelloHybridScenePainter<'a>
     where
         Self: 'a;
-    type Context = VelloHybridRenderContext;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -152,11 +164,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    ) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -168,7 +176,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             let device = state.render_surface.device();
             let queue = state.render_surface.queue();
             draw_fn(&mut VelloHybridScenePainter {
-                ctx,
+                ctx: &mut self.ctx,
                 renderer: &mut state.renderer,
                 device,
                 queue,

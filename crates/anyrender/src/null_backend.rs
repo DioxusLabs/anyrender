@@ -1,31 +1,10 @@
-//! A dummy implementation of the AnyRender traits while simply ignores all commands
+//! A dummy implementation of the AnyRender traits that simply ignores all commands
 
 use crate::{
     ImageRenderer, ImageResource, PaintScene, RenderContext, ResourceId, WindowHandle,
     WindowRenderer,
 };
 use std::sync::Arc;
-
-#[derive(Default)]
-pub struct NullRenderContext {}
-
-impl NullRenderContext {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-impl RenderContext for NullRenderContext {
-    fn register_image(&mut self, image: peniko::ImageData) -> ImageResource {
-        ImageResource {
-            id: ResourceId(0),
-            width: image.width,
-            height: image.height,
-        }
-    }
-
-    fn unregister_resource(&mut self, _id: ResourceId) {}
-}
 
 #[derive(Copy, Clone, Default)]
 pub struct NullWindowRenderer {
@@ -38,12 +17,23 @@ impl NullWindowRenderer {
     }
 }
 
+impl RenderContext for NullWindowRenderer {
+    fn register_image(&mut self, image: peniko::ImageData) -> ImageResource {
+        ImageResource {
+            id: ResourceId(0),
+            width: image.width,
+            height: image.height,
+        }
+    }
+
+    fn unregister_resource(&mut self, _id: ResourceId) {}
+}
+
 impl WindowRenderer for NullWindowRenderer {
     type ScenePainter<'a>
         = NullScenePainter
     where
         Self: 'a;
-    type Context = NullRenderContext;
 
     fn resume(&mut self, _window: Arc<dyn WindowHandle>, _width: u32, _height: u32) {
         self.is_active = true;
@@ -59,12 +49,7 @@ impl WindowRenderer for NullWindowRenderer {
 
     fn set_size(&mut self, _width: u32, _height: u32) {}
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
-        &mut self,
-        _ctx: &mut Self::Context,
-        _draw_fn: F,
-    ) {
-    }
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F) {}
 }
 
 #[derive(Clone, Default)]
@@ -76,12 +61,23 @@ impl NullImageRenderer {
     }
 }
 
+impl RenderContext for NullImageRenderer {
+    fn register_image(&mut self, image: peniko::ImageData) -> ImageResource {
+        ImageResource {
+            id: ResourceId(0),
+            width: image.width,
+            height: image.height,
+        }
+    }
+
+    fn unregister_resource(&mut self, _id: ResourceId) {}
+}
+
 impl ImageRenderer for NullImageRenderer {
     type ScenePainter<'a>
         = NullScenePainter
     where
         Self: 'a;
-    type Context = NullRenderContext;
 
     fn new(_width: u32, _height: u32) -> Self {
         Self
@@ -93,7 +89,6 @@ impl ImageRenderer for NullImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        _ctx: &mut Self::Context,
         _draw_fn: F,
         _vec: &mut Vec<u8>,
     ) {
@@ -101,7 +96,6 @@ impl ImageRenderer for NullImageRenderer {
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        _ctx: &mut Self::Context,
         _draw_fn: F,
         _buffer: &mut [u8],
     ) {

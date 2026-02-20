@@ -1,4 +1,5 @@
-use anyrender::ImageRenderer;
+use anyrender::{ImageRenderer, ImageResource, RenderContext, ResourceId};
+use peniko::ImageData;
 use rustc_hash::FxHashMap;
 use vello::{Renderer as VelloRenderer, RendererOptions, Scene as VelloScene};
 use wgpu::TextureUsages;
@@ -7,9 +8,20 @@ use wgpu_context::{BufferRenderer, BufferRendererConfig, WGPUContext};
 use crate::{DEFAULT_THREADS, VelloRenderContext, VelloScenePainter};
 
 pub struct VelloImageRenderer {
+    ctx: VelloRenderContext,
     buffer_renderer: BufferRenderer,
     vello_renderer: VelloRenderer,
     scene: VelloScene,
+}
+
+impl RenderContext for VelloImageRenderer {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.ctx.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.ctx.unregister_resource(id)
+    }
 }
 
 impl ImageRenderer for VelloImageRenderer {
@@ -17,7 +29,6 @@ impl ImageRenderer for VelloImageRenderer {
         = VelloScenePainter<'a, 'a>
     where
         Self: 'a;
-    type Context = VelloRenderContext;
 
     fn new(width: u32, height: u32) -> Self {
         // Create WGPUContext
@@ -45,6 +56,7 @@ impl ImageRenderer for VelloImageRenderer {
         .expect("Got non-Send/Sync error from creating renderer");
 
         Self {
+            ctx: VelloRenderContext::new(),
             buffer_renderer,
             vello_renderer,
             scene: VelloScene::new(),
@@ -61,23 +73,21 @@ impl ImageRenderer for VelloImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        ctx: &mut Self::Context,
         draw_fn: F,
         cpu_buffer: &mut Vec<u8>,
     ) {
         let size = self.buffer_renderer.size();
         cpu_buffer.resize((size.width * size.height * 4) as usize, 0);
-        self.render(ctx, draw_fn, cpu_buffer);
+        self.render(draw_fn, cpu_buffer);
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
-        ctx: &mut Self::Context,
         draw_fn: F,
         cpu_buffer: &mut [u8],
     ) {
         draw_fn(&mut VelloScenePainter {
-            ctx,
+            ctx: &self.ctx,
             inner: &mut self.scene,
             renderer: Some(&mut self.vello_renderer),
             custom_paint_sources: Some(&mut FxHashMap::default()),

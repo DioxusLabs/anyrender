@@ -1,8 +1,8 @@
-use anyrender::{NullRenderContext, NullWindowRenderer, PaintScene, WindowRenderer};
-use anyrender_skia::{SkiaRenderContext, SkiaWindowRenderer};
-use anyrender_vello::{VelloRenderContext, VelloWindowRenderer};
-use anyrender_vello_cpu::{PixelsWindowRenderer, VelloCpuImageRenderer, VelloCpuRenderContext};
-use anyrender_vello_hybrid::{VelloHybridRenderContext, VelloHybridWindowRenderer};
+use anyrender::{NullWindowRenderer, PaintScene, WindowRenderer};
+use anyrender_skia::SkiaWindowRenderer;
+use anyrender_vello::VelloWindowRenderer;
+use anyrender_vello_cpu::{PixelsWindowRenderer, VelloCpuImageRenderer};
+use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
 use std::sync::Arc;
@@ -23,31 +23,31 @@ struct App {
 type VelloCpuWindowRenderer = PixelsWindowRenderer<VelloCpuImageRenderer>;
 
 enum Renderer {
-    Gpu(Box<VelloWindowRenderer>, VelloRenderContext),
-    Hybrid(Box<VelloHybridWindowRenderer>, VelloHybridRenderContext),
-    Cpu(Box<VelloCpuWindowRenderer>, VelloCpuRenderContext),
-    Skia(Box<SkiaWindowRenderer>, SkiaRenderContext),
-    Null(NullWindowRenderer, NullRenderContext),
+    Gpu(Box<VelloWindowRenderer>),
+    Hybrid(Box<VelloHybridWindowRenderer>),
+    Cpu(Box<VelloCpuWindowRenderer>),
+    Skia(Box<SkiaWindowRenderer>),
+    Null(NullWindowRenderer),
 }
 
 impl Renderer {
     fn is_active(&self) -> bool {
         match self {
-            Renderer::Gpu(r, _) => r.is_active(),
-            Renderer::Hybrid(r, _) => r.is_active(),
-            Renderer::Cpu(r, _) => r.is_active(),
-            Renderer::Null(r, _) => r.is_active(),
-            Renderer::Skia(r, _) => r.is_active(),
+            Renderer::Gpu(r) => r.is_active(),
+            Renderer::Hybrid(r) => r.is_active(),
+            Renderer::Cpu(r) => r.is_active(),
+            Renderer::Null(r) => r.is_active(),
+            Renderer::Skia(r) => r.is_active(),
         }
     }
 
     fn set_size(&mut self, w: u32, h: u32) {
         match self {
-            Renderer::Gpu(r, _) => r.set_size(w, h),
-            Renderer::Hybrid(r, _) => r.set_size(w, h),
-            Renderer::Cpu(r, _) => r.set_size(w, h),
-            Renderer::Null(r, _) => r.set_size(w, h),
-            Renderer::Skia(r, _) => r.set_size(w, h),
+            Renderer::Gpu(r) => r.set_size(w, h),
+            Renderer::Hybrid(r) => r.set_size(w, h),
+            Renderer::Cpu(r) => r.set_size(w, h),
+            Renderer::Null(r) => r.set_size(w, h),
+            Renderer::Skia(r) => r.set_size(w, h),
         }
     }
 }
@@ -105,9 +105,8 @@ impl App {
     fn set_backend<R: WindowRenderer>(
         &mut self,
         mut renderer: R,
-        ctx: R::Context,
         event_loop: &ActiveEventLoop,
-        f: impl FnOnce(R, R::Context) -> Renderer,
+        f: impl FnOnce(R) -> Renderer,
     ) {
         let mut window = match &self.render_state {
             RenderState::Active { window, .. } => Some(window.clone()),
@@ -126,7 +125,7 @@ impl App {
         renderer.resume(window.clone(), self.width, self.height);
         self.render_state = RenderState::Active {
             window,
-            renderer: f(renderer, ctx),
+            renderer: f(renderer),
         };
         self.request_redraw();
     }
@@ -142,9 +141,8 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.set_backend(
             SkiaWindowRenderer::new(),
-            SkiaRenderContext::new(),
             event_loop,
-            |r, ctx| Renderer::Skia(Box::new(r), ctx),
+            |r| Renderer::Skia(Box::new(r)),
         );
     }
 
@@ -171,20 +169,20 @@ impl ApplicationHandler for App {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => match renderer {
-                Renderer::Skia(r, ctx) => {
-                    r.render(ctx, |p| App::draw_scene(p, Color::from_rgb8(128, 128, 128)))
+                Renderer::Skia(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(128, 128, 128)))
                 }
-                Renderer::Gpu(r, ctx) => {
-                    r.render(ctx, |p| App::draw_scene(p, Color::from_rgb8(255, 0, 0)))
+                Renderer::Gpu(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(255, 0, 0)))
                 }
-                Renderer::Hybrid(r, ctx) => {
-                    r.render(ctx, |p| App::draw_scene(p, Color::from_rgb8(0, 0, 0)))
+                Renderer::Hybrid(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0)))
                 }
-                Renderer::Cpu(r, ctx) => {
-                    r.render(ctx, |p| App::draw_scene(p, Color::from_rgb8(0, 255, 0)))
+                Renderer::Cpu(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 255, 0)))
                 }
-                Renderer::Null(r, ctx) => {
-                    r.render(ctx, |p| App::draw_scene(p, Color::from_rgb8(0, 0, 0)))
+                Renderer::Null(r) => {
+                    r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0)))
                 }
             },
             WindowEvent::KeyboardInput {
@@ -199,31 +197,27 @@ impl ApplicationHandler for App {
                 Renderer::Cpu(..) => {
                     self.set_backend(
                         VelloHybridWindowRenderer::new(),
-                        VelloHybridRenderContext::new(),
                         event_loop,
-                        |r, ctx| Renderer::Hybrid(Box::new(r), ctx),
+                        |r| Renderer::Hybrid(Box::new(r)),
                     );
                 }
                 Renderer::Hybrid(..) => {
                     self.set_backend(
                         VelloWindowRenderer::new(),
-                        VelloRenderContext::new(),
                         event_loop,
-                        |r, ctx| Renderer::Gpu(Box::new(r), ctx),
+                        |r| Renderer::Gpu(Box::new(r)),
                     );
                 }
                 Renderer::Gpu(..) => {
                     self.set_backend(
                         SkiaWindowRenderer::new(),
-                        SkiaRenderContext::new(),
                         event_loop,
-                        |r, ctx| Renderer::Skia(Box::new(r), ctx),
+                        |r| Renderer::Skia(Box::new(r)),
                     );
                 }
                 Renderer::Skia(..) => {
                     self.set_backend(
                         NullWindowRenderer::new(),
-                        NullRenderContext::new(),
                         event_loop,
                         Renderer::Null,
                     );
@@ -231,9 +225,8 @@ impl ApplicationHandler for App {
                 Renderer::Null(..) => {
                     self.set_backend(
                         VelloCpuWindowRenderer::new(),
-                        VelloCpuRenderContext::new(),
                         event_loop,
-                        |r, ctx| Renderer::Cpu(Box::new(r), ctx),
+                        |r| Renderer::Cpu(Box::new(r)),
                     );
                 }
             },

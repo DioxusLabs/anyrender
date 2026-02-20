@@ -1,6 +1,6 @@
-use anyrender::{WindowHandle, WindowRenderer};
+use anyrender::{ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use peniko::Color;
+use peniko::{Color, ImageData};
 use rustc_hash::FxHashMap;
 use std::sync::{
     Arc,
@@ -60,6 +60,7 @@ impl Default for VelloRendererOptions {
 }
 
 pub struct VelloWindowRenderer {
+    ctx: VelloRenderContext,
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
     render_state: RenderState,
@@ -83,6 +84,7 @@ impl VelloWindowRenderer {
             | Features::CLEAR_TEXTURE
             | Features::PIPELINE_CACHE;
         Self {
+            ctx: VelloRenderContext::new(),
             wgpu_context: WGPUContext::with_features_and_limits(
                 Some(features),
                 config.limits.clone(),
@@ -117,12 +119,21 @@ impl VelloWindowRenderer {
     }
 }
 
+impl RenderContext for VelloWindowRenderer {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.ctx.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.ctx.unregister_resource(id)
+    }
+}
+
 impl WindowRenderer for VelloWindowRenderer {
     type ScenePainter<'a>
         = VelloScenePainter<'a, 'a>
     where
         Self: 'a;
-    type Context = VelloRenderContext;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -191,28 +202,23 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    ) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
-
-        let render_surface = &mut state.render_surface;
 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Regenerate the vello scene
         draw_fn(&mut VelloScenePainter {
-            ctx,
+            ctx: &self.ctx,
             inner: &mut self.scene,
             renderer: Some(&mut state.renderer),
             custom_paint_sources: Some(&mut self.custom_paint_sources),
         });
         timer.record_time("cmd");
 
+        let render_surface = &mut state.render_surface;
         let texture_view = render_surface.target_texture_view();
         state
             .renderer

@@ -1,6 +1,7 @@
 //! Types that are used within the Anyrender traits
 
-use peniko::{Color, Gradient, ImageBrush, ImageData};
+pub use peniko::ImageData;
+use peniko::{Color, Gradient, ImageBrush};
 use std::{any::Any, sync::Arc};
 
 #[cfg(feature = "serde")]

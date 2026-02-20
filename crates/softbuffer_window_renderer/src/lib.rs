@@ -2,7 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, WindowHandle, WindowRenderer};
+use anyrender::{ImageData, ImageRenderer, ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
@@ -44,12 +44,21 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
     }
 }
 
+impl<Renderer: ImageRenderer> RenderContext for SoftbufferWindowRenderer<Renderer> {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.renderer.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.renderer.unregister_resource(id)
+    }
+}
+
 impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Renderer> {
     type ScenePainter<'a>
         = Renderer::ScenePainter<'a>
     where
         Self: 'a;
-    type Context = Renderer::Context;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -84,11 +93,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    ) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -101,7 +106,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         timer.record_time("buffer_mut");
 
         // Paint
-        self.renderer.render_to_vec(ctx, draw_fn, &mut self.buffer);
+        self.renderer.render_to_vec(draw_fn, &mut self.buffer);
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();

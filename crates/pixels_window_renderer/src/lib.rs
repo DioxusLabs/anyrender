@@ -2,7 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, WindowHandle, WindowRenderer};
+use anyrender::{ImageData, ImageRenderer, ImageResource, RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use pixels::{Pixels, SurfaceTexture, wgpu::Color};
 use std::sync::Arc;
@@ -42,12 +42,21 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
     }
 }
 
+impl<Renderer: ImageRenderer> RenderContext for PixelsWindowRenderer<Renderer> {
+    fn register_image(&mut self, image: ImageData) -> ImageResource {
+        self.renderer.register_image(image)
+    }
+
+    fn unregister_resource(&mut self, id: ResourceId) {
+        self.renderer.unregister_resource(id)
+    }
+}
+
 impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> {
     type ScenePainter<'a>
         = <Renderer as ImageRenderer>::ScenePainter<'a>
     where
         Renderer: 'a;
-    type Context = Renderer::Context;
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(_))
@@ -87,11 +96,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
-        &mut self,
-        ctx: &mut Self::Context,
-        draw_fn: F,
-    ) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -99,7 +104,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Paint
-        self.renderer.render(ctx, draw_fn, state.pixels.frame_mut());
+        self.renderer.render(draw_fn, state.pixels.frame_mut());
         timer.record_time("render");
 
         state.pixels.render().unwrap();
