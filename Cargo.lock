@@ -2616,6 +2616,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "player"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_serialize",
+ "anyrender_skia",
+ "anyrender_vello",
+ "anyrender_vello_cpu",
+ "anyrender_vello_hybrid",
+ "kurbo",
+ "peniko",
+ "winit",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4645,21 +4660,6 @@ dependencies = [
  "x11-dl",
  "x11rb",
  "xkbcommon-dl",
-]
-
-[[package]]
-name = "winit-example"
-version = "0.1.0"
-dependencies = [
- "anyrender",
- "anyrender_serialize",
- "anyrender_skia",
- "anyrender_vello",
- "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
- "kurbo",
- "peniko",
- "winit",
 ]
 
 [[package]]
