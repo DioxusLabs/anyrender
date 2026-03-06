@@ -10,6 +10,7 @@ kurbo = { workspace = true }
 winit = { workspace = true }
 peniko = { workspace = true }
 anyrender = { workspace = true }
+anyrender_serialize = { workspace = true }
 anyrender_vello = { workspace = true }
 anyrender_skia = { workspace = true }
 anyrender_vello_hybrid = { workspace = true }

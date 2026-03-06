@@ -1786,11 +1786,11 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "kurbo"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7564e90fe3c0d5771e1f0bc95322b21baaeaa0d9213fa6a0b61c99f8b17b3bfb"
+source = "git+https://github.com/linebender/kurbo?rev=868cd631beee6f787d63113a9eb72e8c005fa33c#868cd631beee6f787d63113a9eb72e8c005fa33c"
 dependencies = [
  "arrayvec",
  "euclid",
+ "polycool",
  "serde",
  "smallvec",
 ]
@@ -2653,6 +2653,14 @@ name = "pollster"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
+name = "polycool"
+version = "0.4.0"
+source = "git+https://github.com/linebender/kurbo?rev=868cd631beee6f787d63113a9eb72e8c005fa33c#868cd631beee6f787d63113a9eb72e8c005fa33c"
+dependencies = [
+ "arrayvec",
+]
 
 [[package]]
 name = "portable-atomic"
@@ -4644,6 +4652,7 @@ name = "winit-example"
 version = "0.1.0"
 dependencies = [
  "anyrender",
+ "anyrender_serialize",
  "anyrender_skia",
  "anyrender_vello",
  "anyrender_vello_cpu",

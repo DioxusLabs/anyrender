@@ -1,11 +1,12 @@
-use anyrender::{NullWindowRenderer, PaintScene, WindowRenderer};
+use anyrender::{NullWindowRenderer, PaintScene, Scene, WindowRenderer};
+use anyrender_serialize::SceneArchive;
 use anyrender_skia::SkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
@@ -16,6 +17,7 @@ use winit::{
 
 struct App {
     render_state: RenderState,
+    scene: Scene,
     width: u32,
     height: u32,
 }
@@ -119,30 +121,6 @@ impl App {
         }
     }
 
-    fn draw_scene<T: PaintScene>(scene: &mut T, color: Color) {
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            Color::WHITE,
-            None,
-            &Rect::new(0.0, 0.0, 50.0, 50.0),
-        );
-        scene.stroke(
-            &Stroke::new(2.0),
-            Affine::IDENTITY,
-            Color::BLACK,
-            None,
-            &Rect::new(5.0, 5.0, 35.0, 35.0),
-        );
-        scene.fill(
-            Fill::NonZero,
-            Affine::IDENTITY,
-            color,
-            None,
-            &Circle::new(Point::new(20.0, 20.0), 10.0),
-        );
-    }
-
     fn set_backend<R: WindowRenderer + Into<Renderer>>(
         &mut self,
         mut renderer: R,
@@ -204,15 +182,23 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => match renderer {
                 Renderer::Skia(r) => {
-                    r.render(|p| App::draw_scene(p, Color::from_rgb8(128, 128, 128)))
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
                 }
-                Renderer::Gpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(255, 0, 0))),
-                Renderer::Hybrid(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0))),
-                Renderer::Cpu(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 255, 0))),
+                Renderer::Gpu(r) => {
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
+                }
+                Renderer::Hybrid(r) => {
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
+                }
+                Renderer::Cpu(r) => {
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
+                }
                 Renderer::CpuSoftbuffer(r) => {
-                    r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 255)))
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
                 }
-                Renderer::Null(r) => r.render(|p| App::draw_scene(p, Color::from_rgb8(0, 0, 0))),
+                Renderer::Null(r) => {
+                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
+                }
             },
             WindowEvent::KeyboardInput {
                 event:
@@ -245,8 +231,22 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
+    let mut args = std::env::args_os();
+    let maybe_path = args.nth(1).map(PathBuf::from);
+
+    let scene = if let Some(path) = maybe_path {
+        let file = std::fs::File::open(&path).expect("File not found");
+        let archive = SceneArchive::deserialize(file).expect("Failed to deserialize archive");
+        archive
+            .to_scene()
+            .expect("Failed to convert archive to scene")
+    } else {
+        default_scene()
+    };
+
     let mut app = App {
         render_state: RenderState::Suspended(None),
+        scene,
         width: 800,
         height: 600,
     };
@@ -255,4 +255,31 @@ fn main() {
     event_loop
         .run_app(&mut app)
         .expect("Couldn't run event loop");
+}
+
+fn default_scene() -> Scene {
+    let mut scene = Scene::new();
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::WHITE,
+        None,
+        &Rect::new(0.0, 0.0, 50.0, 50.0),
+    );
+    scene.stroke(
+        &Stroke::new(2.0),
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &Rect::new(5.0, 5.0, 35.0, 35.0),
+    );
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(255, 0, 0),
+        None,
+        &Circle::new(Point::new(20.0, 20.0), 10.0),
+    );
+
+    scene
 }
