@@ -5,7 +5,7 @@ use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_app_kit::NSView;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_quartz_core::{CAAutoresizingMask, CAMetalDrawable, CAMetalLayer};
 #[cfg(target_os = "ios")]
 use objc2_ui_kit::UIView;
 use skia_safe::{
@@ -32,6 +32,10 @@ impl MetalBackend {
             layer.setDevice(Some(&device));
             layer.setPixelFormat(objc2_metal::MTLPixelFormat::BGRA8Unorm);
             layer.setPresentsWithTransaction(false);
+            // Match wgpu's `desired_maximum_frame_latency` of 1. This could be configurable but this is typical for gui usage.
+            layer.setMaximumDrawableCount(2);
+            // Avoid timing out while AppKit is in a live-resize loop and drawable delivery is momentarily delayed.
+            layer.setAllowsNextDrawableTimeout(false);
             // Disabling this option allows Skia's Blend Mode to work.
             // More about: https://developer.apple.com/documentation/quartzcore/cametallayer/1478168-framebufferonly
             layer.setFramebufferOnly(false);
@@ -52,8 +56,20 @@ impl MetalBackend {
 
             #[cfg(target_os = "macos")]
             {
+                // AppKit needs the NSView to stay layer-backed so live resize stays on its normal path.
                 view.setWantsLayer(true);
-                view.setLayer(Some(&layer.clone().into_super()));
+                // Use AppKit's root backing layer instead of replacing it with a CAMetalLayer.
+                let root_layer = view.layer().expect("NSView should be layer-backed");
+                // Match the metal sublayer to the current view-backed layer bounds immediately.
+                layer.setFrame(root_layer.bounds());
+                // Match the current backing scale so Retina resize does not blur or jump.
+                layer.setContentsScale(root_layer.contentsScale());
+                // Let Core Animation keep the metal sublayer sized to the view during live resize.
+                layer.setAutoresizingMask(
+                    CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable,
+                );
+                // Attach CAMetalLayer as a child so AppKit still owns the root layer transaction model.
+                root_layer.addSublayer(&layer.clone().into_super());
             }
 
             #[cfg(target_os = "ios")]
@@ -91,6 +107,15 @@ impl MetalBackend {
 
 impl SkiaBackend for MetalBackend {
     fn set_size(&mut self, width: u32, height: u32) {
+        // Re-read the parent layer geometry because AppKit may have updated it during live resize.
+        if let Some(superlayer) = self.metal_layer.superlayer() {
+            // Keep the metal sublayer aligned with the AppKit-managed backing layer bounds.
+            self.metal_layer.setFrame(superlayer.bounds());
+            // Keep drawable scale in sync with the current backing scale.
+            self.metal_layer
+                .setContentsScale(superlayer.contentsScale());
+        }
+        // Update Metal's pixel-backed drawable size to match Floem's logical resize dimensions.
         self.metal_layer
             .setDrawableSize(CGSize::new(width as f64, height as f64));
     }
