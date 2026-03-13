@@ -51,6 +51,8 @@ impl ImageRenderer for SkiaImageRenderer {
     ) {
         debug_timer!(timer, feature = "log_frame_times");
 
+        buffer.resize(self.image_info.compute_min_byte_size(), 0);
+
         let mut surface = surfaces::wrap_pixels(
             &self.image_info,
             &mut buffer[..],
