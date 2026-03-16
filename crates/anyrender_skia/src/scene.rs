@@ -733,6 +733,7 @@ mod sk_peniko {
     }
 
     pub(super) fn color4f_from_dynamic_color(color: DynamicColor) -> SkColor4f {
+        let color = color.to_alpha_color::<Srgb>();
         SkColor4f::new(
             color.components[0],
             color.components[1],
