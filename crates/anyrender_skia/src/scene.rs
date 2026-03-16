@@ -1,7 +1,8 @@
 use anyrender::PaintScene;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
-    MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, Point, RRect, Rect, Shader, Typeface,
+    MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, PathEffect, Point, RRect, Rect, Shader,
+    Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -14,6 +15,7 @@ use crate::cache::{
 
 pub(crate) struct SkiaSceneCache {
     paint: Paint,
+    dash_intervals: Vec<f32>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
@@ -38,6 +40,7 @@ impl Default for SkiaSceneCache {
     fn default() -> Self {
         Self {
             paint: Paint::default(),
+            dash_intervals: Vec::new(),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             extracted_font_data: GenerationalCache::new(10),
             typeface: GenerationalCache::new(1),
@@ -139,6 +142,7 @@ impl SkiaScenePainter<'_> {
                 self.cache.paint.set_style(PaintStyle::Stroke);
                 self.cache.paint.set_stroke(true);
                 self.cache.paint.set_stroke_width(stroke.width as f32);
+                self.cache.paint.set_stroke_miter(stroke.miter_limit as f32);
                 self.cache.paint.set_stroke_join(match stroke.join {
                     kurbo::Join::Bevel => PaintJoin::Bevel,
                     kurbo::Join::Miter => PaintJoin::Miter,
@@ -149,6 +153,18 @@ impl SkiaScenePainter<'_> {
                     kurbo::Cap::Square => PaintCap::Square,
                     kurbo::Cap::Round => PaintCap::Round,
                 });
+                if stroke.dash_pattern.is_empty() {
+                    self.cache.paint.set_path_effect(None);
+                } else {
+                    self.cache.dash_intervals.clear();
+                    self.cache
+                        .dash_intervals
+                        .extend(stroke.dash_pattern.iter().map(|dash| *dash as f32));
+                    self.cache.paint.set_path_effect(PathEffect::dash(
+                        self.cache.dash_intervals.as_slice(),
+                        stroke.dash_offset as f32,
+                    ));
+                }
             }
         }
     }
