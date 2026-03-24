@@ -74,7 +74,7 @@ pub struct ClipCommand {
 /// Strokes a shape using the specified style and brush.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct StrokeCommand<Image> {
+pub struct StrokeCommand<Image = ImageData> {
     pub style: Stroke,
     pub transform: Affine,
     pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
@@ -86,7 +86,7 @@ pub struct StrokeCommand<Image> {
 /// Fills a shape using the specified style and brush.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct FillCommand<Image> {
+pub struct FillCommand<Image = ImageData> {
     pub fill: Fill,
     pub transform: Affine,
     pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
