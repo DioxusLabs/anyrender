@@ -78,8 +78,7 @@ pollster = "0.4"
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
 
-[patch.crates-io]
-kurbo = { git = "https://github.com/linebender/kurbo", rev = "868cd631beee6f787d63113a9eb72e8c005fa33c" }
+# [patch.crates-io]
 # vello = { path = "../vello/vello" }
 # vello_cpu = { path = "../vello/sparse_strips/vello_cpu" }
 # vello_hybrid = { path = "../vello/sparse_strips/vello_hybrid" }

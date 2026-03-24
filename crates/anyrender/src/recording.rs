@@ -299,6 +299,8 @@ mod svg_path {
     use kurbo::BezPath;
     use serde::{self, Deserialize, Deserializer, Serializer};
 
+    use crate::svg_path_parser;
+
     pub fn serialize<S>(path: &BezPath, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -311,6 +313,6 @@ mod svg_path {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        BezPath::from_svg(&s).map_err(serde::de::Error::custom)
+        svg_path_parser::parse_svg_path(&s).map_err(serde::de::Error::custom)
     }
 }
