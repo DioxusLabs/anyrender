@@ -27,6 +27,8 @@
 //!  - [anyrender_vello](https://docs.rs/anyrender_vello)
 //!  - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu)
 
+#![allow(clippy::collapsible_if)]
+
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
@@ -40,6 +42,9 @@ mod null_backend;
 pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
+
+#[cfg(feature = "serde")]
+mod svg_path_parser;
 
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer {

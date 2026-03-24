@@ -10,7 +10,7 @@ members = [
   "crates/wgpu_context",
   "crates/pixels_window_renderer",
   "crates/softbuffer_window_renderer",
-  "examples/winit",
+  "examples/player",
   "examples/bunnymark",
   "examples/serialize",
 ]
