@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc
+      - run: cargo doc --no-deps
 
   check-wasm:
     name: "Check [wasm32 + webgl]"
