@@ -75,7 +75,11 @@ impl WebGlScenePainter<'_> {
     fn convert_image_paint(&mut self, image_brush: peniko::ImageBrushRef<'_>) -> PaintType {
         let image_id = self.image_manager.upload_image(image_brush.image);
         PaintType::Image(ImageBrush {
-            image: ImageSource::OpaqueId(image_id),
+            image: ImageSource::OpaqueId {
+                id: image_id,
+                // TODO: optimize opaque case
+                may_have_opacities: true,
+            },
             sampler: image_brush.sampler,
         })
     }
