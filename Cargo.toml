@@ -23,7 +23,7 @@ homepage = "https://github.com/dioxuslabs/anyrender"
 repository = "https://github.com/dioxuslabs/anyrender"
 categories = ["gui"]
 edition = "2024"
-rust-version = "1.88.0"
+rust-version = "1.92.0"
 
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
@@ -53,13 +53,13 @@ color = "0.3"
 linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13"
-vello = { version = "0.7", features = [ "wgpu" ] }
-vello_cpu = { version = "0.0.6", default-features = false, features = ["std", "text", "u8_pipeline"] }
-vello_hybrid = { version = "0.0.6" }
-vello_common = { version = "0.0.6" }
+vello = { version = "0.8", features = [ "wgpu" ] }
+vello_cpu = { version = "0.0.7", default-features = false, features = ["std", "text", "u8_pipeline"] }
+vello_hybrid = { version = "0.0.7" }
+vello_common = { version = "0.0.7" }
 
 # Rendering
-wgpu = "27"
+wgpu = "28"
 raw-window-handle = "0.6.0"
 softbuffer = "0.4"
 pixels = "0.15"

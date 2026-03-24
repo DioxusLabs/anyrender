@@ -19,7 +19,11 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
         Paint::Image(image_brush) => {
             let image_id = image_manager.upload_image(image_brush.image);
             PaintType::Image(ImageBrush {
-                image: ImageSource::OpaqueId(image_id),
+                image: ImageSource::OpaqueId {
+                    id: image_id,
+                    // TODO: optimize opaque case
+                    may_have_opacities: true,
+                },
                 sampler: image_brush.sampler,
             })
         }
