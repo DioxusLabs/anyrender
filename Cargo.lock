@@ -207,13 +207,12 @@ dependencies = [
 
 [[package]]
 name = "anyrender_svg"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyrender",
  "image",
  "kurbo",
  "peniko",
- "thiserror 2.0.18",
  "usvg",
 ]
 
