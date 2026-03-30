@@ -9,6 +9,7 @@ rustup target add wasm32-unknown-unknown --toolchain 1.92.0
 cargo +1.92.0 install wasm-pack
 
 # build into examples/wasm/src/pkg so index.html can import it
+export RUSTUP_TOOLCHAIN=1.92
 wasm-pack build examples/wasm --target web --out-dir src/pkg
 ```
 

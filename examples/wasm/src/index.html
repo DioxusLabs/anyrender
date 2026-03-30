@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Space+Grotesk:wght@400;600&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -173,13 +173,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Space+Grotesk:wght@400;600&display=swap"
       rel="stylesheet"
     />
     <style>
       body {
         margin: 0;
         font-family: "Space Grotesk", sans-serif;
+      }
+      h1 {
+        font-family: "Rubik Mono One", "Space Grotesk", sans-serif;
+        font-size: 36px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
     </style>
   </head>
@@ -193,25 +199,34 @@
 </html>`;
 
       let painting = false;
-      let pending = false;
+      let queued = false;
+      let waitingOnResources = false;
 
       async function renderCanvas() {
         if (painting) {
-          pending = true;
+          queued = true;
           return;
         }
         painting = true;
         try {
-          do {
-            pending = false;
-            const rect = canvas.getBoundingClientRect();
-            const dpr = window.devicePixelRatio || 1;
-            await paintHtml(canvas, ta.value, rect.width, rect.height, dpr);
-          } while (pending);
+          const rect = canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          const done = await paintHtml(canvas, ta.value, rect.width, rect.height, dpr);
+          if (!done && !waitingOnResources) {
+            waitingOnResources = true;
+            requestAnimationFrame(() => {
+              waitingOnResources = false;
+              renderCanvas();
+            });
+          }
         } catch (err) {
           console.error("paintHtml failed", err);
         } finally {
           painting = false;
+          if (queued) {
+            queued = false;
+            renderCanvas();
+          }
         }
       }
 
