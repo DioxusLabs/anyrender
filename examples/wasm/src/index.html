@@ -231,7 +231,12 @@
             });
           }
         } catch (err) {
-          console.error("paintHtml failed", err);
+          const msg = err?.message ?? String(err);
+          if (msg.includes("busy")) {
+            queued = true;
+          } else {
+            console.error("paintHtml failed", err);
+          }
         } finally {
           painting = false;
           if (queued) {
