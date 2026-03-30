@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Space+Grotesk:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap"
       rel="stylesheet"
     />
     <style>
@@ -27,7 +27,7 @@
       body {
         height: 100%;
         margin: 0;
-        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        font-family: system-ui, "Segoe UI", sans-serif;
         color: var(--text);
         background: var(--bg);
       }
@@ -173,16 +173,27 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&family=Space+Grotesk:wght@400;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap"
       rel="stylesheet"
     />
     <style>
+      /* Rubik Mono One loads via net; Roboto is bundled in WASM for canvas fallback. */
+      html,
+      body,
+      p {
+        font-family: Roboto, ui-sans-serif, system-ui, sans-serif !important;
+      }
+      code,
+      kbd,
+      pre,
+      samp {
+        font-family: Roboto, ui-monospace, monospace !important;
+      }
       body {
         margin: 0;
-        font-family: "Space Grotesk", sans-serif;
       }
       h1 {
-        font-family: "Rubik Mono One", "Space Grotesk", sans-serif;
+        font-family: "Rubik Mono One", Roboto, sans-serif;
         font-size: 36px;
         letter-spacing: 0.04em;
         text-transform: uppercase;

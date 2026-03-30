@@ -24,7 +24,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::HtmlCanvasElement;
 
 /// Blitz is built with `default-features = false`, so there is no system font backend on wasm.
-/// Ship a small font and point UA styles at it so body text can shape and paint.
+/// Register Roboto here; the sample HTML’s `font-family` stack in `index.html` falls back to it.
 fn wasm_font_context() -> FontContext {
     use linebender_resource_handle::Blob;
 
@@ -229,12 +229,7 @@ pub async fn paint_html(
             let mut config = DocumentConfig::default();
             config.net_provider = Some(renderer_state.net_provider.clone());
             config.font_ctx = Some(wasm_font_context());
-            config.ua_stylesheets = Some(vec![
-                DEFAULT_CSS.to_string(),
-                "html, body, p { font-family: Roboto, ui-sans-serif, system-ui, sans-serif !important; }\n\
-                 code, kbd, pre, samp { font-family: Roboto, ui-monospace, monospace !important; }\n"
-                    .to_string(),
-            ]);
+            config.ua_stylesheets = Some(vec![DEFAULT_CSS.to_string()]);
             let mut doc = HtmlDocument::from_html(html, config);
             doc.set_viewport(Viewport::new(phys_w, phys_h, dpr as f32, ColorScheme::Light));
             renderer_state.doc = Some(doc);
