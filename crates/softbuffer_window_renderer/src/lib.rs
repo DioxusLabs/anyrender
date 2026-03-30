@@ -54,7 +54,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    async fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
         let context = Context::new(window_handle.clone()).unwrap();
         let surface = Surface::new(&context, window_handle.clone()).unwrap();
         self.render_state = RenderState::Active(ActiveRenderState {

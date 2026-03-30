@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+pollster = { workspace = true }
 kurbo = { workspace = true }
 winit = { workspace = true }
 peniko = { workspace = true }

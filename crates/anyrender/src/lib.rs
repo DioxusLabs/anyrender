@@ -51,7 +51,12 @@ pub trait WindowRenderer {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
-    fn resume(&mut self, window: Arc<dyn WindowHandle>, width: u32, height: u32);
+    fn resume(
+        &mut self,
+        window: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+    ) -> impl std::future::Future<Output = ()> + '_;
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
     fn set_size(&mut self, width: u32, height: u32);

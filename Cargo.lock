@@ -252,7 +252,6 @@ dependencies = [
  "debug_timer",
  "kurbo",
  "peniko",
- "pollster 0.4.0",
  "rustc-hash 2.1.1",
  "vello_common",
  "vello_hybrid",
@@ -461,6 +460,7 @@ dependencies = [
  "kurbo",
  "peniko",
  "pixels_window_renderer",
+ "pollster 0.4.0",
  "winit",
 ]
 
@@ -2626,6 +2626,7 @@ dependencies = [
  "anyrender_vello_hybrid",
  "kurbo",
  "peniko",
+ "pollster 0.4.0",
  "winit",
 ]
 
