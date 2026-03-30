@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>anyrender wasm</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8fafc;
+        --panel: #ffffff;
+        --text: #0f172a;
+        --muted: #64748b;
+        --border: #e2e8f0;
+        --accent: #2563eb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family: system-ui, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      .app {
+        height: 100%;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+      }
+      .title {
+        font-weight: 600;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .content {
+        padding: 12px;
+        height: 100%;
+        display: grid;
+        grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr) minmax(300px, 1fr);
+        gap: 12px;
+        align-items: stretch;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-height: 0;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+      }
+      .code-panel {
+        grid-template-rows: auto 1fr;
+      }
+      .panel-header {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        background: #f8fafc;
+      }
+      textarea {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        padding: 14px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        resize: none;
+        outline: none;
+        background: #fbfdff;
+        min-height: 0;
+      }
+      button {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #fff;
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+      }
+      .frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        display: block;
+        background: #ffffff;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        background: #fff;
+      }
+      @media (max-width: 1100px) {
+        .content {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar">
+        <div class="title">anyrender wasm</div>
+        <div class="hint">WebGPU required (Chrome/Edge/Safari TP)</div>
+      </div>
+
+      <div class="content">
+        <div class="panel code-panel" id="panel-code">
+          <div class="panel-header">
+            <div class="hint">Code</div>
+            <button class="primary" id="render">Render</button>
+          </div>
+          <textarea id="html"></textarea>
+        </div>
+
+        <div class="panel" id="panel-html">
+          <div class="panel-header">
+            <div class="hint">Normal Output</div>
+          </div>
+          <iframe class="frame" id="preview" title="HTML preview"></iframe>
+        </div>
+
+        <div class="panel" id="panel-canvas">
+          <div class="panel-header">
+            <div class="hint">Canvas Output</div>
+          </div>
+          <canvas id="c"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import init, { paintHtml } from "./pkg/anyrender_wasm_example.js";
+
+      const ta = document.querySelector("#html");
+      const canvas = document.querySelector("#c");
+      const iframe = document.querySelector("#preview");
+      const renderBtn = document.querySelector("#render");
+
+      ta.value = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Canvas paints with bundled Roboto; iframe loads the same family from Google for a closer preview. */
+      html,
+      body,
+      p,
+      h1 {
+        font-family: Roboto, ui-sans-serif, system-ui, sans-serif !important;
+      }
+      code,
+      kbd,
+      pre,
+      samp {
+        font-family: Roboto, ui-monospace, monospace !important;
+      }
+      body {
+        margin: 0;
+      }
+      h1 {
+        font-size: 36px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="padding:24px">
+      <h1 style="margin:0 0 8px 0">Hello from WASM</h1>
+      <p style="margin:0; opacity:.8">This HTML is painted onto a canvas.</p>
+      <div style="margin-top:16px; width:180px; height:80px; border-radius:12px; background:linear-gradient(135deg,#6ea8fe,#b197fc)"></div>
+    </div>
+  </body>
+</html>`;
+
+      let painting = false;
+      let queued = false;
+      let waitingOnResources = false;
+
+      async function renderCanvas() {
+        if (painting) {
+          queued = true;
+          return;
+        }
+        painting = true;
+        try {
+          const rect = canvas.getBoundingClientRect();
+          const dpr = window.devicePixelRatio || 1;
+          const done = await paintHtml(canvas, ta.value, rect.width, rect.height, dpr);
+          if (!done && !waitingOnResources) {
+            waitingOnResources = true;
+            requestAnimationFrame(() => {
+              waitingOnResources = false;
+              renderCanvas();
+            });
+          }
+        } catch (err) {
+          const msg = err?.message ?? String(err);
+          if (msg.includes("busy")) {
+            queued = true;
+          } else {
+            console.error("paintHtml failed", err);
+          }
+        } finally {
+          painting = false;
+          if (queued) {
+            queued = false;
+            renderCanvas();
+          }
+        }
+      }
+
+      function renderHtml() {
+        iframe.srcdoc = ta.value;
+      }
+
+      async function renderAll() {
+        renderHtml();
+        await renderCanvas();
+      }
+
+      renderBtn.addEventListener("click", () => renderAll());
+
+      await init();
+      renderAll();
+
+      const resizeObserver = new ResizeObserver(() => {
+        renderCanvas();
+      });
+      resizeObserver.observe(canvas);
+    </script>
+  </body>
+</html>

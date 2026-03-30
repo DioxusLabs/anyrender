@@ -52,7 +52,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    async fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
         let mut pixels = Pixels::new(width, height, surface).unwrap();
         pixels.enable_vsync(true);

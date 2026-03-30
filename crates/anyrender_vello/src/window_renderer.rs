@@ -127,25 +127,28 @@ impl WindowRenderer for VelloWindowRenderer {
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    async fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
         // Create wgpu_context::SurfaceRenderer
-        let render_surface = pollster::block_on(self.wgpu_context.create_surface(
-            window_handle.clone(),
-            SurfaceRendererConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                formats: vec![TextureFormat::Rgba8Unorm, TextureFormat::Bgra8Unorm],
-                width,
-                height,
-                present_mode: PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-            },
-            Some(TextureConfiguration {
-                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            }),
-        ))
-        .expect("Error creating surface");
+        let render_surface = self
+            .wgpu_context
+            .create_surface(
+                window_handle.clone(),
+                SurfaceRendererConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    formats: vec![TextureFormat::Rgba8Unorm, TextureFormat::Bgra8Unorm],
+                    width,
+                    height,
+                    present_mode: PresentMode::AutoVsync,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: vec![],
+                },
+                Some(TextureConfiguration {
+                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                }),
+            )
+            .await
+            .expect("Error creating surface");
 
         // Create vello::Renderer
         let renderer = VelloRenderer::new(

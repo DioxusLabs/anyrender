@@ -140,7 +140,7 @@ impl App {
             Arc::new(event_loop.create_window(attr).unwrap())
         });
 
-        renderer.resume(window.clone(), self.width, self.height);
+        pollster::block_on(renderer.resume(window.clone(), self.width, self.height));
         let renderer = renderer.into();
         self.render_state = RenderState::Active { window, renderer };
         self.request_redraw();

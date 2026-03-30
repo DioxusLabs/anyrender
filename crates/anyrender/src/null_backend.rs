@@ -3,7 +3,7 @@
 use crate::{ImageRenderer, PaintScene, WindowHandle, WindowRenderer};
 use std::sync::Arc;
 
-#[derive(Copy, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct NullWindowRenderer {
     is_active: bool,
 }
@@ -20,7 +20,7 @@ impl WindowRenderer for NullWindowRenderer {
     where
         Self: 'a;
 
-    fn resume(&mut self, _window: Arc<dyn WindowHandle>, _width: u32, _height: u32) {
+    async fn resume(&mut self, _window: Arc<dyn WindowHandle>, _width: u32, _height: u32) {
         self.is_active = true;
     }
 

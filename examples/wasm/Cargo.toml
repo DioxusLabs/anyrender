@@ -1,0 +1,31 @@
+[package]
+name = "anyrender_wasm_example"
+version = "0.1.0"
+publish = false
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyrender = { workspace = true }
+anyrender_vello = { workspace = true }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", package = "blitz-dom", default-features = false, features = ["woff-rust"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", package = "blitz-html", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", package = "blitz-paint", default-features = false, features = ["svg"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", package = "blitz-traits", default-features = false }
+console_error_panic_hook = "0.1.7"
+js-sys = "0.3"
+linebender_resource_handle = { workspace = true }
+raw-window-handle = { workspace = true, features = ["wasm-bindgen-0-2"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["HtmlCanvasElement", "Response", "Window"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axum = "0.7"
+tokio = { version = "1.37", features = ["macros", "net", "rt-multi-thread"] }
+tower-http = { version = "0.6", features = ["fs"] }
