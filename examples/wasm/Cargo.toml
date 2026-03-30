@@ -1,0 +1,27 @@
+[package]
+name = "anyrender_wasm_example"
+version = "0.1.0"
+publish = false
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyrender = { workspace = true }
+anyrender_vello = { workspace = true }
+console_error_panic_hook = "0.1.7"
+kurbo = { workspace = true }
+peniko = { workspace = true }
+raw-window-handle = { workspace = true, features = ["wasm-bindgen-0-2"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["HtmlCanvasElement"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axum = "0.7"
+tokio = { version = "1.37", features = ["macros", "net", "rt-multi-thread"] }
+tower-http = { version = "0.6", features = ["fs"] }
