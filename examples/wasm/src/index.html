@@ -4,12 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>anyrender wasm</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap"
-      rel="stylesheet"
-    />
     <style>
       :root {
         color-scheme: light;
@@ -173,14 +167,15 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Rubik+Mono+One&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700;800&display=swap"
       rel="stylesheet"
     />
     <style>
-      /* Rubik Mono One loads via net; Roboto is bundled in WASM for canvas fallback. */
+      /* Canvas paints with bundled Roboto; iframe loads the same family from Google for a closer preview. */
       html,
       body,
-      p {
+      p,
+      h1 {
         font-family: Roboto, ui-sans-serif, system-ui, sans-serif !important;
       }
       code,
@@ -193,8 +188,8 @@
         margin: 0;
       }
       h1 {
-        font-family: "Rubik Mono One", Roboto, sans-serif;
         font-size: 36px;
+        font-weight: 800;
         letter-spacing: 0.04em;
         text-transform: uppercase;
       }
