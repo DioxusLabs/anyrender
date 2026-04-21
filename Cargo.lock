@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_serialize"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyrender",
  "image",
@@ -1569,6 +1569,8 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
 ]
 
@@ -2840,16 +2842,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "read-fonts"
-version = "0.39.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32d7821ebf634094f5e5ae9d43c3109407f420f03a7a2e021d3a5d955a4f09fc"
-dependencies = [
- "bytemuck",
- "font-types 0.11.3",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3177,14 +3169,16 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "skera"
-version = "0.1.4"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9a3fa11663b7c9733f0e809f657349c8f1c6f8b0d3b8d33720d46b48a0fecae"
+checksum = "78071e59409b81dffa944716740f7cc90e26dc3f3b1214fb58beae5f48ffcb36"
 dependencies = [
+ "clap",
  "fnv",
- "hashbrown 0.16.1",
- "skrifa 0.42.0",
- "thiserror 2.0.18",
+ "hashbrown 0.15.5",
+ "regex",
+ "skrifa 0.40.0",
+ "thiserror 1.0.69",
  "write-fonts",
 ]
 
@@ -3233,16 +3227,6 @@ checksum = "7fbdfe3d2475fbd7ddd1f3e5cf8288a30eb3e5f95832829570cd88115a7434ac"
 dependencies = [
  "bytemuck",
  "read-fonts 0.37.0",
-]
-
-[[package]]
-name = "skrifa"
-version = "0.42.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c844316c7318cf6ae9034ee45edd2c432076ef910fdc4bc598183b31f88d03c3"
-dependencies = [
- "bytemuck",
- "read-fonts 0.39.1",
 ]
 
 [[package]]
@@ -4690,15 +4674,15 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "write-fonts"
-version = "0.47.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1baa206fa7cf8f73f69d64ac07111aee3e04f80731c569df1ddbaa4827d9646f"
+checksum = "f12725b0845073e20b04e79b500dbfb465904d7cbd84883a1f1bbd084debc515"
 dependencies = [
  "font-types 0.11.3",
  "indexmap",
  "kurbo",
  "log",
- "read-fonts 0.39.1",
+ "read-fonts 0.37.0",
 ]
 
 [[package]]
