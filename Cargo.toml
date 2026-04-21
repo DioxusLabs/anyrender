@@ -62,7 +62,7 @@ vello_common = { version = "0.0.7" }
 wgpu = "28"
 raw-window-handle = "0.6.0"
 softbuffer = "0.4"
-pixels = "0.15"
+pixels = "0.16"
 
 # SVG
 usvg = { version = "0.46.0", default-features = false }
