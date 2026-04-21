@@ -4,7 +4,7 @@
 
 use anyrender::{ImageRenderer, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use softbuffer::{Context, Surface};
+use softbuffer::{Context, Pixel, Surface};
 use std::{num::NonZero, sync::Arc};
 
 // Simple struct to hold the state of the renderer
@@ -90,7 +90,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
 
         debug_timer!(timer, feature = "log_frame_times");
 
-        let Ok(mut surface_buffer) = state.surface.buffer_mut() else {
+        let Ok(mut surface_buffer) = state.surface.next_buffer() else {
             return;
         };
         timer.record_time("buffer_mut");
@@ -99,20 +99,32 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         self.renderer.render_to_vec(draw_fn, &mut self.buffer);
         timer.record_time("render");
 
-        let out = surface_buffer.as_mut();
+        let width = surface_buffer.width().get() as usize;
+        let out_rows = surface_buffer.pixel_rows();
+        let rows = self.buffer.chunks_exact(width * 4);
+        assert_eq!(out_rows.len(), rows.len());
+        assert_eq!(rows.remainder().len(), 0);
 
-        let (chunks, remainder) = self.buffer.as_chunks::<4>();
-        assert_eq!(chunks.len(), out.len());
-        assert_eq!(remainder.len(), 0);
+        for (in_row, out_row) in rows.zip(out_rows) {
+            let (chunks, remainder) = in_row.as_chunks::<4>();
+            debug_assert_eq!(chunks.len(), width);
+            debug_assert_eq!(remainder.len(), 0);
 
-        for (&src, dest) in chunks.iter().zip(out.iter_mut()) {
-            let [r, g, b, a] = src;
-            if a == 0 {
-                *dest = u32::MAX;
-            } else {
-                *dest = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+            for (&src, dest) in chunks.iter().zip(out_row.iter_mut()) {
+                let [r, g, b, a] = src;
+                if a == 0 {
+                    *dest = Pixel {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                        a: 255,
+                    };
+                } else {
+                    *dest = Pixel { r, g, b, a };
+                }
             }
         }
+
         timer.record_time("swizel");
 
         surface_buffer.present().unwrap();

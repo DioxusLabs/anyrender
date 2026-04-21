@@ -61,7 +61,7 @@ vello_common = { version = "0.0.7" }
 # Rendering
 wgpu = "28"
 raw-window-handle = "0.6.0"
-softbuffer = "0.4"
+softbuffer = { git = "https://github.com/rust-windowing/softbuffer", rev = "10dccf3e23f341d67eb7815311821d89c449a432" }
 pixels = "0.15"
 
 # SVG
