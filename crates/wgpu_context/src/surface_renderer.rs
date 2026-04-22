@@ -1,9 +1,13 @@
 use crate::{DeviceHandle, WgpuContextError, util::create_texture};
 use wgpu::{
-    CommandEncoderDescriptor, CompositeAlphaMode, Device, PresentMode, Queue, Surface,
-    SurfaceConfiguration, SurfaceError, SurfaceTexture, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor, util::TextureBlitter,
+    CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Device, PresentMode,
+    Queue, Surface, SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor, util::TextureBlitter,
 };
+
+/// Error getting the current surface texture
+#[derive(Clone, Debug)]
+pub struct GetCurrentSurfaceTextureErr;
 
 #[derive(Clone)]
 pub struct TextureConfiguration {
@@ -85,7 +89,7 @@ pub struct SurfaceRenderer<'s> {
     pub surface: Surface<'s>,
     pub config: SurfaceConfiguration,
 
-    current_surface_texture: Option<Result<SurfaceTexture, SurfaceError>>,
+    current_surface_texture: Option<CurrentSurfaceTexture>,
     intermediate_texture: Option<Box<IntermediateTextureStuff>>,
 }
 
@@ -189,43 +193,41 @@ impl<'s> SurfaceRenderer<'s> {
         self.current_surface_texture = None;
     }
 
-    pub fn ensure_current_surface_texture(&mut self) -> Result<(), SurfaceError> {
+    pub fn ensure_current_surface_texture(
+        &mut self,
+    ) -> Result<&SurfaceTexture, GetCurrentSurfaceTextureErr> {
         if self.current_surface_texture.is_none() {
             let tex = self.surface.get_current_texture();
-            if let Err(SurfaceError::Lost | SurfaceError::Outdated) = &tex {
-                self.surface
-                    .configure(&self.device_handle.device, &self.config);
+            match &tex {
+                CurrentSurfaceTexture::Lost
+                | CurrentSurfaceTexture::Outdated
+                | CurrentSurfaceTexture::Suboptimal(_) => {
+                    self.surface
+                        .configure(&self.device_handle.device, &self.config);
+                }
+                _ => {}
             }
 
             self.current_surface_texture = Some(tex);
         }
 
-        self.current_surface_texture
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .map(|_| ())
-            .map_err(|err| err.clone())
+        match self.current_surface_texture.as_ref().unwrap() {
+            CurrentSurfaceTexture::Success(surface_texture) => Ok(surface_texture),
+            _ => Err(GetCurrentSurfaceTextureErr),
+        }
     }
 
     /// Get a target texture view to render to.
     ///
     /// If there is an intermediate texture, this is a view of that intermediate texture, otherwise
     /// it is a view of the surface texture.
-    pub fn target_texture_view(&mut self) -> Result<TextureView, SurfaceError> {
+    pub fn target_texture_view(&mut self) -> Result<TextureView, GetCurrentSurfaceTextureErr> {
         match &self.intermediate_texture {
             Some(intermediate_texture) => Ok(intermediate_texture.texture_view.clone()),
-            None => {
-                self.ensure_current_surface_texture()?;
-                Ok(self
-                    .current_surface_texture
-                    .as_ref()
-                    .unwrap()
-                    .as_ref()
-                    .unwrap()
-                    .texture
-                    .create_view(&TextureViewDescriptor::default()))
-            }
+            None => Ok(self
+                .ensure_current_surface_texture()?
+                .texture
+                .create_view(&TextureViewDescriptor::default())),
         }
     }
 
@@ -234,9 +236,17 @@ impl<'s> SurfaceRenderer<'s> {
     ///
     /// Prior to calling this, [`Self::target_texture_view`] must have been called and some
     /// rendering work must have been scheduled to the resulting view.
-    pub fn maybe_blit_and_present(&mut self) -> Result<(), SurfaceError> {
-        self.ensure_current_surface_texture()?;
-        let surface_texture = self.current_surface_texture.take().unwrap().unwrap();
+    pub fn maybe_blit_and_present(&mut self) -> Result<(), GetCurrentSurfaceTextureErr> {
+        if self.ensure_current_surface_texture().is_err() {
+            self.clear_surface_texture();
+            return Err(GetCurrentSurfaceTextureErr);
+        }
+
+        let CurrentSurfaceTexture::Success(surface_texture) =
+            self.current_surface_texture.take().unwrap()
+        else {
+            unreachable!("Surface texture was set in ensure_current_surface_texture above");
+        };
 
         if let Some(its) = &self.intermediate_texture {
             self.blit_from_intermediate_texture_to_surface(&surface_texture, its);

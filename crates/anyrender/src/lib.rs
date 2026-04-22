@@ -234,7 +234,7 @@ pub trait PaintScene: RenderContext {
         brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = Glyph>,
+        glyphs: impl Iterator<Item = Glyph> + Clone,
     );
 
     /// Draw a rounded rectangle blurred with a gaussian filter.

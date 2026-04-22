@@ -115,11 +115,15 @@ impl WGPUContext {
         override_limits: Option<Limits>,
     ) -> Self {
         Self {
-            instance: Instance::new(&wgpu::InstanceDescriptor {
+            instance: Instance::new(wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::from_env().unwrap_or_default(),
                 flags: wgpu::InstanceFlags::from_build_config().with_env(),
                 backend_options: wgpu::BackendOptions::from_env_or_default(),
                 memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+
+                // TODO: support passing display handle
+                // Needed for opengl/webgl
+                display: None,
             }),
             device_pool: Vec::new(),
             extra_features,

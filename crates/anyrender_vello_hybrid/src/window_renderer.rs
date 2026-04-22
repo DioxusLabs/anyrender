@@ -6,10 +6,10 @@ use std::future::Future;
 use std::sync::Arc;
 use vello_common::paint::ImageId;
 use vello_hybrid::{
-    RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
-    Scene as VelloHybridScene,
+    RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer, Resources,
+    Scene as VelloHybridScene, TextureBindings,
 };
-use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, TextureFormat};
+use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
@@ -30,6 +30,7 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 
 struct ActiveRenderState {
     renderer: VelloHybridRenderer,
+    resources: Resources,
     render_surface: SurfaceRenderer<'static>,
 }
 
@@ -223,6 +224,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             )
             .expect("Error creating SurfaceRenderer");
 
+            let resources = Resources::new();
             let renderer = VelloHybridRenderer::new(
                 render_surface.device(),
                 &RenderTargetConfig {
@@ -235,6 +237,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
                     renderer,
+                    resources,
                     render_surface,
                 },
             });
@@ -293,6 +296,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         let image_manager = ImageManager {
             renderer: &mut state.renderer,
+            resources: &mut state.resources,
             device: render_surface.device(),
             queue: render_surface.queue(),
             encoder: &mut encoder,
@@ -307,24 +311,17 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         });
         timer.record_time("cmd");
 
-        match render_surface.ensure_current_surface_texture() {
-            Ok(_) => {}
-            Err(SurfaceError::Timeout | SurfaceError::Lost | SurfaceError::Outdated) => {
-                render_surface.clear_surface_texture();
-                return;
-            }
-            Err(SurfaceError::OutOfMemory) => panic!("Out of memory"),
-            Err(SurfaceError::Other) => panic!("Unknown error getting surface"),
+        let Ok(texture_view) = render_surface.target_texture_view() else {
+            // Skip frame in case of error getting surface texture
+            render_surface.clear_surface_texture();
+            return;
         };
-
-        let texture_view = render_surface
-            .target_texture_view()
-            .expect("handled errors from ensure_current_surface_texture above");
 
         state
             .renderer
             .render(
                 &self.scene,
+                &mut state.resources,
                 render_surface.device(),
                 render_surface.queue(),
                 &mut encoder,
@@ -333,6 +330,8 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     height: render_surface.config.height,
                 },
                 &texture_view,
+                // TODO: handle texture registration
+                &TextureBindings::new(),
             )
             .expect("failed to render to texture");
         render_surface.queue().submit([encoder.finish()]);
@@ -340,9 +339,9 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         drop(texture_view);
 
-        render_surface
-            .maybe_blit_and_present()
-            .expect("handled errors from ensure_current_surface_texture above");
+        if render_surface.maybe_blit_and_present().is_err() {
+            return;
+        }
         timer.record_time("present");
 
         render_surface

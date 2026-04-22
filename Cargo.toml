@@ -22,7 +22,7 @@ homepage = "https://github.com/dioxuslabs/anyrender"
 repository = "https://github.com/dioxuslabs/anyrender"
 categories = ["gui"]
 edition = "2024"
-rust-version = "1.92.0"
+rust-version = "1.88.0"
 
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
@@ -52,13 +52,29 @@ color = "0.3"
 linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13"
-vello = { version = "0.8", features = [ "wgpu" ] }
-vello_cpu = { version = "0.0.7", default-features = false, features = ["std", "text", "u8_pipeline"] }
-vello_hybrid = { version = "0.0.7" }
-vello_common = { version = "0.0.7" }
+# glifo = { version = "0.0.0" }
+# vello = { version = "0.8", features = ["wgpu"] }
+# vello_cpu = { version = "0.0.7", default-features = false, features = [
+#   "std",
+#   "text",
+#   "u8_pipeline",
+# ] }
+# vello_hybrid = { version = "0.0.7" }
+# vello_common = { version = "0.0.7" }
+glifo = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
+vello = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5", features = [
+  "wgpu",
+] }
+vello_cpu = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5", default-features = false, features = [
+  "std",
+  "text",
+  "u8_pipeline",
+] }
+vello_hybrid = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
+vello_common = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
 
 # Rendering
-wgpu = "28"
+wgpu = "29"
 raw-window-handle = "0.6.0"
 softbuffer = "0.4"
 pixels = "0.17"
@@ -78,9 +94,3 @@ wasm-bindgen-futures = "0.4"
 
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
-
-# [patch.crates-io]
-# vello = { path = "../vello/vello" }
-# vello_cpu = { path = "../vello/sparse_strips/vello_cpu" }
-# vello_hybrid = { path = "../vello/sparse_strips/vello_hybrid" }
-# vello_common = { path = "../vello/sparse_strips/vello_common" }

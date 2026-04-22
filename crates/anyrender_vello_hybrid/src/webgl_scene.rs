@@ -13,15 +13,21 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 pub struct WebGlImageManager<'a> {
     pub(crate) renderer: &'a mut vello_hybrid::WebGlRenderer,
+    pub(crate) resources: &'a mut vello_hybrid::Resources,
     pub(crate) cache: &'a mut FxHashMap<u64, ImageId>,
 }
 
 impl<'a> WebGlImageManager<'a> {
     pub fn new(
         renderer: &'a mut vello_hybrid::WebGlRenderer,
+        resources: &'a mut vello_hybrid::Resources,
         cache: &'a mut FxHashMap<u64, ImageId>,
     ) -> Self {
-        Self { renderer, cache }
+        Self {
+            renderer,
+            resources,
+            cache,
+        }
     }
 
     pub(crate) fn upload_image(&mut self, image: &peniko::ImageData) -> ImageId {
@@ -35,7 +41,7 @@ impl<'a> WebGlImageManager<'a> {
             unreachable!();
         };
 
-        let atlas_id = self.renderer.upload_image(&pixmap);
+        let atlas_id = self.renderer.upload_image(self.resources, &pixmap);
         self.cache.insert(peniko_id, atlas_id);
         atlas_id
     }
@@ -81,7 +87,7 @@ impl WebGlScenePainter<'_> {
             image: ImageSource::OpaqueId {
                 id: image_id,
                 // TODO: optimize opaque case
-                may_have_opacities: true,
+                may_have_transparency: true,
             },
             sampler: image_brush.sampler,
         })
@@ -173,14 +179,14 @@ impl PaintScene for WebGlScenePainter<'_> {
         _brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = Glyph>,
+        glyphs: impl Iterator<Item = Glyph> + Clone,
     ) {
         let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
-        fn into_vello_glyph(g: Glyph) -> vello_common::glyph::Glyph {
-            vello_common::glyph::Glyph {
+        fn into_vello_glyph(g: Glyph) -> glifo::Glyph {
+            glifo::Glyph {
                 id: g.id,
                 x: g.x,
                 y: g.y,
@@ -192,7 +198,7 @@ impl PaintScene for WebGlScenePainter<'_> {
             StyleRef::Fill(fill) => {
                 self.scene.set_fill_rule(fill);
                 self.scene
-                    .glyph_run(font)
+                    .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -202,7 +208,7 @@ impl PaintScene for WebGlScenePainter<'_> {
             StyleRef::Stroke(stroke) => {
                 self.scene.set_stroke(stroke.clone());
                 self.scene
-                    .glyph_run(font)
+                    .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)

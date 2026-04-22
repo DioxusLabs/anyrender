@@ -3,7 +3,7 @@ use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
 use vello_common::paint::{ImageId, ImageSource, PaintType};
-use vello_hybrid::Renderer;
+use vello_hybrid::{Renderer, Resources};
 use wgpu::{CommandEncoder, Device, Queue};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
@@ -22,7 +22,7 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
                 image: ImageSource::OpaqueId {
                     id: image_id,
                     // TODO: optimize opaque case
-                    may_have_opacities: true,
+                    may_have_transparency: true,
                 },
                 sampler: image_brush.sampler,
             })
@@ -36,6 +36,7 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
 
 pub struct ImageManager<'a> {
     pub(crate) renderer: &'a mut Renderer,
+    pub(crate) resources: &'a mut Resources,
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
     pub(crate) encoder: &'a mut CommandEncoder,
@@ -45,6 +46,7 @@ pub struct ImageManager<'a> {
 impl<'a> ImageManager<'a> {
     pub fn new(
         renderer: &'a mut Renderer,
+        resources: &'a mut Resources,
         device: &'a Device,
         queue: &'a Queue,
         encoder: &'a mut CommandEncoder,
@@ -52,6 +54,7 @@ impl<'a> ImageManager<'a> {
     ) -> Self {
         Self {
             renderer,
+            resources,
             device,
             queue,
             encoder,
@@ -73,9 +76,13 @@ impl<'a> ImageManager<'a> {
         };
 
         // Upload Pixamp
-        let atlas_id = self
-            .renderer
-            .upload_image(self.device, self.queue, self.encoder, &pixmap);
+        let atlas_id = self.renderer.upload_image(
+            self.resources,
+            self.device,
+            self.queue,
+            self.encoder,
+            &pixmap,
+        );
 
         // Store ImageId in cache
         self.cache.insert(peniko_id, atlas_id);
@@ -194,14 +201,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         _brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = anyrender::Glyph>,
+        glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
     ) {
         let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
-        fn into_vello_hybrid_glyph(g: anyrender::Glyph) -> vello_common::glyph::Glyph {
-            vello_common::glyph::Glyph {
+        fn into_vello_hybrid_glyph(g: anyrender::Glyph) -> glifo::Glyph {
+            glifo::Glyph {
                 id: g.id,
                 x: g.x,
                 y: g.y,
@@ -213,7 +220,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             StyleRef::Fill(fill) => {
                 self.scene.set_fill_rule(fill);
                 self.scene
-                    .glyph_run(font)
+                    .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -223,7 +230,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             StyleRef::Stroke(stroke) => {
                 self.scene.set_stroke(stroke.clone());
                 self.scene
-                    .glyph_run(font)
+                    .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
