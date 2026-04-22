@@ -1,7 +1,7 @@
 use crate::VelloCpuScenePainter;
 use anyrender::{ImageRenderer, RenderContext as AnyRenderContext};
 use debug_timer::debug_timer;
-use vello_cpu::{RenderContext, RenderMode};
+use vello_cpu::{RenderContext, RenderMode, Resources};
 
 pub struct VelloCpuImageRenderer {
     scene: VelloCpuScenePainter,
@@ -13,16 +13,19 @@ impl ImageRenderer for VelloCpuImageRenderer {
 
     fn new(width: u32, height: u32) -> Self {
         Self {
-            scene: VelloCpuScenePainter(RenderContext::new(width as u16, height as u16)),
+            scene: VelloCpuScenePainter {
+                render_ctx: RenderContext::new(width as u16, height as u16),
+                resources: Resources::new(),
+            },
         }
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        self.scene.0 = RenderContext::new(width as u16, height as u16);
+        self.scene.render_ctx = RenderContext::new(width as u16, height as u16);
     }
 
     fn reset(&mut self) {
-        self.scene.0.reset();
+        self.scene.render_ctx.reset();
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
@@ -31,13 +34,14 @@ impl ImageRenderer for VelloCpuImageRenderer {
         draw_fn(&mut self.scene);
         timer.record_time("cmds");
 
-        self.scene.0.flush();
+        self.scene.render_ctx.flush();
         timer.record_time("flush");
 
-        self.scene.0.render_to_buffer(
+        self.scene.render_ctx.render_to_buffer(
+            &mut self.scene.resources,
             buffer,
-            self.scene.0.width(),
-            self.scene.0.height(),
+            self.scene.render_ctx.width(),
+            self.scene.render_ctx.height(),
             RenderMode::OptimizeSpeed,
         );
         timer.record_time("render");
@@ -50,8 +54,8 @@ impl ImageRenderer for VelloCpuImageRenderer {
         draw_fn: F,
         buffer: &mut Vec<u8>,
     ) {
-        let width = self.scene.0.width();
-        let height = self.scene.0.height();
+        let width = self.scene.render_ctx.width();
+        let height = self.scene.render_ctx.height();
         buffer.resize(width as usize * height as usize * 4, 0);
         self.render(draw_fn, buffer);
     }

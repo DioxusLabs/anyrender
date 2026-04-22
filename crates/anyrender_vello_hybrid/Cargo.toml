@@ -19,6 +19,7 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 vello_hybrid = { workspace = true }
 vello_common = { workspace = true }
+glifo = { workspace = true }
 wgpu = { workspace = true }
 rustc-hash = { workspace = true }
 wgpu_context = { workspace = true }

@@ -11,7 +11,7 @@ use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
     Scene as VelloScene,
 };
-use wgpu::{Features, Limits, PresentMode, SurfaceError, Texture, TextureFormat, TextureUsages};
+use wgpu::{Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages};
 use wgpu_context::{
     DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
 };
@@ -305,19 +305,12 @@ impl WindowRenderer for VelloWindowRenderer {
         });
         timer.record_time("cmd");
 
-        match render_surface.ensure_current_surface_texture() {
-            Ok(_) => {}
-            Err(SurfaceError::Timeout | SurfaceError::Lost | SurfaceError::Outdated) => {
-                render_surface.clear_surface_texture();
-                return;
-            }
-            Err(SurfaceError::OutOfMemory) => panic!("Out of memory"),
-            Err(SurfaceError::Other) => panic!("Unknown error getting surface"),
+        let Ok(texture_view) = render_surface.target_texture_view() else {
+            // Skip frame in case of error trying to get current surface texture
+            render_surface.clear_surface_texture();
+            return;
         };
 
-        let texture_view = render_surface
-            .target_texture_view()
-            .expect("handled errors from ensure_current_surface_texture above");
         state
             .renderer
             .render_to_texture(
@@ -337,9 +330,9 @@ impl WindowRenderer for VelloWindowRenderer {
 
         drop(texture_view);
 
-        render_surface
-            .maybe_blit_and_present()
-            .expect("handled errors from ensure_current_surface_texture above");
+        if render_surface.maybe_blit_and_present().is_err() {
+            return;
+        }
         timer.record_time("present");
 
         render_surface

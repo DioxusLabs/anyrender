@@ -36,12 +36,16 @@ fn convert_image_cached(image: &peniko::ImageData) -> ImageSource {
         .clone()
 }
 
-pub struct VelloCpuScenePainter(pub vello_cpu::RenderContext);
+pub struct VelloCpuScenePainter {
+    pub render_ctx: vello_cpu::RenderContext,
+    pub resources: vello_cpu::Resources,
+}
 
 impl VelloCpuScenePainter {
-    pub fn finish(self) -> Pixmap {
-        let mut pixmap = Pixmap::new(self.0.width(), self.0.height());
-        self.0.render_to_pixmap(&mut pixmap);
+    pub fn finish(mut self) -> Pixmap {
+        let mut pixmap = Pixmap::new(self.render_ctx.width(), self.render_ctx.height());
+        self.render_ctx
+            .render_to_pixmap(&mut self.resources, &mut pixmap);
         pixmap
     }
 }
@@ -49,7 +53,7 @@ impl VelloCpuScenePainter {
 impl RenderContext for VelloCpuScenePainter {}
 impl PaintScene for VelloCpuScenePainter {
     fn reset(&mut self) {
-        self.0.reset();
+        self.render_ctx.reset();
     }
 
     fn push_layer(
@@ -59,8 +63,8 @@ impl PaintScene for VelloCpuScenePainter {
         transform: Affine,
         clip: &impl Shape,
     ) {
-        self.0.set_transform(transform);
-        self.0.push_layer(
+        self.render_ctx.set_transform(transform);
+        self.render_ctx.push_layer(
             Some(&clip.into_path(DEFAULT_TOLERANCE)),
             Some(blend.into()),
             Some(alpha),
@@ -70,12 +74,13 @@ impl PaintScene for VelloCpuScenePainter {
     }
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
-        self.0.set_transform(transform);
-        self.0.push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+        self.render_ctx.set_transform(transform);
+        self.render_ctx
+            .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
     }
 
     fn pop_layer(&mut self) {
-        self.0.pop_layer();
+        self.render_ctx.pop_layer();
     }
 
     fn stroke<'a>(
@@ -86,13 +91,14 @@ impl PaintScene for VelloCpuScenePainter {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        self.0.set_transform(transform);
-        self.0.set_stroke(style.clone());
-        self.0
+        self.render_ctx.set_transform(transform);
+        self.render_ctx.set_stroke(style.clone());
+        self.render_ctx
             .set_paint(anyrender_paint_to_vello_cpu_paint(paint.into()));
-        self.0
+        self.render_ctx
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.0.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.render_ctx
+            .stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
     fn fill<'a>(
@@ -103,13 +109,14 @@ impl PaintScene for VelloCpuScenePainter {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        self.0.set_transform(transform);
-        self.0.set_fill_rule(style);
-        self.0
+        self.render_ctx.set_transform(transform);
+        self.render_ctx.set_fill_rule(style);
+        self.render_ctx
             .set_paint(anyrender_paint_to_vello_cpu_paint(paint.into()));
-        self.0
+        self.render_ctx
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.0.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.render_ctx
+            .fill_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -123,10 +130,10 @@ impl PaintScene for VelloCpuScenePainter {
         _brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = anyrender::Glyph>,
+        glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
     ) {
-        self.0.set_transform(transform);
-        self.0
+        self.render_ctx.set_transform(transform);
+        self.render_ctx
             .set_paint(anyrender_paint_to_vello_cpu_paint(paint.into()));
 
         fn into_vello_cpu_glyph(g: anyrender::Glyph) -> vello_cpu::Glyph {
@@ -140,9 +147,9 @@ impl PaintScene for VelloCpuScenePainter {
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
-                self.0.set_fill_rule(fill);
-                self.0
-                    .glyph_run(font)
+                self.render_ctx.set_fill_rule(fill);
+                self.render_ctx
+                    .glyph_run(&mut self.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -150,9 +157,9 @@ impl PaintScene for VelloCpuScenePainter {
                     .fill_glyphs(glyphs.map(into_vello_cpu_glyph));
             }
             StyleRef::Stroke(stroke) => {
-                self.0.set_stroke(stroke.clone());
-                self.0
-                    .glyph_run(font)
+                self.render_ctx.set_stroke(stroke.clone());
+                self.render_ctx
+                    .glyph_run(&mut self.resources, font)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -169,9 +176,9 @@ impl PaintScene for VelloCpuScenePainter {
         radius: f64,
         std_dev: f64,
     ) {
-        self.0.set_transform(transform);
-        self.0.set_paint(PaintType::Solid(color));
-        self.0
+        self.render_ctx.set_transform(transform);
+        self.render_ctx.set_paint(PaintType::Solid(color));
+        self.render_ctx
             .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
     }
 }
