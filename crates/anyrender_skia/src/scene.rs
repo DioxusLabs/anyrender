@@ -57,6 +57,7 @@ impl Default for SkiaSceneCache {
 pub struct SkiaScenePainter<'a> {
     pub(crate) inner: &'a Canvas,
     pub(crate) cache: &'a mut SkiaSceneCache,
+    pub(crate) base_color: Color,
 }
 
 impl SkiaScenePainter<'_> {
@@ -380,7 +381,7 @@ impl SkiaScenePainter<'_> {
 
 impl PaintScene for SkiaScenePainter<'_> {
     fn reset(&mut self) {
-        self.inner.clear(Color::WHITE);
+        self.inner.clear(self.base_color);
     }
 
     fn push_layer(
