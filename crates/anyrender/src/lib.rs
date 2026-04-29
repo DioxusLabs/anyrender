@@ -157,6 +157,9 @@ pub trait PaintScene {
         std_dev: f64,
     );
 
+    /// Marks a region where a separately produced iframe scene may be composited.
+    fn iframe_placeholder(&mut self, _frame_id: u64, _transform: Affine, _clip: &impl Shape) {}
+
     // --- Provided methods
 
     /// Append a recorded Scene Fragment to the current scene
@@ -218,6 +221,13 @@ pub trait PaintScene {
                     cmd.radius,
                     cmd.std_dev,
                 ),
+                RenderCommand::IframePlaceholder(cmd) => {
+                    self.iframe_placeholder(
+                        cmd.frame_id,
+                        scene_transform * cmd.transform,
+                        &cmd.clip,
+                    )
+                }
             }
         }
     }

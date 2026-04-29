@@ -28,6 +28,8 @@ pub enum RenderCommand<Font = FontData, Image = ImageData> {
     GlyphRun(GlyphRunCommand<Font, Image>),
     /// Draw a rounded rectangle blurred with a gaussian filter.
     BoxShadow(BoxShadowCommand),
+    /// Marks a region where a separately produced iframe scene may be composited.
+    IframePlaceholder(IframePlaceholderCommand),
 }
 
 impl RenderCommand {
@@ -41,6 +43,7 @@ impl RenderCommand {
             RenderCommand::Fill(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::GlyphRun(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::BoxShadow(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::IframePlaceholder(cmd) => cmd.transform = transform * cmd.transform,
         };
 
         self
@@ -120,6 +123,16 @@ pub struct BoxShadowCommand {
     pub brush: Color,
     pub radius: f64,
     pub std_dev: f64,
+}
+
+/// Marks a region where a separately produced iframe scene may be composited.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct IframePlaceholderCommand {
+    pub frame_id: u64,
+    pub transform: Affine,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
+    pub clip: BezPath,
 }
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
@@ -281,6 +294,16 @@ impl PaintScene for Scene {
             std_dev,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
+    }
+
+    fn iframe_placeholder(&mut self, frame_id: u64, transform: Affine, clip: &impl Shape) {
+        let clip = clip.into_path(self.tolerance);
+        let placeholder = IframePlaceholderCommand {
+            frame_id,
+            transform,
+            clip,
+        };
+        self.commands.push(RenderCommand::IframePlaceholder(placeholder));
     }
 
     fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
