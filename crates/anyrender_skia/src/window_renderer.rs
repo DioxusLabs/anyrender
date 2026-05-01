@@ -1,4 +1,4 @@
-use anyrender::WindowRenderer;
+use anyrender::{RenderContext, WindowRenderer};
 use debug_timer::debug_timer;
 use skia_safe::{Color, Surface, graphics};
 use std::sync::Arc;
@@ -43,6 +43,7 @@ impl SkiaWindowRenderer {
 
 impl SkiaWindowRenderer {}
 
+impl RenderContext for SkiaWindowRenderer {}
 impl WindowRenderer for SkiaWindowRenderer {
     type ScenePainter<'a>
         = SkiaScenePainter<'a>

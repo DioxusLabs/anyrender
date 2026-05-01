@@ -1,4 +1,4 @@
-use anyrender::{WindowHandle, WindowRenderer};
+use anyrender::{RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use peniko::Color;
 use rustc_hash::FxHashMap;
@@ -117,6 +117,16 @@ impl VelloWindowRenderer {
     }
 }
 
+impl RenderContext for VelloWindowRenderer {
+    fn renderer_specific_context(&self) -> &dyn std::any::Any {
+        match &self.render_state {
+            RenderState::Active(active_render_state) => {
+                &active_render_state.render_surface.device_handle as _
+            }
+            RenderState::Suspended => &() as _,
+        }
+    }
+}
 impl WindowRenderer for VelloWindowRenderer {
     type ScenePainter<'a>
         = VelloScenePainter<'a, 'a>

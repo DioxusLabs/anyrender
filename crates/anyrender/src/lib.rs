@@ -32,7 +32,7 @@
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 pub mod wasm_send_sync;
 pub use wasm_send_sync::*;
@@ -43,11 +43,57 @@ pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
 
+mod resource_id;
+pub use resource_id::ResourceId;
+
 #[cfg(feature = "serde")]
 mod svg_path_parser;
 
+pub enum RegisterResourceErrorKind {
+    /// The `RenderContext` you tried to register the resource with does not support the kind of resource
+    UnsupportedResourceKind,
+    /// Some other kind of error occured
+    Other,
+    /// This backend has not implemented resource registration
+    Unimplemented,
+}
+pub struct RegisterResourceError {
+    /// The kind of error that occurred when registering the resource
+    pub kind: RegisterResourceErrorKind,
+    /// An optional detailed error message
+    pub message: Option<String>,
+}
+
+impl From<RegisterResourceErrorKind> for RegisterResourceError {
+    fn from(kind: RegisterResourceErrorKind) -> Self {
+        Self {
+            kind,
+            message: None,
+        }
+    }
+}
+
+pub trait RenderContext {
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn Any>,
+    ) -> Result<ResourceId, RegisterResourceError> {
+        let _ = resource;
+        Err(RegisterResourceErrorKind::Unimplemented.into())
+    }
+    fn unregister_resource(&mut self, resource_id: ResourceId) {
+        let _ = resource_id;
+    }
+
+    /// Return a type-erased context type that is passed to custom widgets
+    /// in order to enable them to render renderer-specific content
+    fn renderer_specific_context(&self) -> &dyn Any {
+        &() as _
+    }
+}
+
 /// Abstraction for rendering a scene to a window
-pub trait WindowRenderer {
+pub trait WindowRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;
@@ -59,7 +105,7 @@ pub trait WindowRenderer {
 }
 
 /// Abstraction for rendering a scene to an image buffer
-pub trait ImageRenderer {
+pub trait ImageRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where
         Self: 'a;

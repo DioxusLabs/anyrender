@@ -1,5 +1,5 @@
 use crate::VelloCpuScenePainter;
-use anyrender::ImageRenderer;
+use anyrender::{ImageRenderer, RenderContext as AnyRenderContext};
 use debug_timer::debug_timer;
 use vello_cpu::{RenderContext, RenderMode};
 
@@ -7,6 +7,7 @@ pub struct VelloCpuImageRenderer {
     scene: VelloCpuScenePainter,
 }
 
+impl AnyRenderContext for VelloCpuImageRenderer {}
 impl ImageRenderer for VelloCpuImageRenderer {
     type ScenePainter<'a> = VelloCpuScenePainter;
 

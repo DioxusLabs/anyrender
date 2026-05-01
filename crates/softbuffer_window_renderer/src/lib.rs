@@ -2,7 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, WindowHandle, WindowRenderer};
+use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
@@ -44,6 +44,18 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
     }
 }
 
+impl<Renderer: ImageRenderer> RenderContext for SoftbufferWindowRenderer<Renderer> {
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn std::any::Any>,
+    ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+        self.renderer.try_register_custom_resource(resource)
+    }
+
+    fn unregister_resource(&mut self, resource_id: anyrender::ResourceId) {
+        self.renderer.unregister_resource(resource_id);
+    }
+}
 impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Renderer> {
     type ScenePainter<'a>
         = Renderer::ScenePainter<'a>

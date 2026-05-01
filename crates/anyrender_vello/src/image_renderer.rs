@@ -1,4 +1,4 @@
-use anyrender::ImageRenderer;
+use anyrender::{ImageRenderer, RenderContext};
 use rustc_hash::FxHashMap;
 use vello::{Renderer as VelloRenderer, RendererOptions, Scene as VelloScene};
 use wgpu::TextureUsages;
@@ -12,6 +12,7 @@ pub struct VelloImageRenderer {
     scene: VelloScene,
 }
 
+impl RenderContext for VelloImageRenderer {}
 impl ImageRenderer for VelloImageRenderer {
     type ScenePainter<'a>
         = VelloScenePainter<'a, 'a>

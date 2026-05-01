@@ -1,6 +1,6 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{ImageRenderer, PaintScene, WindowHandle, WindowRenderer};
+use crate::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -14,6 +14,7 @@ impl NullWindowRenderer {
     }
 }
 
+impl RenderContext for NullWindowRenderer {}
 impl WindowRenderer for NullWindowRenderer {
     type ScenePainter<'a>
         = NullScenePainter
@@ -46,6 +47,7 @@ impl NullImageRenderer {
     }
 }
 
+impl RenderContext for NullImageRenderer {}
 impl ImageRenderer for NullImageRenderer {
     type ScenePainter<'a>
         = NullScenePainter

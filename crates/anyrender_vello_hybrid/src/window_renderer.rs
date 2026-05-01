@@ -1,4 +1,4 @@
-use anyrender::{WindowHandle, WindowRenderer};
+use anyrender::{RegisterResourceErrorKind, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use rustc_hash::FxHashMap;
 use std::sync::{
@@ -10,7 +10,9 @@ use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
 };
-use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, TextureFormat};
+use wgpu::{
+    CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, Texture, TextureFormat,
+};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
@@ -112,6 +114,43 @@ const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 #[cfg(not(target_os = "android"))]
 const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
 
+impl RenderContext for VelloHybridWindowRenderer {
+//     fn renderer_specific_context(&self) -> &dyn std::any::Any {
+//         match &self.render_state {
+//             RenderState::Active(active_render_state) => {
+//                 &active_render_state.render_surface.device_handle as _
+//             }
+//             RenderState::Suspended => &() as _,
+//         }
+//     }
+
+//     fn try_register_custom_resource(
+//         &mut self,
+//         resource: Box<dyn std::any::Any>,
+//     ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+//         let RenderState::Active(state) = self.render_state else {
+//             return Err(RegisterResourceErrorKind::Other.into());
+//         };
+
+//         if let Ok(texture) = resource.downcast::<Texture>() {
+//             let device = state.render_surface.device();
+//             let queue = state.render_surface.queue();
+//             let mut encoder =
+//                 state
+//                     .render_surface
+//                     .device()
+//                     .create_command_encoder(&CommandEncoderDescriptor {
+//                         label: Some("Upload texture to Atlas"),
+//                     });
+//             let id = state
+//                 .renderer
+//                 .upload_image(device, queue, &mut encoder, &*texture);
+//             Ok(ResourceId(id.as_u32() as u64))
+//         } else {
+//             Err(RegisterResourceErrorKind::UnsupportedResourceKind.into())
+//         }
+//     }
+}
 impl WindowRenderer for VelloHybridWindowRenderer {
     type ScenePainter<'a>
         = VelloHybridScenePainter<'a>

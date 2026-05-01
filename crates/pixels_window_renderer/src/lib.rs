@@ -2,7 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, WindowHandle, WindowRenderer};
+use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use pixels::{Pixels, SurfaceTexture, wgpu::Color};
 use std::sync::Arc;
@@ -42,6 +42,18 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
     }
 }
 
+impl<Renderer: ImageRenderer> RenderContext for PixelsWindowRenderer<Renderer> {
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn std::any::Any>,
+    ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+        self.renderer.try_register_custom_resource(resource)
+    }
+
+    fn unregister_resource(&mut self, resource_id: anyrender::ResourceId) {
+        self.renderer.unregister_resource(resource_id);
+    }
+}
 impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> {
     type ScenePainter<'a>
         = <Renderer as ImageRenderer>::ScenePainter<'a>

@@ -1,4 +1,4 @@
-use anyrender::ImageRenderer;
+use anyrender::{ImageRenderer, RenderContext};
 use debug_timer::debug_timer;
 use skia_safe::{AlphaType, Color, ColorType, ImageInfo, SurfaceProps, graphics, surfaces};
 
@@ -10,6 +10,7 @@ pub struct SkiaImageRenderer {
     scene_cache: SkiaSceneCache,
 }
 
+impl RenderContext for SkiaImageRenderer {}
 impl ImageRenderer for SkiaImageRenderer {
     type ScenePainter<'a>
         = SkiaScenePainter<'a>
