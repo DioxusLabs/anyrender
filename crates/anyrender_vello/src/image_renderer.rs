@@ -1,4 +1,5 @@
-use anyrender::{ImageRenderer, RenderContext};
+use anyrender::{ImageRenderer, RenderContext, ResourceId};
+use peniko::ImageData;
 use rustc_hash::FxHashMap;
 use vello::{Renderer as VelloRenderer, RendererOptions, Scene as VelloScene};
 use wgpu::TextureUsages;
@@ -10,6 +11,7 @@ pub struct VelloImageRenderer {
     buffer_renderer: BufferRenderer,
     vello_renderer: VelloRenderer,
     scene: VelloScene,
+    texture_handles: FxHashMap<ResourceId, ImageData>,
 }
 
 impl RenderContext for VelloImageRenderer {}
@@ -48,6 +50,7 @@ impl ImageRenderer for VelloImageRenderer {
             buffer_renderer,
             vello_renderer,
             scene: VelloScene::new(),
+            texture_handles: FxHashMap::default(),
         }
     }
 
@@ -78,6 +81,7 @@ impl ImageRenderer for VelloImageRenderer {
             inner: &mut self.scene,
             renderer: Some(&mut self.vello_renderer),
             custom_paint_sources: Some(&mut FxHashMap::default()),
+            texture_handles: Some(&mut self.texture_handles),
         });
 
         let size = self.buffer_renderer.size();

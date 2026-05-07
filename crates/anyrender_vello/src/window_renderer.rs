@@ -1,6 +1,6 @@
-use anyrender::{RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{RenderContext, ResourceId, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use peniko::Color;
+use peniko::{Color, ImageData};
 use rustc_hash::FxHashMap;
 use std::sync::{
     Arc,
@@ -70,7 +70,9 @@ pub struct VelloWindowRenderer {
     scene: VelloScene,
     config: VelloRendererOptions,
 
+    // Resources
     custom_paint_sources: FxHashMap<u64, Box<dyn CustomPaintSource>>,
+    texture_handles: FxHashMap<ResourceId, ImageData>,
 }
 impl VelloWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -92,6 +94,7 @@ impl VelloWindowRenderer {
             window_handle: None,
             scene: VelloScene::new(),
             custom_paint_sources: FxHashMap::default(),
+            texture_handles: FxHashMap::default(),
         }
     }
 
@@ -214,6 +217,7 @@ impl WindowRenderer for VelloWindowRenderer {
             inner: &mut self.scene,
             renderer: Some(&mut state.renderer),
             custom_paint_sources: Some(&mut self.custom_paint_sources),
+            texture_handles: Some(&mut self.texture_handles),
         });
         timer.record_time("cmd");
 
