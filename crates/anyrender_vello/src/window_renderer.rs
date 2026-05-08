@@ -121,12 +121,12 @@ impl VelloWindowRenderer {
 }
 
 impl RenderContext for VelloWindowRenderer {
-    fn renderer_specific_context(&self) -> &dyn std::any::Any {
+    fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
         match &self.render_state {
-            RenderState::Active(active_render_state) => {
-                &active_render_state.render_surface.device_handle as _
-            }
-            RenderState::Suspended => &() as _,
+            RenderState::Active(active_render_state) => Some(Box::new(
+                active_render_state.render_surface.device_handle.clone(),
+            )),
+            RenderState::Suspended => None,
         }
     }
 }

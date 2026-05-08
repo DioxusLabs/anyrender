@@ -1,4 +1,4 @@
-use anyrender::PaintScene;
+use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
@@ -386,6 +386,7 @@ impl SkiaScenePainter<'_> {
     }
 }
 
+impl RenderContext for SkiaScenePainter<'_> {}
 impl PaintScene for SkiaScenePainter<'_> {
     fn reset(&mut self) {
         self.inner.clear(Color::WHITE);

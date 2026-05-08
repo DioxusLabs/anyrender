@@ -90,8 +90,8 @@ pub trait RenderContext {
 
     /// Return a type-erased context type that is passed to custom widgets
     /// in order to enable them to render renderer-specific content
-    fn renderer_specific_context(&self) -> &dyn Any {
-        &() as _
+    fn renderer_specific_context(&self) -> Option<Box<dyn Any>> {
+        None
     }
 }
 

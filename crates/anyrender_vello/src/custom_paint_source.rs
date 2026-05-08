@@ -64,8 +64,4 @@ impl RenderContext for CustomPaintCtx<'_> {
     fn unregister_resource(&mut self, resource_id: ResourceId) {
         self.unregister_texture(resource_id);
     }
-
-    fn renderer_specific_context(&self) -> &dyn std::any::Any {
-        &() as _
-    }
 }
