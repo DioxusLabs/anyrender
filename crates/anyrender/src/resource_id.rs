@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicUsize;
 static ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceId(u64);
 
 impl ResourceId {

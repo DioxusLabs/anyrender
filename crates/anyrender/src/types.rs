@@ -6,6 +6,8 @@ use std::{any::Any, sync::Arc};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::ResourceId;
+
 pub type NormalizedCoord = i16;
 
 /// A positioned glyph.
@@ -35,6 +37,8 @@ pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
     Gradient(G),
     /// Image brush.
     Image(I),
+    /// Custom paint (referenced by ID)
+    Resource(ResourceId),
     /// Custom paint (type erased as each backend will have their own)
     Custom(C),
 }
@@ -47,8 +51,7 @@ impl Paint {
             Paint::Solid(color) => Paint::Solid(*color),
             Paint::Gradient(gradient) => Paint::Gradient(gradient),
             Paint::Image(image) => Paint::Image(image.as_ref()),
-
-            // Custom paints are translated into "invisible" where they are not supported
+            Paint::Resource(id) => Paint::Resource(*id),
             Paint::Custom(custom) => Paint::Custom(custom.as_ref()),
         }
     }
@@ -68,6 +71,7 @@ impl<'a> From<PaintRef<'a>> for BrushRef<'a> {
             Paint::Image(image) => Brush::Image(image),
 
             // Custom paints are translated into "invisible" where they are not supported
+            Paint::Resource(_) => Brush::Solid(Color::TRANSPARENT),
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }
     }

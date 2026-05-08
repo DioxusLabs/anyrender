@@ -81,6 +81,7 @@ impl NullScenePainter {
     }
 }
 
+impl RenderContext for NullScenePainter {}
 impl PaintScene for NullScenePainter {
     fn reset(&mut self) {}
 

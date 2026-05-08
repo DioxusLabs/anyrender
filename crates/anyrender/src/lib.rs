@@ -49,6 +49,7 @@ pub use resource_id::ResourceId;
 #[cfg(feature = "serde")]
 mod svg_path_parser;
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RegisterResourceErrorKind {
     /// The `RenderContext` you tried to register the resource with does not support the kind of resource
     UnsupportedResourceKind,
@@ -57,6 +58,8 @@ pub enum RegisterResourceErrorKind {
     /// This backend has not implemented resource registration
     Unimplemented,
 }
+
+#[derive(Debug, Clone)]
 pub struct RegisterResourceError {
     /// The kind of error that occurred when registering the resource
     pub kind: RegisterResourceErrorKind,
@@ -134,7 +137,7 @@ pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
 }
 
 /// Abstraction for drawing a 2D scene
-pub trait PaintScene {
+pub trait PaintScene: RenderContext {
     /// Removes all content from the scene
     fn reset(&mut self);
 

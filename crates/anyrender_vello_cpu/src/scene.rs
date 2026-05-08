@@ -1,4 +1,4 @@
-use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene};
+use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
 use vello_cpu::{ImageSource, PaintType, Pixmap};
@@ -17,6 +17,7 @@ fn anyrender_paint_to_vello_cpu_paint<'a>(paint: PaintRef<'a>) -> PaintType {
             sampler: image.sampler,
         }),
         // TODO: custom paint
+        Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
         Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
     }
 }
@@ -45,6 +46,7 @@ impl VelloCpuScenePainter {
     }
 }
 
+impl RenderContext for VelloCpuScenePainter {}
 impl PaintScene for VelloCpuScenePainter {
     fn reset(&mut self) {
         self.0.reset();

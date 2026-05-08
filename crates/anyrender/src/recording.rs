@@ -1,4 +1,4 @@
-use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
+use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
 use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrush, ImageData, Style, StyleRef};
 
@@ -158,11 +158,13 @@ impl Scene {
             Paint::Gradient(gradient) => Brush::Gradient(gradient.clone()),
             Paint::Image(image) => Brush::Image(image.to_owned()),
             // TODO: handle this somehow
+            Paint::Resource(_) => Brush::Solid(Color::TRANSPARENT),
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }
     }
 }
 
+impl RenderContext for Scene {}
 impl PaintScene for Scene {
     fn reset(&mut self) {
         self.commands.clear()

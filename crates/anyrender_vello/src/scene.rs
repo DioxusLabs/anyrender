@@ -2,7 +2,9 @@ use anyrender::{
     CustomPaint, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
 };
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
+use peniko::{
+    BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, ImageSampler, StyleRef,
+};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
@@ -57,9 +59,11 @@ impl VelloScenePainter<'_, '_> {
     }
 
     fn render_custom_source(&mut self, custom_paint: CustomPaint) -> Option<peniko::ImageBrush> {
-        let (Some(renderer), Some(custom_paint_sources)) =
-            (&mut self.renderer, &mut self.custom_paint_sources)
-        else {
+        let (Some(renderer), Some(custom_paint_sources), Some(texture_handles)) = (
+            &mut self.renderer,
+            &mut self.custom_paint_sources,
+            &mut self.texture_handles,
+        ) else {
             return None;
         };
 
@@ -72,11 +76,13 @@ impl VelloScenePainter<'_, '_> {
 
         // Render custom paint source
         let source = custom_paint_sources.get_mut(&source_id)?;
-        let ctx = CustomPaintCtx::new(renderer);
-        let texture_handle = source.render(ctx, width, height, scale)?;
+        let ctx = CustomPaintCtx::new(renderer, texture_handles);
+        let resource_id = source.render(ctx, width, height, scale)?;
+
+        let texture_handle = texture_handles.get(&resource_id)?.clone();
 
         // Return dummy image
-        Some(ImageBrush::new(texture_handle.0))
+        Some(ImageBrush::new(texture_handle))
     }
 }
 
@@ -133,6 +139,20 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             Paint::Solid(color) => BrushRef::Solid(color),
             Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
             Paint::Image(image) => BrushRef::Image(image),
+            Paint::Resource(id) => {
+                if let Some(texture_handle) = self
+                    .texture_handles
+                    .as_ref()
+                    .and_then(|texture_handles| texture_handles.get(&id))
+                {
+                    peniko::Brush::Image(ImageBrush {
+                        image: texture_handle,
+                        sampler: ImageSampler::default(), // TODO: allow sampler customisation
+                    })
+                } else {
+                    BrushRef::Solid(Color::TRANSPARENT)
+                }
+            }
             Paint::Custom(custom_paint) => {
                 let Some(custom_paint) = custom_paint.downcast_ref::<CustomPaint>() else {
                     return;
