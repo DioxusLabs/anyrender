@@ -40,7 +40,21 @@ pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
     /// Custom paint (referenced by ID)
     Resource(ResourceId),
     /// Custom paint (type erased as each backend will have their own)
+    #[cfg_attr(feature = "serde", serde(skip))]
     Custom(C),
+}
+
+impl<I: PartialEq, G: PartialEq> PartialEq for Paint<I, G, Arc<dyn Any + Send + Sync>> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Solid(l0), Self::Solid(r0)) => l0 == r0,
+            (Self::Gradient(l0), Self::Gradient(r0)) => l0 == r0,
+            (Self::Image(l0), Self::Image(r0)) => l0 == r0,
+            (Self::Resource(l0), Self::Resource(r0)) => l0 == r0,
+            (Self::Custom(l0), Self::Custom(r0)) => Arc::ptr_eq(l0, r0),
+            _ => false,
+        }
+    }
 }
 
 pub type PaintRef<'a> = Paint<ImageBrushRef<'a>, &'a Gradient, &'a (dyn Any + Send + Sync)>;

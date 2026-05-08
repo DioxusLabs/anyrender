@@ -8,11 +8,13 @@ use peniko::{
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
+use wgpu_context::DeviceHandle;
 
 use crate::{CustomPaintSource, custom_paint_source::CustomPaintCtx};
 
 pub struct VelloScenePainter<'r, 's> {
     pub(crate) renderer: Option<&'r mut VelloRenderer>,
+    pub(crate) device_handle: Option<&'r DeviceHandle>,
     pub(crate) custom_paint_sources: Option<&'r mut FxHashMap<u64, Box<dyn CustomPaintSource>>>,
     pub(crate) texture_handles: Option<&'r mut FxHashMap<ResourceId, ImageData>>,
     pub(crate) inner: &'s mut vello::Scene,
@@ -46,12 +48,18 @@ impl RenderContext for VelloScenePainter<'_, '_> {
             renderer.unregister_texture(handle);
         }
     }
+
+    fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
+        self.device_handle
+            .and_then(|device_handle| Some(Box::new(device_handle.clone()) as _))
+    }
 }
 
 impl VelloScenePainter<'_, '_> {
     pub fn new<'s>(scene: &'s mut vello::Scene) -> VelloScenePainter<'static, 's> {
         VelloScenePainter {
             renderer: None,
+            device_handle: None,
             custom_paint_sources: None,
             texture_handles: None,
             inner: scene,

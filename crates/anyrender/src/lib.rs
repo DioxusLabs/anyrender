@@ -57,6 +57,8 @@ pub enum RegisterResourceErrorKind {
     Other,
     /// This backend has not implemented resource registration
     Unimplemented,
+    /// The `RenderContext` you tried to register the resource is not currently active
+    NotActive,
 }
 
 #[derive(Debug, Clone)]
@@ -226,9 +228,11 @@ pub trait PaintScene: RenderContext {
                     &cmd.style,
                     scene_transform * cmd.transform,
                     match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
+                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
+                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
+                        Paint::Resource(id) => Paint::Resource(id),
+                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
                     },
                     cmd.brush_transform,
                     &cmd.shape,
@@ -237,9 +241,11 @@ pub trait PaintScene: RenderContext {
                     cmd.fill,
                     scene_transform * cmd.transform,
                     match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
+                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
+                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
+                        Paint::Resource(id) => Paint::Resource(id),
+                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
                     },
                     cmd.brush_transform,
                     &cmd.shape,

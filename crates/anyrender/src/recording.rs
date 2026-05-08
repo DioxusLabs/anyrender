@@ -77,7 +77,7 @@ pub struct ClipCommand {
 pub struct StrokeCommand<Image = ImageData> {
     pub style: Stroke,
     pub transform: Affine,
-    pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Paint<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
@@ -89,7 +89,7 @@ pub struct StrokeCommand<Image = ImageData> {
 pub struct FillCommand<Image = ImageData> {
     pub fill: Fill,
     pub transform: Affine,
-    pub brush: Brush<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
+    pub brush: Paint<ImageBrush<Image>>, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
@@ -162,6 +162,17 @@ impl Scene {
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
         }
     }
+
+    fn convert_paint(&mut self, paint_ref: PaintRef<'_>) -> Paint {
+        match paint_ref {
+            Paint::Solid(color) => Paint::Solid(color),
+            Paint::Gradient(gradient) => Paint::Gradient(gradient.clone()),
+            Paint::Image(image) => Paint::Image(image.to_owned()),
+            // TODO: handle this somehow
+            Paint::Resource(id) => Paint::Resource(id),
+            Paint::Custom(_) => Paint::Solid(Color::TRANSPARENT),
+        }
+    }
 }
 
 impl RenderContext for Scene {}
@@ -207,7 +218,7 @@ impl PaintScene for Scene {
         shape: &impl Shape,
     ) {
         let shape = shape.into_path(self.tolerance);
-        let brush = self.convert_paintref(paint_ref.into());
+        let brush = self.convert_paint(paint_ref.into());
         let stroke = StrokeCommand {
             style: style.clone(),
             transform,
@@ -227,7 +238,7 @@ impl PaintScene for Scene {
         shape: &impl Shape,
     ) {
         let shape = shape.into_path(self.tolerance);
-        let brush = self.convert_paintref(paint.into());
+        let brush = self.convert_paint(paint.into());
         let fill = FillCommand {
             fill: style,
             transform,
