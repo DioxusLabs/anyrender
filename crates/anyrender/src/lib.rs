@@ -41,7 +41,7 @@ pub use types::*;
 mod null_backend;
 pub use null_backend::*;
 pub mod recording;
-pub use recording::Scene;
+pub use recording::{PlaceholderCommand, PlaceholderKind, Scene};
 
 #[cfg(feature = "serde")]
 mod svg_path_parser;
@@ -157,8 +157,8 @@ pub trait PaintScene {
         std_dev: f64,
     );
 
-    /// Marks a region where a separately produced iframe scene may be composited.
-    fn iframe_placeholder(&mut self, _frame_id: u64, _transform: Affine, _clip: &impl Shape) {}
+    /// Marks a region where a separately produced scene may be composited.
+    fn placeholder(&mut self, _kind: PlaceholderKind, _transform: Affine, _clip: &impl Shape) {}
 
     // --- Provided methods
 
@@ -221,12 +221,8 @@ pub trait PaintScene {
                     cmd.radius,
                     cmd.std_dev,
                 ),
-                RenderCommand::IframePlaceholder(cmd) => {
-                    self.iframe_placeholder(
-                        cmd.frame_id,
-                        scene_transform * cmd.transform,
-                        &cmd.clip,
-                    )
+                RenderCommand::Placeholder(cmd) => {
+                    self.placeholder(cmd.kind, scene_transform * cmd.transform, &cmd.clip)
                 }
             }
         }

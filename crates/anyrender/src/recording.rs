@@ -28,8 +28,8 @@ pub enum RenderCommand<Font = FontData, Image = ImageData> {
     GlyphRun(GlyphRunCommand<Font, Image>),
     /// Draw a rounded rectangle blurred with a gaussian filter.
     BoxShadow(BoxShadowCommand),
-    /// Marks a region where a separately produced iframe scene may be composited.
-    IframePlaceholder(IframePlaceholderCommand),
+    /// Marks a region where a separately produced scene may be composited.
+    Placeholder(PlaceholderCommand),
 }
 
 impl RenderCommand {
@@ -43,7 +43,7 @@ impl RenderCommand {
             RenderCommand::Fill(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::GlyphRun(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::BoxShadow(cmd) => cmd.transform = transform * cmd.transform,
-            RenderCommand::IframePlaceholder(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::Placeholder(cmd) => cmd.transform = transform * cmd.transform,
         };
 
         self
@@ -125,11 +125,18 @@ pub struct BoxShadowCommand {
     pub std_dev: f64,
 }
 
-/// Marks a region where a separately produced iframe scene may be composited.
+/// Identifies the out-of-band scene content that should be composited into a placeholder region.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct IframePlaceholderCommand {
-    pub frame_id: u64,
+pub enum PlaceholderKind {
+    CrossOriginIframe { frame_id: u64 },
+}
+
+/// Marks a region where a separately produced scene may be composited.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PlaceholderCommand {
+    pub kind: PlaceholderKind,
     pub transform: Affine,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath,
@@ -296,14 +303,14 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
     }
 
-    fn iframe_placeholder(&mut self, frame_id: u64, transform: Affine, clip: &impl Shape) {
+    fn placeholder(&mut self, kind: PlaceholderKind, transform: Affine, clip: &impl Shape) {
         let clip = clip.into_path(self.tolerance);
-        let placeholder = IframePlaceholderCommand {
-            frame_id,
+        let placeholder = PlaceholderCommand {
+            kind,
             transform,
             clip,
         };
-        self.commands.push(RenderCommand::IframePlaceholder(placeholder));
+        self.commands.push(RenderCommand::Placeholder(placeholder));
     }
 
     fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
