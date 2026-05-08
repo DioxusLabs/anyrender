@@ -14,3 +14,6 @@ mod vulkan;
 pub use image_renderer::SkiaImageRenderer;
 pub use scene::{SkiaSceneCache, SkiaScenePainter};
 pub use window_renderer::*;
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+pub use opengl::pick_x11_gl_visual;
