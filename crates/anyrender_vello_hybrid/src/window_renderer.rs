@@ -1,10 +1,9 @@
 use anyrender::{RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
+use futures_channel::oneshot;
 use rustc_hash::FxHashMap;
-use std::sync::{
-    Arc,
-    // atomic::{AtomicU64},
-};
+use std::future::Future;
+use std::sync::Arc;
 use vello_common::paint::ImageId;
 use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
@@ -14,29 +13,36 @@ use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
-// use crate::CustomPaintSource;
 
-// static PAINT_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_arch = "wasm32")]
+fn spawn_init<F: Future<Output = ()> + 'static>(f: F) {
+    wasm_bindgen_futures::spawn_local(f);
+}
 
-// Simple struct to hold the state of the renderer
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_init<F: Future<Output = ()>>(f: F) {
+    pollster::block_on(f);
+}
+
 struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     render_surface: SurfaceRenderer<'static>,
 }
 
-#[allow(clippy::large_enum_variant)]
-enum RenderState {
-    Active(ActiveRenderState),
-    Suspended,
+/// Result of a successful asynchronous resume; both the active state and the
+/// `WGPUContext` are returned so the renderer can reclaim the context.
+struct InitOutput {
+    wgpu_context: WGPUContext,
+    active: ActiveRenderState,
 }
 
-impl RenderState {
-    fn current_device_handle(&self) -> Option<&DeviceHandle> {
-        let RenderState::Active(state) = self else {
-            return None;
-        };
-        Some(&state.render_surface.device_handle)
-    }
+#[allow(clippy::large_enum_variant)]
+enum RenderState {
+    Suspended,
+    Pending {
+        receiver: oneshot::Receiver<InitOutput>,
+    },
+    Active(ActiveRenderState),
 }
 
 #[derive(Clone, Default)]
@@ -52,11 +58,11 @@ pub struct VelloHybridWindowRenderer {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
-    // Vello
-    wgpu_context: WGPUContext,
+    /// Optional so the spawned init future can take ownership of it. Restored from
+    /// the future's result inside `complete_resume`.
+    wgpu_context: Option<WGPUContext>,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
-    // custom_paint_sources: FxHashMap<u64, Box<dyn CustomPaintSource>>,
     cached_images: FxHashMap<u64, ImageId>,
 }
 impl VelloHybridWindowRenderer {
@@ -66,44 +72,29 @@ impl VelloHybridWindowRenderer {
     }
 
     pub fn with_options(config: VelloHybridRendererOptions) -> Self {
-        let features = config.features.unwrap_or_default()
-            | Features::CLEAR_TEXTURE
-            | Features::PIPELINE_CACHE;
         let render_settings = config.render_settings;
         Self {
-            wgpu_context: WGPUContext::with_features_and_limits(
-                Some(features),
-                config.limits.clone(),
-            ),
+            wgpu_context: Some(build_wgpu_context(&config)),
             config,
             render_state: RenderState::Suspended,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings),
-            // custom_paint_sources: FxHashMap::default(),
             cached_images: FxHashMap::default(),
         }
     }
 
     pub fn current_device_handle(&self) -> Option<&DeviceHandle> {
-        self.render_state.current_device_handle()
+        match &self.render_state {
+            RenderState::Active(state) => Some(&state.render_surface.device_handle),
+            _ => None,
+        }
     }
+}
 
-    // pub fn register_custom_paint_source(&mut self, mut source: Box<dyn CustomPaintSource>) -> u64 {
-    //     if let Some(device_handle) = self.render_state.current_device_handle() {
-    //         source.resume(device_handle);
-    //     }
-    //     let id = PAINT_SOURCE_ID.fetch_add(1, atomic::Ordering::SeqCst);
-    //     self.custom_paint_sources.insert(id, source);
-
-    //     id
-    // }
-
-    // pub fn unregister_custom_paint_source(&mut self, id: u64) {
-    //     if let Some(mut source) = self.custom_paint_sources.remove(&id) {
-    //         source.suspend();
-    //         drop(source);
-    //     }
-    // }
+fn build_wgpu_context(config: &VelloHybridRendererOptions) -> WGPUContext {
+    let features =
+        config.features.unwrap_or_default() | Features::CLEAR_TEXTURE | Features::PIPELINE_CACHE;
+    WGPUContext::with_features_and_limits(Some(features), config.limits.clone())
 }
 
 // TODO: Make configurable?
@@ -159,62 +150,85 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
-        // Create wgpu_context::SurfaceRenderer
-        let render_surface = pollster::block_on(self.wgpu_context.create_surface(
-            window_handle.clone(),
-            SurfaceRendererConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                formats: vec![DEFAULT_TEXTURE_FORMAT],
-                width,
-                height,
-                present_mode: PresentMode::AutoVsync,
-                desired_maximum_frame_latency: 2,
-                alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                view_formats: vec![],
-            },
-            None,
-            // Some(TextureConfiguration {
-            //     usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-            // }),
-        ))
-        .expect("Error creating surface");
+    fn resume<F: FnOnce() + 'static>(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+        on_ready: F,
+    ) {
+        let wgpu_context = self
+            .wgpu_context
+            .take()
+            .unwrap_or_else(|| build_wgpu_context(&self.config));
 
-        // Create vello::Renderer
-        let renderer = VelloHybridRenderer::new(
-            render_surface.device(),
-            &RenderTargetConfig {
-                format: DEFAULT_TEXTURE_FORMAT,
-                width,
-                height,
-            },
-        );
+        self.window_handle = Some(window_handle.clone());
+        let (sender, receiver) = oneshot::channel();
+        let render_settings = self.config.render_settings;
 
-        // Resume custom paint sources
-        // let device_handle = &render_surface.device_handle;
-        // for source in self.custom_paint_sources.values_mut() {
-        //     source.resume(device_handle)
-        // }
+        // Reset the scene to the new dimensions before init kicks off, so callers that
+        // query scene size (e.g. `set_size`) see consistent state.
+        self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings);
 
-        // Create a Scene with the correct dimensions
-        self.scene =
-            VelloHybridScene::new_with(width as u16, height as u16, self.config.render_settings);
+        spawn_init(async move {
+            let mut wgpu_context = wgpu_context;
+            let render_surface = wgpu_context
+                .create_surface(
+                    window_handle,
+                    SurfaceRendererConfiguration {
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                        formats: vec![DEFAULT_TEXTURE_FORMAT],
+                        width,
+                        height,
+                        present_mode: PresentMode::AutoVsync,
+                        desired_maximum_frame_latency: 2,
+                        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                        view_formats: vec![],
+                    },
+                    None,
+                )
+                .await
+                .expect("Error creating surface");
 
-        // Set state to Active
-        self.window_handle = Some(window_handle);
-        self.render_state = RenderState::Active(ActiveRenderState {
-            renderer,
-            render_surface,
+            let renderer = VelloHybridRenderer::new(
+                render_surface.device(),
+                &RenderTargetConfig {
+                    format: DEFAULT_TEXTURE_FORMAT,
+                    width,
+                    height,
+                },
+            );
+
+            let _ = sender.send(InitOutput {
+                wgpu_context,
+                active: ActiveRenderState {
+                    renderer,
+                    render_surface,
+                },
+            });
+            on_ready();
         });
+
+        self.render_state = RenderState::Pending { receiver };
+    }
+
+    fn complete_resume(&mut self) -> bool {
+        if let RenderState::Pending { receiver } = &mut self.render_state {
+            let Ok(Some(InitOutput {
+                wgpu_context,
+                active,
+            })) = receiver.try_recv()
+            else {
+                return false;
+            };
+            self.wgpu_context = Some(wgpu_context);
+            self.render_state = RenderState::Active(active);
+            return true;
+        }
+        matches!(self.render_state, RenderState::Active(_))
     }
 
     fn suspend(&mut self) {
-        // Suspend custom paint sources
-        // for source in self.custom_paint_sources.values_mut() {
-        //     source.suspend()
-        // }
-
-        // Set state to Suspended
         self.render_state = RenderState::Suspended;
     }
 
@@ -308,9 +322,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         timer.record_time("wait");
         timer.print_times("vello_hybrid: ");
-
-        // static COUNTER: AtomicU64 = AtomicU64::new(0);
-        // println!("FRAME {}", COUNTER.fetch_add(1, atomic::Ordering::Relaxed));
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();

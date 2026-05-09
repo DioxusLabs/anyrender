@@ -64,7 +64,13 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         matches!(self.render_state, RenderState::Active(_))
     }
 
-    fn resume(&mut self, window_handle: Arc<dyn WindowHandle>, width: u32, height: u32) {
+    fn resume<F: FnOnce() + 'static>(
+        &mut self,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+        on_ready: F,
+    ) {
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
         let mut pixels = Pixels::new(width, height, surface).unwrap();
         pixels.enable_vsync(true);
@@ -78,6 +84,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         self.window_handle = Some(window_handle);
 
         self.set_size(width, height);
+        on_ready();
     }
 
     fn suspend(&mut self) {

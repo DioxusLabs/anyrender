@@ -50,7 +50,13 @@ impl WindowRenderer for SkiaWindowRenderer {
     where
         Self: 'a;
 
-    fn resume(&mut self, window: Arc<dyn anyrender::WindowHandle>, width: u32, height: u32) {
+    fn resume<F: FnOnce() + 'static>(
+        &mut self,
+        window: Arc<dyn anyrender::WindowHandle>,
+        width: u32,
+        height: u32,
+        on_ready: F,
+    ) {
         graphics::set_font_cache_count_limit(100);
         graphics::set_typeface_cache_count_limit(100);
         graphics::set_resource_cache_total_bytes_limit(10485760);
@@ -63,7 +69,8 @@ impl WindowRenderer for SkiaWindowRenderer {
         self.render_state = RenderState::Active(Box::new(ActiveRenderState {
             backend: Box::new(backend),
             scene_cache: SkiaSceneCache::default(),
-        }))
+        }));
+        on_ready();
     }
 
     fn suspend(&mut self) {

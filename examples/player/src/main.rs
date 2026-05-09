@@ -140,7 +140,8 @@ impl App {
             Arc::new(event_loop.create_window(attr).unwrap())
         });
 
-        renderer.resume(window.clone(), self.width, self.height);
+        renderer.resume(window.clone(), self.width, self.height, || {});
+        let _ = renderer.complete_resume();
         let renderer = renderer.into();
         self.render_state = RenderState::Active { window, renderer };
         self.request_redraw();

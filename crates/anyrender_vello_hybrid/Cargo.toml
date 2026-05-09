@@ -20,6 +20,12 @@ peniko = { workspace = true }
 vello_hybrid = { workspace = true }
 vello_common = { workspace = true }
 wgpu = { workspace = true }
-pollster = { workspace = true }
 rustc-hash = { workspace = true }
 wgpu_context = { workspace = true }
+futures-channel = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = { workspace = true }

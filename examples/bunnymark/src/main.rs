@@ -148,7 +148,13 @@ impl App {
         self.scale_factor = window.scale_factor();
 
         let physical_size = window.inner_size();
-        renderer.resume(window.clone(), physical_size.width, physical_size.height);
+        renderer.resume(
+            window.clone(),
+            physical_size.width,
+            physical_size.height,
+            || {},
+        );
+        let _ = renderer.complete_resume();
         self.render_state = RenderState::Active {
             window,
             renderer: f(renderer),

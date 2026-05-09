@@ -222,11 +222,13 @@ version = "0.8.0"
 dependencies = [
  "anyrender",
  "debug_timer",
+ "futures-channel",
  "kurbo",
  "peniko",
  "pollster",
  "rustc-hash 2.1.2",
  "vello",
+ "wasm-bindgen-futures",
  "wgpu 28.0.0",
  "wgpu_context",
 ]
@@ -250,12 +252,14 @@ version = "0.3.0"
 dependencies = [
  "anyrender",
  "debug_timer",
+ "futures-channel",
  "kurbo",
  "peniko",
  "pollster",
  "rustc-hash 2.1.2",
  "vello_common",
  "vello_hybrid",
+ "wasm-bindgen-futures",
  "wgpu 28.0.0",
  "wgpu_context",
 ]
@@ -1194,6 +1198,15 @@ name = "foreign-types-shared"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
+
+[[package]]
+name = "futures-channel"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07bbe89c50d7a535e539b8c17bc0b49bdb77747034daa8087407d655f3f7cc1d"
+dependencies = [
+ "futures-core",
+]
 
 [[package]]
 name = "futures-core"

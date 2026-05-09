@@ -73,7 +73,9 @@ debug_timer = "0.1.1"
 rustc-hash = "2"
 futures-util = "0.3.31"
 futures-intrusive = "0.5.0"
+futures-channel = "0.3"
 pollster = "0.4"
+wasm-bindgen-futures = "0.4"
 
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
