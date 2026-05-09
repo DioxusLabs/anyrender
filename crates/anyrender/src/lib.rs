@@ -129,14 +129,21 @@ pub trait WindowRenderer: RenderContext {
     /// active and ready to render. Idempotent on already-active renderers; returns
     /// `false` if a pending init has not yet produced a result.
     ///
-    /// The default implementation returns `true` for backends whose `resume` finishes
-    /// synchronously inline.
-    fn complete_resume(&mut self) -> bool {
-        true
-    }
+    /// Backends whose `resume` finishes synchronously inline should return `true`
+    /// directly. There is intentionally no default: forgetting to override this on
+    /// an async-init backend would silently no-op rendering.
+    fn complete_resume(&mut self) -> bool;
 
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
+
+    /// Returns `true` while an asynchronous resume is in flight (after `resume`
+    /// but before `complete_resume` has succeeded). Defaults to `false` for
+    /// backends with synchronous initialization.
+    fn is_pending(&self) -> bool {
+        false
+    }
+
     fn set_size(&mut self, width: u32, height: u32);
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }

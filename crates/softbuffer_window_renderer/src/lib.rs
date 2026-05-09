@@ -85,6 +85,10 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         on_ready();
     }
 
+    fn complete_resume(&mut self) -> bool {
+        true
+    }
+
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
     }

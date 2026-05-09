@@ -73,6 +73,10 @@ impl WindowRenderer for SkiaWindowRenderer {
         on_ready();
     }
 
+    fn complete_resume(&mut self) -> bool {
+        true
+    }
+
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
     }

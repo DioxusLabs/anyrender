@@ -32,6 +32,10 @@ impl WindowRenderer for NullWindowRenderer {
         on_ready();
     }
 
+    fn complete_resume(&mut self) -> bool {
+        true
+    }
+
     fn suspend(&mut self) {
         self.is_active = false
     }
