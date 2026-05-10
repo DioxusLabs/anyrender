@@ -19,15 +19,6 @@ pub struct Glyph {
     pub y: f32,
 }
 
-#[derive(Copy, Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CustomPaint {
-    pub source_id: u64,
-    pub width: u32,
-    pub height: u32,
-    pub scale: f64,
-}
-
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {

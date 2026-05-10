@@ -4,10 +4,7 @@ use anyrender::{
 use debug_timer::debug_timer;
 use peniko::{Color, ImageData};
 use rustc_hash::FxHashMap;
-use std::sync::{
-    Arc,
-    atomic::{self, AtomicU64},
-};
+use std::sync::Arc;
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
     Scene as VelloScene,
@@ -17,9 +14,7 @@ use wgpu_context::{
     DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
 };
 
-use crate::{CustomPaintSource, DEFAULT_THREADS, VelloScenePainter};
-
-static PAINT_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
+use crate::{DEFAULT_THREADS, VelloScenePainter};
 
 // Simple struct to hold the state of the renderer
 struct ActiveRenderState {
@@ -73,7 +68,6 @@ pub struct VelloWindowRenderer {
     config: VelloRendererOptions,
 
     // Resources
-    custom_paint_sources: FxHashMap<u64, Box<dyn CustomPaintSource>>,
     texture_handles: FxHashMap<ResourceId, ImageData>,
 }
 impl VelloWindowRenderer {
@@ -95,30 +89,12 @@ impl VelloWindowRenderer {
             render_state: RenderState::Suspended,
             window_handle: None,
             scene: VelloScene::new(),
-            custom_paint_sources: FxHashMap::default(),
             texture_handles: FxHashMap::default(),
         }
     }
 
     pub fn current_device_handle(&self) -> Option<&DeviceHandle> {
         self.render_state.current_device_handle()
-    }
-
-    pub fn register_custom_paint_source(&mut self, mut source: Box<dyn CustomPaintSource>) -> u64 {
-        if let Some(device_handle) = self.render_state.current_device_handle() {
-            source.resume(device_handle);
-        }
-        let id = PAINT_SOURCE_ID.fetch_add(1, atomic::Ordering::SeqCst);
-        self.custom_paint_sources.insert(id, source);
-
-        id
-    }
-
-    pub fn unregister_custom_paint_source(&mut self, id: u64) {
-        if let Some(mut source) = self.custom_paint_sources.remove(&id) {
-            source.suspend();
-            drop(source);
-        }
     }
 }
 
@@ -203,12 +179,6 @@ impl WindowRenderer for VelloWindowRenderer {
         )
         .unwrap();
 
-        // Resume custom paint sources
-        let device_handle = &render_surface.device_handle;
-        for source in self.custom_paint_sources.values_mut() {
-            source.resume(device_handle)
-        }
-
         // Set state to Active
         self.window_handle = Some(window_handle);
         self.render_state = RenderState::Active(ActiveRenderState {
@@ -221,11 +191,6 @@ impl WindowRenderer for VelloWindowRenderer {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
-
-        // Suspend custom paint sources
-        for source in self.custom_paint_sources.values_mut() {
-            source.suspend()
-        }
 
         // Unregister all textures on suspend
         for (_id, handle) in self.texture_handles.drain() {
@@ -256,7 +221,6 @@ impl WindowRenderer for VelloWindowRenderer {
             inner: &mut self.scene,
             renderer: Some(&mut state.renderer),
             device_handle: Some(&render_surface.device_handle),
-            custom_paint_sources: Some(&mut self.custom_paint_sources),
             texture_handles: Some(&mut self.texture_handles),
         });
         timer.record_time("cmd");

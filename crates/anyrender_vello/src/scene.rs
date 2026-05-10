@@ -1,6 +1,4 @@
-use anyrender::{
-    CustomPaint, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
-};
+use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
@@ -8,12 +6,9 @@ use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
 use wgpu_context::DeviceHandle;
 
-use crate::{CustomPaintSource, custom_paint_source::CustomPaintCtx};
-
 pub struct VelloScenePainter<'r, 's> {
     pub(crate) renderer: Option<&'r mut VelloRenderer>,
     pub(crate) device_handle: Option<&'r DeviceHandle>,
-    pub(crate) custom_paint_sources: Option<&'r mut FxHashMap<u64, Box<dyn CustomPaintSource>>>,
     pub(crate) texture_handles: Option<&'r mut FxHashMap<ResourceId, ImageData>>,
     pub(crate) inner: &'s mut vello::Scene,
 }
@@ -58,37 +53,9 @@ impl VelloScenePainter<'_, '_> {
         VelloScenePainter {
             renderer: None,
             device_handle: None,
-            custom_paint_sources: None,
             texture_handles: None,
             inner: scene,
         }
-    }
-
-    fn render_custom_source(&mut self, custom_paint: CustomPaint) -> Option<peniko::ImageBrush> {
-        let (Some(renderer), Some(custom_paint_sources), Some(texture_handles)) = (
-            &mut self.renderer,
-            &mut self.custom_paint_sources,
-            &mut self.texture_handles,
-        ) else {
-            return None;
-        };
-
-        let CustomPaint {
-            source_id,
-            width,
-            height,
-            scale,
-        } = custom_paint;
-
-        // Render custom paint source
-        let source = custom_paint_sources.get_mut(&source_id)?;
-        let ctx = CustomPaintCtx::new(renderer, texture_handles);
-        let resource_id = source.render(ctx, width, height, scale)?;
-
-        let texture_handle = texture_handles.get(&resource_id)?.clone();
-
-        // Return dummy image
-        Some(ImageBrush::new(texture_handle))
     }
 }
 
@@ -139,8 +106,6 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         shape: &impl Shape,
     ) {
         let paint: PaintRef<'_> = paint.into();
-
-        let dummy_image: peniko::ImageBrush;
         let brush_ref: BrushRef<'_> = match paint {
             Paint::Solid(color) => BrushRef::Solid(color),
             Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
@@ -160,16 +125,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                     BrushRef::Solid(Color::TRANSPARENT)
                 }
             }
-            Paint::Custom(custom_paint) => {
-                let Some(custom_paint) = custom_paint.downcast_ref::<CustomPaint>() else {
-                    return;
-                };
-                let Some(image) = self.render_custom_source(*custom_paint) else {
-                    return;
-                };
-                dummy_image = image;
-                BrushRef::Image(dummy_image.as_ref())
-            }
+            Paint::Custom(_) => BrushRef::Solid(Color::TRANSPARENT),
         };
 
         self.inner

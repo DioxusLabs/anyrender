@@ -3,11 +3,9 @@ mod image_renderer;
 mod scene;
 mod window_renderer;
 
-pub mod custom_paint_source;
-
-pub use custom_paint_source::*;
 pub use image_renderer::VelloImageRenderer;
 pub use scene::VelloScenePainter;
+pub use wgpu_context::DeviceHandle;
 pub use window_renderer::{VelloRendererOptions, VelloWindowRenderer};
 
 pub use wgpu;

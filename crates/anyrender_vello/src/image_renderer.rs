@@ -81,7 +81,6 @@ impl ImageRenderer for VelloImageRenderer {
             inner: &mut self.scene,
             renderer: Some(&mut self.vello_renderer),
             device_handle: None,
-            custom_paint_sources: Some(&mut FxHashMap::default()),
             texture_handles: Some(&mut self.texture_handles),
         });
 
