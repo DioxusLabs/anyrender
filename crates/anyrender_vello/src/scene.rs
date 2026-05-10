@@ -2,9 +2,7 @@ use anyrender::{
     CustomPaint, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
 };
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{
-    BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, ImageSampler, StyleRef,
-};
+use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
@@ -51,7 +49,7 @@ impl RenderContext for VelloScenePainter<'_, '_> {
 
     fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
         self.device_handle
-            .and_then(|device_handle| Some(Box::new(device_handle.clone()) as _))
+            .map(|device_handle| Box::new(device_handle.clone()) as _)
     }
 }
 
@@ -147,15 +145,16 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             Paint::Solid(color) => BrushRef::Solid(color),
             Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
             Paint::Image(image) => BrushRef::Image(image),
-            Paint::Resource(id) => {
+            Paint::Resource(brush) => {
+                let resource_id = brush.image;
                 if let Some(texture_handle) = self
                     .texture_handles
                     .as_ref()
-                    .and_then(|texture_handles| texture_handles.get(&id))
+                    .and_then(|texture_handles| texture_handles.get(&resource_id))
                 {
                     peniko::Brush::Image(ImageBrush {
                         image: texture_handle,
-                        sampler: ImageSampler::default(), // TODO: allow sampler customisation
+                        sampler: brush.sampler,
                     })
                 } else {
                     BrushRef::Solid(Color::TRANSPARENT)

@@ -30,7 +30,7 @@
 #![allow(clippy::collapsible_if)]
 
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Brush, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
@@ -257,9 +257,11 @@ pub trait PaintScene: RenderContext {
                     &cmd.normalized_coords,
                     &cmd.style,
                     match cmd.brush {
-                        Brush::Solid(alpha_color) => Brush::Solid(alpha_color),
-                        Brush::Gradient(ref gradient) => Brush::Gradient(gradient),
-                        Brush::Image(ref image) => Brush::Image(image.as_ref()),
+                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
+                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
+                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
+                        Paint::Resource(id) => Paint::Resource(id),
+                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
                     },
                     cmd.brush_alpha,
                     scene_transform * cmd.transform,

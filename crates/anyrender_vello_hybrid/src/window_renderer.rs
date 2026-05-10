@@ -1,4 +1,4 @@
-use anyrender::{RegisterResourceErrorKind, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use rustc_hash::FxHashMap;
 use std::sync::{
@@ -10,9 +10,7 @@ use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Scene as VelloHybridScene,
 };
-use wgpu::{
-    CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, Texture, TextureFormat,
-};
+use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};

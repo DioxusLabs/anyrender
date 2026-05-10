@@ -12,8 +12,9 @@
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 
+use anyrender::Paint;
 use image::{ImageBuffer, ImageEncoder, RgbaImage};
-use peniko::{Blob, Brush, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
+use peniko::{Blob, Color, FontData, Gradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -27,10 +28,21 @@ mod json_formatter;
 use font_writer::FontWriter;
 
 /// A render command with resources replaced by IDs.
-pub type SerializableRenderCommand = RenderCommand<FontResourceId, ResourceId>;
+pub type SerializableRenderCommand = RenderCommand<FontResourceId, SerializableBrush>;
+
+// /// A brush with images replaced by IDs.
+// pub type SerializableBrush = Paint<ImageBrush<ResourceId>>;
 
 /// A brush with images replaced by IDs.
-pub type SerializableBrush = Brush<ImageBrush<ResourceId>>;
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SerializableBrush {
+    /// Solid color brush.
+    Solid(Color),
+    /// Gradient brush.
+    Gradient(Gradient),
+    /// Image brush.
+    Image(ImageBrush<ResourceId>),
+}
 
 /// A unique identifier for a serialized resource.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -159,23 +171,25 @@ impl ResourceCollector {
     }
 
     /// Convert a [`Brush`] to a [`SerializableBrush`] by registering images.
-    fn convert_brush(&mut self, brush: &Brush) -> SerializableBrush {
+    fn convert_brush(&mut self, brush: &Paint) -> Option<SerializableBrush> {
         match brush {
-            Brush::Solid(color) => Brush::Solid(*color),
-            Brush::Gradient(gradient) => Brush::Gradient(gradient.clone()),
-            Brush::Image(image_brush) => {
+            Paint::Solid(color) => Some(SerializableBrush::Solid(*color)),
+            Paint::Gradient(gradient) => Some(SerializableBrush::Gradient(gradient.clone())),
+            Paint::Image(image_brush) => {
                 let id = self.register_image(&image_brush.image);
-                Brush::Image(ImageBrush {
+                Some(SerializableBrush::Image(ImageBrush {
                     image: id,
                     sampler: image_brush.sampler,
-                })
+                }))
             }
+            Paint::Resource(_) => None,
+            Paint::Custom(_) => None,
         }
     }
 
     /// Convert a [`RenderCommand`] to a [`SerializableRenderCommand`].
-    fn convert_command(&mut self, cmd: &RenderCommand) -> SerializableRenderCommand {
-        match cmd {
+    fn convert_command(&mut self, cmd: &RenderCommand) -> Option<SerializableRenderCommand> {
+        Some(match cmd {
             RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(layer.clone()),
             RenderCommand::PushClipLayer(clip) => {
                 SerializableRenderCommand::PushClipLayer(clip.clone())
@@ -184,21 +198,21 @@ impl ResourceCollector {
             RenderCommand::Stroke(stroke) => SerializableRenderCommand::Stroke(StrokeCommand {
                 style: stroke.style.clone(),
                 transform: stroke.transform,
-                brush: self.convert_brush(&stroke.brush),
+                brush: self.convert_brush(&stroke.brush)?,
                 brush_transform: stroke.brush_transform,
                 shape: stroke.shape.clone(),
             }),
             RenderCommand::Fill(fill) => SerializableRenderCommand::Fill(FillCommand {
                 fill: fill.fill,
                 transform: fill.transform,
-                brush: self.convert_brush(&fill.brush),
+                brush: self.convert_brush(&fill.brush)?,
                 brush_transform: fill.brush_transform,
                 shape: fill.shape.clone(),
             }),
             RenderCommand::GlyphRun(glyph_run) => {
                 let resource_id = self.fonts.register(&glyph_run.font_data);
                 self.fonts.record_glyphs(resource_id, &glyph_run.glyphs);
-                let brush = self.convert_brush(&glyph_run.brush);
+                let brush = self.convert_brush(&glyph_run.brush)?;
                 SerializableRenderCommand::GlyphRun(GlyphRunCommand {
                     font_data: FontResourceId {
                         resource_id,
@@ -218,7 +232,7 @@ impl ResourceCollector {
             RenderCommand::BoxShadow(shadow) => {
                 SerializableRenderCommand::BoxShadow(shadow.clone())
             }
-        }
+        })
     }
 }
 
@@ -246,13 +260,13 @@ impl ResourceReconstructor {
     }
 
     /// Convert a [`SerializableBrush`] back to a [`Brush`].
-    fn convert_brush(&self, brush: &SerializableBrush) -> Result<Brush, ArchiveError> {
+    fn convert_brush(&self, brush: &SerializableBrush) -> Result<Paint, ArchiveError> {
         Ok(match brush {
-            Brush::Solid(color) => Brush::Solid(*color),
-            Brush::Gradient(gradient) => Brush::Gradient(gradient.clone()),
-            Brush::Image(image_brush) => {
+            SerializableBrush::Solid(color) => Paint::Solid(*color),
+            SerializableBrush::Gradient(gradient) => Paint::Gradient(gradient.clone()),
+            SerializableBrush::Image(image_brush) => {
                 let image = self.get_image(image_brush.image)?;
-                Brush::Image(ImageBrush {
+                Paint::Image(ImageBrush {
                     image: image.clone(),
                     sampler: image_brush.sampler,
                 })
@@ -388,7 +402,7 @@ impl SceneArchive {
         let commands: Vec<_> = scene
             .commands
             .iter()
-            .map(|cmd| collector.convert_command(cmd))
+            .filter_map(|cmd| collector.convert_command(cmd))
             .collect();
 
         // Normalize all images to RGBA8

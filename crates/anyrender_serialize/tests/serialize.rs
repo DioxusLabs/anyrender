@@ -3,14 +3,13 @@
 use std::io::{Cursor, Read};
 
 use anyrender::recording::{RenderCommand, Scene};
-use anyrender::{Glyph, PaintScene};
+use anyrender::{Glyph, Paint, PaintScene};
 use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
 use kurbo::{Affine, Rect, Stroke};
 use peniko::{
-    Blob, Brush, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
-    ImageFormat, Mix,
+    Blob, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
 };
 use read_fonts::TableProvider;
 use zip::ZipArchive;
@@ -393,7 +392,7 @@ fn make_1x1_image(r: u8, g: u8, b: u8, a: u8) -> ImageData {
 fn extract_image_pixels(scene: &Scene, command_index: usize) -> Vec<u8> {
     match &scene.commands[command_index] {
         RenderCommand::Fill(f) => match &f.brush {
-            Brush::Image(img) => img.image.data.data().to_vec(),
+            Paint::Image(img) => img.image.data.data().to_vec(),
             other => panic!("Expected image brush, got {other:?}"),
         },
         other => panic!("Expected Fill command, got {other:?}"),

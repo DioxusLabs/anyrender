@@ -38,7 +38,7 @@ pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
     /// Image brush.
     Image(I),
     /// Custom paint (referenced by ID)
-    Resource(ResourceId),
+    Resource(ImageBrush<ResourceId>),
     /// Custom paint (type erased as each backend will have their own)
     #[cfg_attr(feature = "serde", serde(skip))]
     Custom(C),
