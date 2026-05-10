@@ -26,6 +26,66 @@ pub struct DeviceHandle {
     pub queue: Queue,
 }
 
+impl DeviceHandle {
+    /// Creates a `DeviceHandle` with `Device` that's compatible with the specified `Surface`
+    pub async fn new_from_compatible_surface(
+        instance: Instance,
+        compatible_surface: Option<&Surface<'_>>,
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+    ) -> Result<Self, WgpuContextError> {
+        let adapter =
+            wgpu::util::initialize_adapter_from_env_or_default(&instance, compatible_surface)
+                .await?;
+
+        // Determine features to request
+        // The user may request additional features
+        let requested_features = extra_features.unwrap_or(Features::empty());
+        let available_features = adapter.features();
+        let required_features = requested_features & available_features;
+
+        // Determine limits to request
+        // The user may override the limits
+        let required_limits = override_limits.clone().unwrap_or_default();
+
+        // Create the device and the queue
+        let descripter = wgpu::DeviceDescriptor {
+            label: None,
+            required_features,
+            required_limits,
+            memory_hints: MemoryHints::MemoryUsage,
+            trace: wgpu::Trace::default(),
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+        };
+        let (device, queue) = adapter.request_device(&descripter).await?;
+
+        // Create the device handle and store in the pool
+        Ok(DeviceHandle {
+            instance,
+            adapter,
+            device,
+            queue,
+        })
+    }
+
+    /// Creates a new surface for the specified window and dimensions.
+    pub async fn create_surface<'w>(
+        &mut self,
+        window: impl Into<SurfaceTarget<'w>>,
+        surface_config: SurfaceRendererConfiguration,
+        intermediate_texture_config: Option<TextureConfiguration>,
+    ) -> Result<SurfaceRenderer<'w>, WgpuContextError> {
+        // Create a surface from the window handle
+        let surface = self.instance.create_surface(window.into())?;
+        SurfaceRenderer::new(
+            surface,
+            surface_config,
+            intermediate_texture_config,
+            self.clone(),
+        )
+    }
+}
+
 /// Simple render context that maintains wgpu state for rendering the pipeline.
 pub struct WGPUContext {
     /// A WGPU `Instance`. This only needs to be created once per application.
@@ -67,15 +127,31 @@ impl WGPUContext {
         }
     }
 
+    pub fn extra_features(&self) -> Option<Features> {
+        self.extra_features
+    }
+
+    pub fn override_limits(&self) -> Option<Limits> {
+        self.override_limits.clone()
+    }
+
     /// Creates a new surface for the specified window and dimensions.
-    pub async fn create_surface<'w>(
+    pub fn create_surface<'w>(
+        &self,
+        window: impl Into<SurfaceTarget<'w>>,
+    ) -> Result<Surface<'w>, WgpuContextError> {
+        Ok(self.instance.create_surface(window.into())?)
+    }
+
+    /// Creates a new surface for the specified window and dimensions.
+    pub async fn create_surface_renderer<'w>(
         &mut self,
         window: impl Into<SurfaceTarget<'w>>,
         surface_config: SurfaceRendererConfiguration,
         intermediate_texture_config: Option<TextureConfiguration>,
     ) -> Result<SurfaceRenderer<'w>, WgpuContextError> {
         // Create a surface from the window handle
-        let surface = self.instance.create_surface(window.into())?;
+        let surface = self.create_surface(window.into())?;
 
         // Find or create a suitable device for rendering to the surface
         let dev_id = self
@@ -89,9 +165,7 @@ impl WGPUContext {
             surface_config,
             intermediate_texture_config,
             device_handle,
-            dev_id,
         )
-        .await
     }
 
     /// Creates a new `BufferRenderer` for the specified dimensions.
@@ -114,14 +188,23 @@ impl WGPUContext {
         &mut self,
         compatible_surface: Option<&Surface<'_>>,
     ) -> Result<usize, WgpuContextError> {
-        match self.find_existing_device(compatible_surface) {
+        match self.find_existing_device_idx(compatible_surface) {
             Some(device_id) => Ok(device_id),
             None => self.create_device(compatible_surface).await,
         }
     }
 
     /// Finds or creates a compatible device handle id.
-    fn find_existing_device(&self, compatible_surface: Option<&Surface<'_>>) -> Option<usize> {
+    pub fn find_compatible_device_handle(
+        &mut self,
+        compatible_surface: Option<&Surface<'_>>,
+    ) -> Option<DeviceHandle> {
+        self.find_existing_device_idx(compatible_surface)
+            .map(|idx| self.device_pool[idx].clone())
+    }
+
+    /// Finds  a compatible device handle id.
+    fn find_existing_device_idx(&self, compatible_surface: Option<&Surface<'_>>) -> Option<usize> {
         match compatible_surface {
             Some(s) => self
                 .device_pool
@@ -133,47 +216,25 @@ impl WGPUContext {
         }
     }
 
+    pub fn create_device_handle(
+        &self,
+        compatible_surface: Option<&Surface<'_>>,
+    ) -> impl Future<Output = Result<DeviceHandle, WgpuContextError>> {
+        DeviceHandle::new_from_compatible_surface(
+            self.instance.clone(),
+            compatible_surface,
+            self.extra_features,
+            self.override_limits.clone(),
+        )
+    }
+
     /// Creates a compatible device handle id.
     async fn create_device(
         &mut self,
         compatible_surface: Option<&Surface<'_>>,
     ) -> Result<usize, WgpuContextError> {
-        let instance = self.instance.clone();
-        let adapter =
-            wgpu::util::initialize_adapter_from_env_or_default(&instance, compatible_surface)
-                .await?;
-
-        // Determine features to request
-        // The user may request additional features
-        let requested_features = self.extra_features.unwrap_or(Features::empty());
-        let available_features = adapter.features();
-        let required_features = requested_features & available_features;
-
-        // Determine limits to request
-        // The user may override the limits
-        let required_limits = self.override_limits.clone().unwrap_or_default();
-
-        // Create the device and the queue
-        let descripter = wgpu::DeviceDescriptor {
-            label: None,
-            required_features,
-            required_limits,
-            memory_hints: MemoryHints::MemoryUsage,
-            trace: wgpu::Trace::default(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-        };
-        let (device, queue) = adapter.request_device(&descripter).await?;
-
-        // Create the device handle and store in the pool
-        let device_handle = DeviceHandle {
-            instance,
-            adapter,
-            device,
-            queue,
-        };
+        let device_handle = self.create_device_handle(compatible_surface).await?;
         self.device_pool.push(device_handle);
-
-        // Return the ID
         Ok(self.device_pool.len() - 1)
     }
 }

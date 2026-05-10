@@ -40,22 +40,16 @@ struct ActiveRenderState {
 /// Result of a successful asynchronous resume; both the active state and the
 /// `WGPUContext` are returned so the renderer can reclaim the context.
 struct InitOutput {
-    wgpu_context: WGPUContext,
     active: ActiveRenderState,
 }
 
 #[allow(clippy::large_enum_variant)]
 enum RenderState {
-    Suspended {
-        wgpu_context: WGPUContext,
-    },
+    Suspended,
     Pending {
         receiver: oneshot::Receiver<InitOutput>,
     },
-    Active {
-        wgpu_context: WGPUContext,
-        active: ActiveRenderState,
-    },
+    Active(ActiveRenderState),
 }
 
 #[derive(Clone)]
@@ -83,6 +77,7 @@ pub struct VelloWindowRenderer {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
+    wgpu_context: WGPUContext,
     scene: VelloScene,
     config: VelloRendererOptions,
 
@@ -96,9 +91,9 @@ impl VelloWindowRenderer {
     }
 
     pub fn with_options(config: VelloRendererOptions) -> Self {
-        let wgpu_context = build_wgpu_context(&config);
         Self {
-            render_state: RenderState::Suspended { wgpu_context },
+            render_state: RenderState::Suspended,
+            wgpu_context: build_wgpu_context(&config),
             config,
             window_handle: None,
             scene: VelloScene::new(),
@@ -108,7 +103,7 @@ impl VelloWindowRenderer {
 
     pub fn current_device_handle(&self) -> Option<&DeviceHandle> {
         match &self.render_state {
-            RenderState::Active { active, .. } => Some(&active.render_surface.device_handle),
+            RenderState::Active(active) => Some(&active.render_surface.device_handle),
             _ => None,
         }
     }
@@ -119,7 +114,7 @@ impl RenderContext for VelloWindowRenderer {
         &mut self,
         resource: Box<dyn std::any::Any>,
     ) -> Result<ResourceId, anyrender::RegisterResourceError> {
-        let RenderState::Active { active, .. } = &mut self.render_state else {
+        let RenderState::Active(active) = &mut self.render_state else {
             return Err(RegisterResourceErrorKind::NotActive.into());
         };
 
@@ -134,7 +129,7 @@ impl RenderContext for VelloWindowRenderer {
     }
 
     fn unregister_resource(&mut self, resource_id: ResourceId) {
-        let RenderState::Active { active, .. } = &mut self.render_state else {
+        let RenderState::Active(active) = &mut self.render_state else {
             return;
         };
 
@@ -145,11 +140,11 @@ impl RenderContext for VelloWindowRenderer {
 
     fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
         match &self.render_state {
-            RenderState::Active { active, .. } => {
+            RenderState::Active(active) => {
                 Some(Box::new(active.render_surface.device_handle.clone()))
             }
             RenderState::Pending { .. } => None,
-            RenderState::Suspended { .. } => None,
+            RenderState::Suspended => None,
         }
     }
 }
@@ -185,60 +180,71 @@ impl WindowRenderer for VelloWindowRenderer {
         // construction). Calling while `Pending` or `Active` is a state-machine bug
         // in the embedder: it would orphan the in-flight init's `WGPUContext` and
         // pay for a fresh adapter+device init on the fallback path below.
-        debug_assert!(
-            matches!(self.render_state, RenderState::Suspended { .. }),
-            "WindowRenderer::resume called from non-Suspended state",
-        );
+        if !matches!(self.render_state, RenderState::Suspended) {
+            // #[cfg(feature = "tracing")]
+            // tracing::warn!("WindowRenderer::resume called from non-Suspended state");
+            return;
+        }
 
-        self.window_handle = Some(window_handle.clone());
         let (sender, receiver) = oneshot::channel();
-        let num_init_threads = DEFAULT_THREADS;
+        self.render_state = RenderState::Pending { receiver };
+        self.window_handle = Some(window_handle.clone());
 
-        // Take ownership of the WGPUContext so the init future can move it,
-        // and leave the channel receiver in its place. `mem::replace` lets us
-        // do both without fighting the borrow checker.
-        let prev = std::mem::replace(&mut self.render_state, RenderState::Pending { receiver });
-        let mut wgpu_context = match prev {
-            RenderState::Suspended { wgpu_context } => wgpu_context,
-            // Defensive: if a misbehaving caller hit this path, the in-flight
-            // init's context is orphaned and we pay for a fresh init.
-            _ => build_wgpu_context(&self.config),
-        };
+        let surface = self
+            .wgpu_context
+            .create_surface(window_handle)
+            .expect("Error creating surface");
+        let instance = self.wgpu_context.instance.clone();
+        let extra_features = self.wgpu_context.extra_features();
+        let override_limits = self.wgpu_context.override_limits();
+        let existing_device_handle = self
+            .wgpu_context
+            .find_compatible_device_handle(Some(&surface));
 
         spawn_init(async move {
-            let render_surface = wgpu_context
-                .create_surface(
-                    window_handle,
-                    SurfaceRendererConfiguration {
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        formats: vec![TextureFormat::Rgba8Unorm, TextureFormat::Bgra8Unorm],
-                        width,
-                        height,
-                        present_mode: PresentMode::AutoVsync,
-                        desired_maximum_frame_latency: 2,
-                        alpha_mode: wgpu::CompositeAlphaMode::Auto,
-                        view_formats: vec![],
-                    },
-                    Some(TextureConfiguration {
-                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                    }),
+            let device_handle = match existing_device_handle {
+                Some(device_handle) => device_handle,
+                None => DeviceHandle::new_from_compatible_surface(
+                    instance,
+                    Some(&surface),
+                    extra_features,
+                    override_limits,
                 )
                 .await
-                .expect("Error creating surface");
+                .expect("Error creating DeviceHandle"),
+            };
+
+            let render_surface = SurfaceRenderer::new(
+                surface,
+                SurfaceRendererConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    formats: vec![TextureFormat::Rgba8Unorm, TextureFormat::Bgra8Unorm],
+                    width,
+                    height,
+                    present_mode: PresentMode::AutoVsync,
+                    desired_maximum_frame_latency: 2,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: vec![],
+                },
+                Some(TextureConfiguration {
+                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                }),
+                device_handle,
+            )
+            .expect("Error creating SurfaceRenderer");
 
             let renderer = VelloRenderer::new(
                 render_surface.device(),
                 RendererOptions {
                     antialiasing_support: AaSupport::all(),
                     use_cpu: false,
-                    num_init_threads,
+                    num_init_threads: DEFAULT_THREADS,
                     pipeline_cache: None,
                 },
             )
             .unwrap();
 
             let _ = sender.send(InitOutput {
-                wgpu_context,
                 active: ActiveRenderState {
                     renderer,
                     render_surface,
@@ -249,60 +255,39 @@ impl WindowRenderer for VelloWindowRenderer {
     }
 
     fn complete_resume(&mut self) -> bool {
-        if let RenderState::Pending { receiver } = &mut self.render_state {
-            let Ok(Some(InitOutput {
-                wgpu_context,
-                active,
-            })) = receiver.try_recv()
-            else {
-                return false;
-            };
-
-            self.render_state = RenderState::Active {
-                wgpu_context,
-                active,
-            };
-            return true;
+        match &mut self.render_state {
+            RenderState::Active { .. } => true,
+            RenderState::Suspended => false,
+            RenderState::Pending { receiver } => match receiver.try_recv() {
+                Ok(Some(InitOutput { active })) => {
+                    let device_handle = active.render_surface.device_handle.clone();
+                    self.wgpu_context.device_pool.push(device_handle);
+                    self.render_state = RenderState::Active(active);
+                    true
+                }
+                _ => false,
+            },
         }
-        matches!(self.render_state, RenderState::Active { .. })
     }
 
     fn suspend(&mut self) {
-        if let RenderState::Active { active, .. } = &mut self.render_state {
+        if let RenderState::Active(active) = &mut self.render_state {
             // Unregister all textures on suspend
             for (_id, handle) in self.texture_handles.drain() {
                 active.renderer.unregister_texture(handle);
             }
         }
-
-        // Recover the WGPUContext (if any) and place it back into Suspended so
-        // the next resume cycle can reuse it. The temporary closed-channel
-        // Pending state satisfies mem::replace; it's overwritten before any
-        // observer can touch it.
-        let prev = std::mem::replace(
-            &mut self.render_state,
-            RenderState::Pending {
-                receiver: oneshot::channel().1,
-            },
-        );
-        let wgpu_context = match prev {
-            RenderState::Active { wgpu_context, .. } => wgpu_context,
-            RenderState::Suspended { wgpu_context } => wgpu_context,
-            // Suspended-during-Pending: the in-flight future owns the previous
-            // context and is orphaned. Cheap-rebuild for the next cycle.
-            RenderState::Pending { .. } => build_wgpu_context(&self.config),
-        };
-        self.render_state = RenderState::Suspended { wgpu_context };
+        self.render_state = RenderState::Suspended;
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
-        if let RenderState::Active { active, .. } = &mut self.render_state {
+        if let RenderState::Active(active) = &mut self.render_state {
             active.render_surface.resize(width, height);
         };
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
-        let RenderState::Active { active: state, .. } = &mut self.render_state else {
+        let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
 

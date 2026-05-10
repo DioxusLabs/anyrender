@@ -79,7 +79,6 @@ struct IntermediateTextureStuff {
 /// Combination of surface and its configuration.
 pub struct SurfaceRenderer<'s> {
     // The device and queue for rendering to the surface
-    pub dev_id: usize,
     pub device_handle: DeviceHandle,
 
     // The surface and it's configuration
@@ -93,7 +92,6 @@ pub struct SurfaceRenderer<'s> {
 impl std::fmt::Debug for SurfaceRenderer<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SurfaceRenderer")
-            .field("dev_id", &self.dev_id)
             .field("surface_config", &self.config)
             .field("has_intermediate_texture", &true)
             .finish()
@@ -102,12 +100,11 @@ impl std::fmt::Debug for SurfaceRenderer<'_> {
 
 impl<'s> SurfaceRenderer<'s> {
     /// Creates a new render surface for the specified window and dimensions.
-    pub async fn new<'w>(
+    pub fn new<'w>(
         surface: Surface<'w>,
         surface_renderer_config: SurfaceRendererConfiguration,
         intermediate_texture_config: Option<TextureConfiguration>,
         device_handle: DeviceHandle,
-        dev_id: usize,
     ) -> Result<SurfaceRenderer<'w>, WgpuContextError> {
         // Convert SurfaceRendererConfiguration to SurfaceConfiguration.
         // The difference is that `format` is a Vec in SurfaceRendererConfiguration and a single value in SurfaceConfiguration
@@ -142,7 +139,6 @@ impl<'s> SurfaceRenderer<'s> {
         });
 
         let surface = SurfaceRenderer {
-            dev_id,
             device_handle,
             surface,
             config: surface_config,
