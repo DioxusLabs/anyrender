@@ -980,7 +980,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1262,7 +1262,7 @@ dependencies = [
 [[package]]
 name = "glifo"
 version = "0.0.0"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -2742,7 +2742,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3512,7 +3512,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "vello"
 version = "0.8.0"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "futures-intrusive",
@@ -3530,7 +3530,7 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.7"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -3546,7 +3546,7 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.0.7"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "crossbeam-channel",
@@ -3561,7 +3561,7 @@ dependencies = [
 [[package]]
 name = "vello_encoding"
 version = "0.8.0"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "guillotiere",
@@ -3573,7 +3573,7 @@ dependencies = [
 [[package]]
 name = "vello_hybrid"
 version = "0.0.7"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "glifo",
@@ -3590,7 +3590,7 @@ dependencies = [
 [[package]]
 name = "vello_shaders"
 version = "0.8.0"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "bytemuck",
  "log",
@@ -3602,7 +3602,7 @@ dependencies = [
 [[package]]
 name = "vello_sparse_shaders"
 version = "0.0.7"
-source = "git+https://github.com/linebender/vello?rev=3e1aba3ffa1286012119052cb4bc7250e1b61a4b#3e1aba3ffa1286012119052cb4bc7250e1b61a4b"
+source = "git+https://github.com/linebender/vello?rev=7023c3f03deff7100d2fc2e361959a439f14a3b7#7023c3f03deff7100d2fc2e361959a439f14a3b7"
 dependencies = [
  "naga",
 ]
@@ -4023,7 +4023,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

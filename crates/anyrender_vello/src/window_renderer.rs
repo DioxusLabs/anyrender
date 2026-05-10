@@ -311,6 +311,10 @@ impl WindowRenderer for VelloWindowRenderer {
             return;
         };
 
+        for handle in self.texture_handles.values() {
+            state.renderer.mark_override_image_dirty(handle);
+        }
+
         state
             .renderer
             .render_to_texture(
