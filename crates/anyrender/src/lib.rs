@@ -229,6 +229,7 @@ pub trait PaintScene: RenderContext {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [NormalizedCoord],
+        embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         brush: impl Into<PaintRef<'a>>,
         brush_alpha: f32,
@@ -294,6 +295,7 @@ pub trait PaintScene: RenderContext {
                     cmd.font_size,
                     cmd.hint,
                     &cmd.normalized_coords,
+                    cmd.embolden,
                     &cmd.style,
                     match cmd.brush {
                         Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
