@@ -1,6 +1,6 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_hybrid::Scene`].
 
-use anyrender::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene};
+use anyrender::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
 use vello_common::paint::PaintType;
@@ -68,6 +68,9 @@ impl WebGlScenePainter<'_> {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
             Paint::Image(image_brush) => self.convert_image_paint(image_brush),
+
+            // TODO: custom paint
+            Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
             Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
         }
     }
@@ -85,6 +88,7 @@ impl WebGlScenePainter<'_> {
     }
 }
 
+impl RenderContext for WebGlScenePainter<'_> {}
 impl PaintScene for WebGlScenePainter<'_> {
     fn reset(&mut self) {
         self.scene.reset();
