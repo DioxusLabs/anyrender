@@ -30,7 +30,7 @@
 #![allow(clippy::collapsible_if)]
 
 use kurbo::{Affine, Rect, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
+use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, ImageData, StyleRef};
 use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
@@ -79,6 +79,13 @@ impl From<RegisterResourceErrorKind> for RegisterResourceError {
 }
 
 pub trait RenderContext {
+    fn try_register_image(
+        &mut self,
+        resource: ImageData,
+    ) -> Result<ResourceId, RegisterResourceError> {
+        let _ = resource;
+        Err(RegisterResourceErrorKind::Unimplemented.into())
+    }
     fn try_register_custom_resource(
         &mut self,
         resource: Box<dyn Any>,

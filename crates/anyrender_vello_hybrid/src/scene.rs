@@ -3,14 +3,15 @@ use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
 use vello_common::paint::{ImageId, ImageSource, PaintType};
-use vello_hybrid::Renderer;
+use vello_hybrid::{AtlasWriter, Renderer};
 use wgpu::{CommandEncoder, Device, Queue};
+use wgpu_context::DeviceHandle;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
     paint: PaintRef<'a>,
-    image_manager: &mut ImageManager<'_>,
+    image_manager: &mut VelloHybridRenderContext<'_>,
 ) -> PaintType {
     match paint {
         Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
@@ -34,24 +35,86 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
     }
 }
 
-pub struct ImageManager<'a> {
-    pub(crate) renderer: &'a mut Renderer,
+pub trait ImageManager {
+    fn upload_image<T: AtlasWriter>(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        writer: &T,
+    ) -> ImageId;
+
+    fn destroy_image(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        image_id: ImageId,
+    );
+}
+
+impl ImageManager for Renderer {
+    fn upload_image<T: AtlasWriter>(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        writer: &T,
+    ) -> ImageId {
+        self.upload_image(device, queue, encoder, writer)
+    }
+
+    fn destroy_image(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        image_id: ImageId,
+    ) {
+        self.destroy_image(device, queue, encoder, image_id);
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "webgl"))]
+impl ImageManager for Renderer {
+    fn upload_image<T: AtlasWriter>(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        writer: &T,
+    ) -> ImageId {
+        self.upload_image(device, queue, encoder, writer)
+    }
+
+    fn destroy_image(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        encoder: &mut CommandEncoder,
+        image_id: ImageId,
+    ) {
+        self.destroy_image(device, queue, encoder, image_id);
+    }
+}
+
+pub struct VelloHybridRenderContext<'a, I: ImageManager> {
+    pub(crate) image_manager: &'a mut I,
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
     pub(crate) encoder: &'a mut CommandEncoder,
     pub(crate) cache: &'a mut FxHashMap<u64, ImageId>,
 }
 
-impl<'a> ImageManager<'a> {
+impl<'a, I: ImageManager> VelloHybridRenderContext<'a, I> {
     pub fn new(
-        renderer: &'a mut Renderer,
-        device: &'a Device,
-        queue: &'a Queue,
+        image_manager: &'a mut I,
+        device_handle: &'a DeviceHandle,
         encoder: &'a mut CommandEncoder,
         cache: &'a mut FxHashMap<u64, ImageId>,
     ) -> Self {
         Self {
-            renderer,
+            image_manager,
             device,
             queue,
             encoder,
@@ -73,15 +136,46 @@ impl<'a> ImageManager<'a> {
         };
 
         // Upload Pixamp
-        let atlas_id = self
-            .renderer
-            .upload_image(self.device, self.queue, self.encoder, &pixmap);
+        let atlas_id = self.image_manager.upload_image(
+            self.device_handle.device,
+            self.device_handle.queue,
+            self.encoder,
+            &pixmap,
+        );
 
         // Store ImageId in cache
         self.cache.insert(peniko_id, atlas_id);
 
         // Return ImageId
         atlas_id
+    }
+}
+
+impl<'a, I: ImageManager> RenderContext for VelloHybridRenderContext<'a, I> {
+    fn try_register_image(
+        &mut self,
+        image: ImageData,
+    ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+        Ok(self.upload_image(image))
+    }
+
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn std::any::Any>,
+    ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+        let _ = resource;
+        Err(anyrender::RegisterResourceErrorKind::Unimplemented.into())
+    }
+
+    fn unregister_resource(&mut self, resource_id: anyrender::ResourceId) {
+        if let Some(image_id) = self.cache.remove(resource_id) {
+            self.image_manager
+                .destroy_image(self.device, self.queue, self.encoder, image_id);
+        }
+    }
+
+    fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
+        Some(Box::new(self.device_handle.clone()) as _)
     }
 }
 
@@ -93,13 +187,13 @@ pub(crate) enum LayerKind {
 pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_hybrid::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
-    pub(crate) image_manager: ImageManager<'s>,
+    pub(crate) image_manager: VelloHybridRenderContext<'s>,
 }
 
 impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(
         scene: &'s mut vello_hybrid::Scene,
-        image_manager: ImageManager<'s>,
+        image_manager: VelloHybridRenderContext<'s>,
     ) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             scene,

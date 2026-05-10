@@ -13,7 +13,7 @@ use vello_hybrid::{
 use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, SurfaceError, TextureFormat};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use crate::{VelloHybridScenePainter, scene::ImageManager};
+use crate::{VelloHybridScenePainter, scene::VelloHybridRenderContext};
 // use crate::CustomPaintSource;
 
 // static PAINT_SOURCE_ID: AtomicU64 = AtomicU64::new(0);
@@ -22,6 +22,7 @@ use crate::{VelloHybridScenePainter, scene::ImageManager};
 struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     render_surface: SurfaceRenderer<'static>,
+    cached_images: FxHashMap<u64, ImageId>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -57,7 +58,6 @@ pub struct VelloHybridWindowRenderer {
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
     // custom_paint_sources: FxHashMap<u64, Box<dyn CustomPaintSource>>,
-    cached_images: FxHashMap<u64, ImageId>,
 }
 impl VelloHybridWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -80,7 +80,6 @@ impl VelloHybridWindowRenderer {
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings),
             // custom_paint_sources: FxHashMap::default(),
-            cached_images: FxHashMap::default(),
         }
     }
 
@@ -205,6 +204,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         self.render_state = RenderState::Active(ActiveRenderState {
             renderer,
             render_surface,
+            cached_images: FxHashMap::default(),
         });
     }
 
@@ -247,12 +247,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     label: Some("Render scene"),
                 });
 
-        let image_manager = ImageManager {
+        let image_manager = VelloHybridRenderContext {
             renderer: &mut state.renderer,
             device: render_surface.device(),
             queue: render_surface.queue(),
             encoder: &mut encoder,
-            cache: &mut self.cached_images,
+            cache: &mut state.cached_images,
         };
 
         // Regenerate the vello scene
