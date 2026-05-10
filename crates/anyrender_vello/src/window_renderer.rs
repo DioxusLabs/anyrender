@@ -84,6 +84,7 @@ pub struct VelloWindowRenderer {
     // Resources
     texture_handles: FxHashMap<ResourceId, ImageData>,
 }
+
 impl VelloWindowRenderer {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
