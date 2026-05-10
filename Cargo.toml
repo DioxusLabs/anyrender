@@ -42,17 +42,17 @@ serde = "1.0.228"
 serde_json = "1.0"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
-skera = "=0.1.0" # pin because of breaking changes in past patch releases
+skera = "=0.1.0"                                                            # pin because of breaking changes in past patch releases
 read-fonts = "0.37"
 ttf2woff2 = "0.11"
 wuff = "0.2"
 
 # Linebender
-color = "0.3"
+
 linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13"
-# glifo = { version = "0.0.0" }
+# glifo = { version = "0.0.0" }color = "0.3"
 # vello = { version = "0.8", features = ["wgpu"] }
 # vello_cpu = { version = "0.0.7", default-features = false, features = [
 #   "std",
@@ -61,17 +61,17 @@ kurbo = "0.13"
 # ] }
 # vello_hybrid = { version = "0.0.7" }
 # vello_common = { version = "0.0.7" }
-glifo = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
-vello = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5", features = [
+glifo = { git = "https://github.com/linebender/vello", rev = "3e1aba3ffa1286012119052cb4bc7250e1b61a4b" }
+vello = { git = "https://github.com/linebender/vello", rev = "3e1aba3ffa1286012119052cb4bc7250e1b61a4b", features = [
   "wgpu",
 ] }
-vello_cpu = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5", default-features = false, features = [
+vello_cpu = { git = "https://github.com/linebender/vello", rev = "3e1aba3ffa1286012119052cb4bc7250e1b61a4b", default-features = false, features = [
   "std",
   "text",
   "u8_pipeline",
 ] }
-vello_hybrid = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
-vello_common = { git = "https://github.com/linebender/vello", rev = "b5c4a3192c1a2a5cc1dc2fe45342de1de95a1dc5" }
+vello_hybrid = { git = "https://github.com/linebender/vello", rev = "3e1aba3ffa1286012119052cb4bc7250e1b61a4b" }
+vello_common = { git = "https://github.com/linebender/vello", rev = "3e1aba3ffa1286012119052cb4bc7250e1b61a4b" }
 
 # Rendering
 wgpu = "29"
@@ -94,3 +94,6 @@ wasm-bindgen-futures = "0.4"
 
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
+
+[patch.crates-io]
+kurbo = { git = "https://github.com/linebender/kurbo", rev = "6836244" }

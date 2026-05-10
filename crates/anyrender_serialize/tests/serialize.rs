@@ -7,7 +7,7 @@ use anyrender::{Glyph, Paint, PaintScene};
 use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
-use kurbo::{Affine, Rect, Stroke};
+use kurbo::{Affine, Rect, Stroke, Vec2};
 use peniko::{
     Blob, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
 };
@@ -282,6 +282,7 @@ fn test_font_deduplication() {
             12.0,
             false,
             &[],
+            Vec2 { x: 0.0, y: 0.0 },
             Fill::NonZero,
             Color::from_rgb8(0, 0, 0),
             1.0,
@@ -428,6 +429,7 @@ fn build_glyph_scene(font: &FontData) -> Scene {
         16.0,
         false,
         &[],
+        Vec2 { x: 0.0, y: 0.0 },
         Fill::NonZero,
         Color::from_rgb8(0, 0, 0),
         1.0,

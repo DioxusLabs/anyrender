@@ -9,7 +9,7 @@ use anyrender::{Glyph, PaintScene, render_to_buffer};
 use anyrender_serialize::{SceneArchive, SerializeConfig};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
-use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke};
+use kurbo::{Affine, Circle, Point, Rect, RoundedRect, Stroke, Vec2};
 use parley::style::{FontFamily, FontStack};
 use parley::{Alignment, AlignmentOptions, FontContext, Layout, LayoutContext, StyleProperty};
 use peniko::{
@@ -266,6 +266,7 @@ fn render_layout(
                     font_size,
                     false,
                     normalized_coords,
+                    Vec2 { x: 0.0, y: 0.0 },
                     Fill::NonZero,
                     color,
                     1.0,
