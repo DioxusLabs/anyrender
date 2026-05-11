@@ -203,6 +203,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
+                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
                     .glyph_transform(glyph_transform.unwrap_or_default())
                     .fill_glyphs(glyphs.map(into_vello_glyph));
             }

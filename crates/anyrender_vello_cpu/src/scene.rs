@@ -1,5 +1,6 @@
 use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
-use kurbo::{Affine, Rect, Shape, Stroke};
+use glifo::FontEmbolden;
+use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
 use vello_cpu::{ImageSource, PaintType, Pixmap};
 
@@ -125,7 +126,7 @@ impl PaintScene for VelloCpuScenePainter {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [NormalizedCoord],
-        _embolden: kurbo::Vec2,
+        embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         paint: impl Into<PaintRef<'a>>,
         _brush_alpha: f32,
@@ -154,6 +155,7 @@ impl PaintScene for VelloCpuScenePainter {
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
+                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
                     .glyph_transform(glyph_transform.unwrap_or_default())
                     .fill_glyphs(glyphs.map(into_vello_cpu_glyph));
             }

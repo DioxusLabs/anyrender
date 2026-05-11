@@ -28,6 +28,7 @@ anyrender = { workspace = true }
 debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
+glifo = { workspace = true }
 
 # WindowRenderer backends
 softbuffer_window_renderer = { workspace = true, optional = true }

@@ -239,6 +239,7 @@ version = "0.11.0"
 dependencies = [
  "anyrender",
  "debug_timer",
+ "glifo",
  "kurbo",
  "peniko",
  "pixels_window_renderer",
