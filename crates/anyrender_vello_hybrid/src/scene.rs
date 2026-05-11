@@ -209,14 +209,6 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
-        fn into_vello_hybrid_glyph(g: anyrender::Glyph) -> glifo::Glyph {
-            glifo::Glyph {
-                id: g.id,
-                x: g.x,
-                y: g.y,
-            }
-        }
-
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -228,7 +220,11 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                     .normalized_coords(normalized_coords)
                     .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(into_vello_hybrid_glyph));
+                    .fill_glyphs(glyphs.map(|g| glifo::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y - embolden.y as f32,
+                    }));
             }
             StyleRef::Stroke(stroke) => {
                 self.scene.set_stroke(stroke.clone());
@@ -238,7 +234,11 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                     .hint(hint)
                     .normalized_coords(normalized_coords)
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(into_vello_hybrid_glyph));
+                    .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y,
+                    }));
             }
         }
     }

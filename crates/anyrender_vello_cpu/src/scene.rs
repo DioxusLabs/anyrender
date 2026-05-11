@@ -138,14 +138,6 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx
             .set_paint(anyrender_paint_to_vello_cpu_paint(paint.into()));
 
-        fn into_vello_cpu_glyph(g: anyrender::Glyph) -> vello_cpu::Glyph {
-            vello_cpu::Glyph {
-                id: g.id,
-                x: g.x,
-                y: g.y,
-            }
-        }
-
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -157,7 +149,11 @@ impl PaintScene for VelloCpuScenePainter {
                     .normalized_coords(normalized_coords)
                     .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(into_vello_cpu_glyph));
+                    .fill_glyphs(glyphs.map(|g| vello_cpu::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y - embolden.y as f32,
+                    }));
             }
             StyleRef::Stroke(stroke) => {
                 self.render_ctx.set_stroke(stroke.clone());
@@ -167,7 +163,11 @@ impl PaintScene for VelloCpuScenePainter {
                     .hint(hint)
                     .normalized_coords(normalized_coords)
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(into_vello_cpu_glyph));
+                    .stroke_glyphs(glyphs.map(|g| vello_cpu::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y,
+                    }));
             }
         }
     }

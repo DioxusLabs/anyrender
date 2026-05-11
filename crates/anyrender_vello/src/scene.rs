@@ -163,7 +163,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                 glyphs.map(|g: anyrender::Glyph| vello::Glyph {
                     id: g.id,
                     x: g.x,
-                    y: g.y,
+                    y: g.y - embolden.y as f32,
                 }),
             );
     }

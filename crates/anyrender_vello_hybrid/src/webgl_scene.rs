@@ -1,7 +1,8 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_hybrid::Scene`].
 
 use anyrender::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
-use kurbo::{Affine, Rect, Shape, Stroke};
+use glifo::FontEmbolden;
+use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
 use vello_common::paint::PaintType;
 
@@ -174,7 +175,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [NormalizedCoord],
-        _embolden: kurbo::Vec2,
+        embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         paint: impl Into<PaintRef<'a>>,
         _brush_alpha: f32,
@@ -185,14 +186,6 @@ impl PaintScene for WebGlScenePainter<'_> {
         let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
-
-        fn into_vello_glyph(g: Glyph) -> glifo::Glyph {
-            glifo::Glyph {
-                id: g.id,
-                x: g.x,
-                y: g.y,
-            }
-        }
 
         let style: StyleRef<'a> = style.into();
         match style {
@@ -205,7 +198,11 @@ impl PaintScene for WebGlScenePainter<'_> {
                     .normalized_coords(normalized_coords)
                     .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(into_vello_glyph));
+                    .fill_glyphs(glyphs.map(|g| glifo::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y - embolden.y as f32,
+                    }));
             }
             StyleRef::Stroke(stroke) => {
                 self.scene.set_stroke(stroke.clone());
@@ -215,7 +212,11 @@ impl PaintScene for WebGlScenePainter<'_> {
                     .hint(hint)
                     .normalized_coords(normalized_coords)
                     .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(into_vello_glyph));
+                    .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
+                        id: g.id,
+                        x: g.x,
+                        y: g.y,
+                    }));
             }
         }
     }
