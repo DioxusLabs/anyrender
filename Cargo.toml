@@ -51,7 +51,7 @@ wuff = "0.2"
 
 linebender_resource_handle = "0.1"
 peniko = "0.6"
-kurbo = "0.13"
+kurbo = "0.13.1"
 # glifo = { version = "0.0.0" }color = "0.3"
 # vello = { version = "0.8", features = ["wgpu"] }
 # vello_cpu = { version = "0.0.7", default-features = false, features = [
@@ -61,17 +61,17 @@ kurbo = "0.13"
 # ] }
 # vello_hybrid = { version = "0.0.7" }
 # vello_common = { version = "0.0.7" }
-glifo = { git = "https://github.com/linebender/vello", rev = "7023c3f03deff7100d2fc2e361959a439f14a3b7" }
-vello = { git = "https://github.com/linebender/vello", rev = "7023c3f03deff7100d2fc2e361959a439f14a3b7", features = [
+glifo = { git = "https://github.com/linebender/vello", rev = "e58c90b68a6e9685f203e932de8d50788cfea515" }
+vello = { git = "https://github.com/linebender/vello", rev = "e58c90b68a6e9685f203e932de8d50788cfea515", features = [
   "wgpu",
 ] }
-vello_cpu = { git = "https://github.com/linebender/vello", rev = "7023c3f03deff7100d2fc2e361959a439f14a3b7", default-features = false, features = [
+vello_cpu = { git = "https://github.com/linebender/vello", rev = "e58c90b68a6e9685f203e932de8d50788cfea515", default-features = false, features = [
   "std",
   "text",
   "u8_pipeline",
 ] }
-vello_hybrid = { git = "https://github.com/linebender/vello", rev = "7023c3f03deff7100d2fc2e361959a439f14a3b7" }
-vello_common = { git = "https://github.com/linebender/vello", rev = "7023c3f03deff7100d2fc2e361959a439f14a3b7" }
+vello_hybrid = { git = "https://github.com/linebender/vello", rev = "e58c90b68a6e9685f203e932de8d50788cfea515" }
+vello_common = { git = "https://github.com/linebender/vello", rev = "e58c90b68a6e9685f203e932de8d50788cfea515" }
 
 # Rendering
 wgpu = "29"
