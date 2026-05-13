@@ -46,7 +46,11 @@ impl DeviceHandle {
 
         // Determine limits to request
         // The user may override the limits
-        let required_limits = override_limits.clone().unwrap_or_default();
+        let required_limits = override_limits.clone().unwrap_or_else(|| Limits {
+            // Fix iOS simulator
+            max_inter_stage_shader_variables: 15,
+            ..Limits::default()
+        });
 
         // Create the device and the queue
         let descripter = wgpu::DeviceDescriptor {
