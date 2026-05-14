@@ -223,12 +223,15 @@ impl PaintScene for WebGlScenePainter<'_> {
 
     fn draw_box_shadow(
         &mut self,
-        _transform: Affine,
-        _rect: Rect,
-        _color: Color,
-        _radius: f64,
-        _std_dev: f64,
+        transform: Affine,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
     ) {
-        // Not yet supported in vello_hybrid WebGL.
+        self.scene.set_transform(transform);
+        self.scene.set_paint(PaintType::Solid(color));
+        self.scene
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
     }
 }
