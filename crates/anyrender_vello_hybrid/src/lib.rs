@@ -11,3 +11,5 @@ pub use scene::VelloHybridScenePainter;
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use webgl_scene::*;
 pub use window_renderer::*;
+
+pub use wgpu;

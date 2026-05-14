@@ -1,11 +1,16 @@
-use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
-use vello_common::paint::{ImageId, ImageSource, PaintType};
-use vello_hybrid::{Renderer, Resources};
-use wgpu::{CommandEncoder, Device, Queue};
+use vello_common::{
+    TextureId,
+    geometry::RectU16,
+    paint::{ImageId, ImageSource, PaintType},
+};
+use vello_hybrid::{Renderer, Resources, SampleRect};
+use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
+use wgpu_context::DeviceHandle;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
@@ -102,22 +107,64 @@ pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_hybrid::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
     pub(crate) image_manager: ImageManager<'s>,
+    pub(crate) texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
+    pub(crate) device_handle: &'s DeviceHandle,
 }
 
 impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(
         scene: &'s mut vello_hybrid::Scene,
         image_manager: ImageManager<'s>,
+        texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
+        device_handle: &'s DeviceHandle,
     ) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
+            texture_bindings,
+            device_handle,
         }
     }
 }
 
-impl RenderContext for VelloHybridScenePainter<'_> {}
+impl RenderContext for VelloHybridScenePainter<'_> {
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn std::any::Any>,
+    ) -> Result<ResourceId, anyrender::RegisterResourceError> {
+        // Try to downcast as Texture
+        match resource.downcast::<Texture>() {
+            Ok(texture) => {
+                let id = ResourceId::new();
+                let texture_view = texture.create_view(&TextureViewDescriptor::default());
+                self.texture_bindings.insert(id, texture_view);
+                Ok(id)
+            }
+            Err(resource) => {
+                // Else try to downcast as TextureView
+                if let Ok(texture_view) = resource.downcast::<TextureView>() {
+                    let id = ResourceId::new();
+                    self.texture_bindings.insert(id, *texture_view);
+                    Ok(id)
+                }
+                // Else return error
+                else {
+                    Err(anyrender::RegisterResourceErrorKind::UnsupportedResourceKind.into())
+                }
+            }
+        }
+    }
+
+    fn unregister_resource(&mut self, resource_id: ResourceId) {
+        self.texture_bindings.remove(&resource_id);
+    }
+
+    fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
+        Some(Box::new(self.device_handle.clone()) as _)
+    }
+}
+
 impl PaintScene for VelloHybridScenePainter<'_> {
     fn reset(&mut self) {
         self.scene.reset();
@@ -184,11 +231,41 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
-        self.scene.set_paint(paint);
-        self.scene
-            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        let paint = paint.into();
+
+        match paint {
+            Paint::Resource(brush) => {
+                if let Some(texture_view) = self.texture_bindings.get(&brush.image) {
+                    let texture_id = TextureId(brush.image.into_ffi());
+
+                    let src_width = texture_view.texture().width();
+                    let src_height = texture_view.texture().height();
+
+                    let rect = shape.bounding_box();
+
+                    self.scene.draw_texture_rects(
+                        texture_id,
+                        brush.sampler.quality,
+                        [SampleRect {
+                            source_region: RectU16 {
+                                x0: 0,
+                                y0: 0,
+                                x1: src_width as u16,
+                                y1: src_height as u16,
+                            },
+                            transform: Affine::translate(rect.origin().to_vec2()),
+                        }],
+                    );
+                }
+            }
+            _ => {
+                let paint = anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager);
+                self.scene.set_paint(paint);
+                self.scene
+                    .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
+                self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+            }
+        }
     }
 
     fn draw_glyphs<'a, 's: 'a>(

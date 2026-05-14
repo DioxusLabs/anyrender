@@ -1,15 +1,20 @@
-use anyrender::{RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+};
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
 use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
-use vello_common::paint::ImageId;
+use vello_common::{TextureId, paint::ImageId};
 use vello_hybrid::{
     RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer, Resources,
     Scene as VelloHybridScene, TextureBindings,
 };
-use wgpu::{CommandEncoderDescriptor, Features, Limits, PresentMode, TextureFormat};
+use wgpu::{
+    CommandEncoderDescriptor, Features, Limits, PresentMode, Texture, TextureFormat, TextureView,
+    TextureViewDescriptor,
+};
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
@@ -31,6 +36,7 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     resources: Resources,
+    texture_bindings: FxHashMap<ResourceId, TextureView>,
     render_surface: SurfaceRenderer<'static>,
 }
 
@@ -107,42 +113,55 @@ const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
 const DEFAULT_TEXTURE_FORMAT: TextureFormat = TextureFormat::Bgra8Unorm;
 
 impl RenderContext for VelloHybridWindowRenderer {
-    //     fn renderer_specific_context(&self) -> &dyn std::any::Any {
-    //         match &self.render_state {
-    //             RenderState::Active(active_render_state) => {
-    //                 &active_render_state.render_surface.device_handle as _
-    //             }
-    //             RenderState::Suspended => &() as _,
-    //         }
-    //     }
+    fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
+        match &self.render_state {
+            RenderState::Active(state) => {
+                Some(Box::new(state.render_surface.device_handle.clone()) as _)
+            }
+            RenderState::Suspended => None,
+            RenderState::Pending { .. } => None,
+        }
+    }
 
-    //     fn try_register_custom_resource(
-    //         &mut self,
-    //         resource: Box<dyn std::any::Any>,
-    //     ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
-    //         let RenderState::Active(state) = self.render_state else {
-    //             return Err(RegisterResourceErrorKind::Other.into());
-    //         };
+    fn try_register_custom_resource(
+        &mut self,
+        resource: Box<dyn std::any::Any>,
+    ) -> Result<anyrender::ResourceId, anyrender::RegisterResourceError> {
+        let RenderState::Active(state) = &mut self.render_state else {
+            return Err(RegisterResourceErrorKind::Other.into());
+        };
 
-    //         if let Ok(texture) = resource.downcast::<Texture>() {
-    //             let device = state.render_surface.device();
-    //             let queue = state.render_surface.queue();
-    //             let mut encoder =
-    //                 state
-    //                     .render_surface
-    //                     .device()
-    //                     .create_command_encoder(&CommandEncoderDescriptor {
-    //                         label: Some("Upload texture to Atlas"),
-    //                     });
-    //             let id = state
-    //                 .renderer
-    //                 .upload_image(device, queue, &mut encoder, &*texture);
-    //             Ok(ResourceId(id.as_u32() as u64))
-    //         } else {
-    //             Err(RegisterResourceErrorKind::UnsupportedResourceKind.into())
-    //         }
-    //     }
+        // Try to downcast as Texture
+        match resource.downcast::<Texture>() {
+            Ok(texture) => {
+                let id = ResourceId::new();
+                let texture_view = texture.create_view(&TextureViewDescriptor::default());
+                state.texture_bindings.insert(id, texture_view);
+                Ok(id)
+            }
+            Err(resource) => {
+                // Else try to downcast as TextureView
+                if let Ok(texture_view) = resource.downcast::<TextureView>() {
+                    let id = ResourceId::new();
+                    state.texture_bindings.insert(id, *texture_view);
+                    Ok(id)
+                }
+                // Else return error
+                else {
+                    Err(anyrender::RegisterResourceErrorKind::UnsupportedResourceKind.into())
+                }
+            }
+        }
+    }
+
+    fn unregister_resource(&mut self, resource_id: ResourceId) {
+        let RenderState::Active(state) = &mut self.render_state else {
+            return;
+        };
+        state.texture_bindings.remove(&resource_id);
+    }
 }
+
 impl WindowRenderer for VelloHybridWindowRenderer {
     type ScenePainter<'a>
         = VelloHybridScenePainter<'a>
@@ -239,6 +258,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     renderer,
                     resources,
                     render_surface,
+                    texture_bindings: FxHashMap::default(),
                 },
             });
             on_ready();
@@ -308,6 +328,8 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             scene: &mut self.scene,
             layer_stack: Vec::new(),
             image_manager,
+            texture_bindings: &mut state.texture_bindings,
+            device_handle: &render_surface.device_handle,
         });
         timer.record_time("cmd");
 
@@ -316,6 +338,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             render_surface.clear_surface_texture();
             return;
         };
+
+        // Construct Vello Hybrid TextureBindings
+        let mut texture_bindings = TextureBindings::new();
+        for (resource_id, texture_view) in state.texture_bindings.iter() {
+            texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view);
+        }
 
         state
             .renderer
@@ -330,8 +358,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     height: render_surface.config.height,
                 },
                 &texture_view,
-                // TODO: handle texture registration
-                &TextureBindings::new(),
+                &texture_bindings,
             )
             .expect("failed to render to texture");
         render_surface.queue().submit([encoder.finish()]);
