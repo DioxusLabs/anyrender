@@ -342,7 +342,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         // Construct Vello Hybrid TextureBindings
         let mut texture_bindings = TextureBindings::new();
         for (resource_id, texture_view) in state.texture_bindings.iter() {
-            texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view);
+            texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view.clone());
         }
 
         state
