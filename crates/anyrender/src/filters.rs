@@ -21,7 +21,6 @@
 // - `GaussianBlur` - Gaussian blur filter
 // - `DropShadow` - Drop shadow effect (compound primitive)
 // - `Offset` - Translation/shift (single primitive)
-//
 
 use kurbo::{Affine, Rect, Vec2};
 use peniko::color::{AlphaColor, Srgb};
@@ -47,7 +46,7 @@ use self::{
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Filter {
     /// All filter primitives in the graph, stored in insertion order.
-    primitives: SmallVec<[FilterEffect; 1]>,
+    primitives: SmallVec<[FilterGraphNode; 1]>,
     /// The final output filter ID whose result is the output of this graph.
     output: FilterId,
     /// Accumulated bounds expansion from all primitives in the graph, cached in user space.
@@ -110,8 +109,26 @@ impl Filter {
     /// Use this for direct access to low-level SVG filter operations.
     pub fn single(primitive: FilterEffect) -> Self {
         let mut graph = Self::empty();
-        let filter_id = graph.add(primitive, None);
+        let filter_id = graph.add(primitive, FilterInputs::NONE);
         graph.set_output(filter_id);
+        graph
+    }
+
+    /// Create a filter from an iterator of filter effects.
+    ///
+    /// Creates a filter graph where the effects are applied in order.
+    pub fn linear_list(primitives: impl Iterator<Item = FilterEffect>) -> Self {
+        let mut graph = Self::empty();
+        let mut last_id = None;
+        for primitive in primitives {
+            let inputs = FilterInputs {
+                primary: last_id.map(FilterInput::Result),
+                secondary: None,
+            };
+            let filter_id = graph.add(primitive, inputs);
+            graph.set_output(filter_id);
+            last_id = Some(filter_id);
+        }
         graph
     }
 
@@ -119,20 +136,20 @@ impl Filter {
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
-    pub fn add(&mut self, primitive: FilterEffect, _inputs: Option<FilterInputs>) -> FilterId {
+    pub fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
         let id = FilterId(self.primitives.len() as u16);
 
         // Update accumulated expansion by taking the union of rects
-        let primitive_rect = primitive.expansion_rect();
+        let primitive_rect = effect.expansion_rect();
         self.expansion_rect = self.expansion_rect.union(primitive_rect);
 
-        self.primitives.push(primitive);
+        self.primitives.push(FilterGraphNode { effect, inputs });
 
         id
     }
 
-    /// The list of primitives in the graph
-    pub fn primitives(&mut self) -> &[FilterEffect] {
+    /// The list of nodes in the graph
+    pub fn nodes(&mut self) -> &[FilterGraphNode] {
         &self.primitives
     }
 
@@ -185,6 +202,106 @@ impl Filter {
         // transform_rect_bbox computes the axis-aligned bounding box of the transformed rect
         transform.transform_rect_bbox(self.expansion_rect)
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FilterGraphNode {
+    pub effect: FilterEffect,
+    pub inputs: FilterInputs,
+}
+
+/// Unique identifier for a filter primitive in the graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FilterId(pub u16);
+
+/// Input connections for a filter primitive.
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct FilterInputs {
+    /// Primary input ("in" attribute in SVG).
+    pub primary: Option<FilterInput>,
+    /// Secondary input ("in2" attribute in SVG, for composite/blend operations).
+    pub secondary: Option<FilterInput>,
+}
+
+impl FilterInputs {
+    pub const NONE: Self = Self {
+        primary: None,
+        secondary: None,
+    };
+}
+
+impl FilterInputs {
+    /// Create filter inputs with a single input.
+    ///
+    /// Use this for primitives that operate on a single source (blur, color matrix, etc.).
+    pub fn single(input: FilterInput) -> Self {
+        Self {
+            primary: Some(input),
+            secondary: None,
+        }
+    }
+
+    /// Create filter inputs with two inputs (for composite, blend, etc.).
+    ///
+    /// Use this for primitives that combine two sources (composite, blend, displacement map, etc.).
+    pub fn dual(input1: FilterInput, input2: FilterInput) -> Self {
+        Self {
+            primary: Some(input1),
+            secondary: Some(input2),
+        }
+    }
+}
+
+/// A single filter input.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FilterInput {
+    /// Input from a source (`SourceGraphic`, `SourceAlpha`, etc.).
+    Source(FilterSource),
+    /// Input from another filter's result.
+    Result(FilterId),
+}
+
+/// Filter input sources.
+///
+/// Defines the various built-in sources that can be used as filter inputs,
+/// matching the SVG filter primitive input types. These represent implicit
+/// inputs available to any filter primitive without requiring previous operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FilterSource {
+    /// The original graphic content being filtered.
+    ///
+    /// This is the default input - the rendered result of the element
+    /// the filter is applied to, including all its fill, stroke, and content.
+    SourceGraphic,
+    /// Alpha channel only of the original graphic.
+    ///
+    /// Useful for creating effects based on shape/transparency, such as
+    /// shadows that follow the element's outline.
+    SourceAlpha,
+    /// Background image content behind the filtered element.
+    ///
+    /// Allows filters to incorporate or blend with content behind the element.
+    /// Not always available depending on the rendering context.
+    BackgroundImage,
+    /// Alpha channel only of the background image.
+    ///
+    /// The transparency mask of the background content.
+    BackgroundAlpha,
+    /// The fill paint of the element as an image input.
+    ///
+    /// For elements with gradient or pattern fills, this provides access
+    /// to the fill as a filter input.
+    FillPaint,
+    /// The stroke paint of the element as an image input.
+    ///
+    /// For elements with gradient or pattern strokes, this provides access
+    /// to the stroke as a filter input.
+    StrokePaint,
 }
 
 /// Edge mode for filter operations.
@@ -403,92 +520,6 @@ mod offset_expansion_tests {
             "Offset expansion should be asymmetric and include the shift vector"
         );
     }
-}
-
-/// Unique identifier for a filter primitive in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FilterId(pub u16);
-
-/// Input connections for a filter primitive.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FilterInputs {
-    /// Primary input ("in" attribute in SVG).
-    pub primary: FilterInput,
-    /// Secondary input ("in2" attribute in SVG, for composite/blend operations).
-    pub secondary: Option<FilterInput>,
-}
-
-impl FilterInputs {
-    /// Create filter inputs with a single input.
-    ///
-    /// Use this for primitives that operate on a single source (blur, color matrix, etc.).
-    pub fn single(input: FilterInput) -> Self {
-        Self {
-            primary: input,
-            secondary: None,
-        }
-    }
-
-    /// Create filter inputs with two inputs (for composite, blend, etc.).
-    ///
-    /// Use this for primitives that combine two sources (composite, blend, displacement map, etc.).
-    pub fn dual(input1: FilterInput, input2: FilterInput) -> Self {
-        Self {
-            primary: input1,
-            secondary: Some(input2),
-        }
-    }
-}
-
-/// A single filter input.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum FilterInput {
-    /// Input from a source (`SourceGraphic`, `SourceAlpha`, etc.).
-    Source(FilterSource),
-    /// Input from another filter's result.
-    Result(FilterId),
-}
-
-/// Filter input sources.
-///
-/// Defines the various built-in sources that can be used as filter inputs,
-/// matching the SVG filter primitive input types. These represent implicit
-/// inputs available to any filter primitive without requiring previous operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum FilterSource {
-    /// The original graphic content being filtered.
-    ///
-    /// This is the default input - the rendered result of the element
-    /// the filter is applied to, including all its fill, stroke, and content.
-    SourceGraphic,
-    /// Alpha channel only of the original graphic.
-    ///
-    /// Useful for creating effects based on shape/transparency, such as
-    /// shadows that follow the element's outline.
-    SourceAlpha,
-    /// Background image content behind the filtered element.
-    ///
-    /// Allows filters to incorporate or blend with content behind the element.
-    /// Not always available depending on the rendering context.
-    BackgroundImage,
-    /// Alpha channel only of the background image.
-    ///
-    /// The transparency mask of the background content.
-    BackgroundAlpha,
-    /// The fill paint of the element as an image input.
-    ///
-    /// For elements with gradient or pattern fills, this provides access
-    /// to the fill as a filter input.
-    FillPaint,
-    /// The stroke paint of the element as an image input.
-    ///
-    /// For elements with gradient or pattern strokes, this provides access
-    /// to the stroke as a filter input.
-    StrokePaint,
 }
 
 /// Blend modes for combining colors.
