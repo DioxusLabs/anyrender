@@ -8,28 +8,35 @@
 //! to follow the W3C Filter Effects Module Level 1 specification.
 //!
 //! See: <https://drafts.fxtf.org/filter-effects/>
-//!
-//! ## Implementation Status
-//!
-//! ### Implemented
-//!
-//! **Filter Functions:**
-//! - `Blur` - Gaussian blur effect
-//!
-//! **Filter Primitives (Single Use Only):**
-//! - `Flood` - Solid color fill
-//! - `GaussianBlur` - Gaussian blur filter
-//! - `DropShadow` - Drop shadow effect (compound primitive)
-//! - `Offset` - Translation/shift (single primitive)
-//!
 
-use kurbo::{Affine, Rect};
+// ## Vello Implementation Status
+//
+// ### Implemented
+//
+// **Filter Functions:**
+// - `Blur` - Gaussian blur effect
+//
+// **Filter Primitives (Single Use Only):**
+// - `Flood` - Solid color fill
+// - `GaussianBlur` - Gaussian blur filter
+// - `DropShadow` - Drop shadow effect (compound primitive)
+// - `Offset` - Translation/shift (single primitive)
+//
+
+use kurbo::{Affine, Rect, Vec2};
 use peniko::color::{AlphaColor, Srgb};
 use smallvec::SmallVec;
 
-use crate::filters::{
-    component_transfer::TransferFunction, convolution::ConvolutionKernel, lighting::LightSource,
-    morphology::MorphologyOperator, turbulence::TurbulenceType,
+use self::{
+    blur::GaussianBlurFilter,
+    component_transfer::ComponentTransferFilter,
+    composite::CompositeOperator,
+    convolution::ConvolutionKernel,
+    displacement::DisplacementMapFilter,
+    lighting::{DiffuseLightingFilter, SpecularLightingFilter},
+    morphology::MorphologyFilter,
+    shadow::DropShadow,
+    turbulence::TurbulenceFilter,
 };
 
 /// A directed acyclic graph (DAG) of filter operations.
@@ -64,10 +71,10 @@ impl Filter {
     /// Applies a Gaussian blur to the input image. Larger radius values
     /// produce more blur. The blur is applied equally in all directions.
     pub fn blur(radius: f32) -> Self {
-        Self::single(FilterEffect::GaussianBlur {
+        Self::single(FilterEffect::GaussianBlur(GaussianBlurFilter {
             std_deviation: radius,
             edge_mode: EdgeMode::None,
-        })
+        }))
     }
 
     /// Drop shadow effect (compound primitive).
@@ -78,13 +85,13 @@ impl Filter {
     ///
     /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
     pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
-        Self::single(FilterEffect::DropShadow {
+        Self::single(FilterEffect::DropShadow(DropShadow {
             dx,
             dy,
             std_deviation,
             color,
             edge_mode: EdgeMode::None,
-        })
+        }))
     }
 
     /// Create a new empty filter graph.
@@ -224,31 +231,16 @@ pub enum FilterEffect {
     ///
     /// Creates a rectangle filled with the specified color, typically used as
     /// input to other filter operations (e.g., for colored shadows).
-    Flood {
-        /// Fill color with alpha channel.
-        color: AlphaColor<Srgb>,
-    },
+    Flood(AlphaColor<Srgb>),
+
     /// Gaussian blur filter.
     ///
     /// Applies a Gaussian blur using the specified standard deviation (σ).
     /// The effective blur range (distance over which pixels are sampled) is
     /// approximately 3 × `std_deviation`, as this captures ~99.7% of the
     /// Gaussian distribution.
-    GaussianBlur {
-        /// Standard deviation for the blur kernel. Larger values create more blur.
-        /// Must be non-negative. A value of 0 means no blur.
-        ///
-        /// This directly corresponds to the σ (sigma) parameter in the Gaussian
-        /// function. The visible blur effect extends approximately 3σ in each direction.
-        ///
-        /// TODO: Per the W3C specification, this should support separate x and y values.
-        /// The spec allows `stdDeviation` to be either one number (applied to both axes)
-        /// or two numbers (first for x-axis, second for y-axis). Currently only uniform
-        /// blur is supported. Consider changing to `(f32, f32)` or a dedicated type.
-        std_deviation: f32,
-        /// Edge mode determining how pixels beyond the input bounds are handled.
-        edge_mode: EdgeMode,
-    },
+    GaussianBlur(GaussianBlurFilter),
+
     /// Drop shadow effect (compound primitive).
     ///
     /// Creates a drop shadow by blurring the input's alpha channel, offsetting it,
@@ -256,164 +248,85 @@ pub enum FilterEffect {
     /// combines multiple primitive operations into one.
     ///
     /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
-    DropShadow {
-        /// Horizontal offset of the shadow in pixels. Positive values shift right.
-        dx: f32,
-        /// Vertical offset of the shadow in pixels. Positive values shift down.
-        dy: f32,
-        /// Blur standard deviation for the shadow. Larger values create softer shadows.
-        std_deviation: f32,
-        /// Shadow color with alpha channel. Alpha controls shadow opacity.
-        color: AlphaColor<Srgb>,
-        /// Edge mode for handling boundaries during blur operation.
-        /// Default is `EdgeMode::None` per SVG spec.
-        edge_mode: EdgeMode,
-    },
-    //
-    // ============================================================
-    // TODO: The following filter primitives are not yet implemented
-    // ============================================================
-    //
+    DropShadow(DropShadow),
+
     /// Matrix-based color transformation.
     ///
     /// Applies a 4x5 matrix transformation to colors, allowing arbitrary
     /// color space transformations, hue shifts, and color adjustments.
-    ColorMatrix {
-        /// 4x5 color transformation matrix: 4 rows (R,G,B,A) × 5 columns (R,G,B,A,offset).
-        /// Each output channel is computed as a linear combination of input channels plus offset.
-        matrix: [f32; 20],
-    },
+    ///
+    /// 4x5 color transformation matrix: 4 rows (R,G,B,A) × 5 columns (R,G,B,A,offset).
+    /// Each output channel is computed as a linear combination of input channels plus offset.
+    ColorMatrix([f32; 20]),
+
     /// Geometric offset/translation.
     ///
     /// Shifts the input image by the specified offset. Useful for creating
     /// shadow effects or positioning elements in a filter graph.
-    Offset {
-        /// Horizontal offset in pixels. Positive values shift right.
-        dx: f32,
-        /// Vertical offset in pixels. Positive values shift down.
-        dy: f32,
-    },
+    ///
+    /// Positive values shift right or down.
+    Offset(Vec2),
 
     /// Composite two inputs using Porter-Duff compositing operations.
     ///
     /// Combines two input images using standard compositing operators
     /// (over, in, out, atop, xor) or custom arithmetic combination.
-    Composite {
-        /// Porter-Duff compositing operator to apply.
-        operator: CompositeOperator,
-    },
+    Composite(CompositeOperator),
+
     /// Blend two inputs using blend modes.
     ///
     /// Combines two input images using Photoshop-style blend modes
     /// (multiply, screen, overlay, etc.).
-    Blend {
-        /// Blend mode determining how colors are combined.
-        mode: BlendMode,
-    },
+    Blend(BlendMode),
+
     /// Morphological operations (dilate/erode).
     ///
     /// Expands (dilate) or contracts (erode) the shapes in the input image.
     /// Useful for creating outline effects or cleaning up edges.
-    Morphology {
-        /// Morphological operator determining whether to erode or dilate.
-        operator: MorphologyOperator,
-        /// Operation radius in pixels. Larger values create stronger effects.
-        radius: f32,
-    },
+    Morphology(MorphologyFilter),
     /// Custom convolution kernel for image processing.
     ///
     /// Applies a custom convolution matrix to the input image, enabling
     /// effects like sharpening, edge detection, embossing, and custom filters.
-    ConvolveMatrix {
-        /// Convolution kernel specification including size, values, and normalization.
-        kernel: ConvolutionKernel,
-    },
+    ConvolveMatrix(ConvolutionKernel),
+
     /// Generate Perlin noise/turbulence patterns.
     ///
     /// Creates procedural noise patterns useful for textures, clouds,
     /// marble effects, and other organic-looking randomness.
-    Turbulence {
-        /// Base frequency for noise generation. Higher values create finer detail.
-        base_frequency: f32,
-        /// Number of octaves for fractal noise. More octaves add finer detail.
-        num_octaves: u32,
-        /// Random seed for reproducible noise generation.
-        seed: u32,
-        /// Type of noise: smooth fractal or more chaotic turbulence.
-        turbulence_type: TurbulenceType,
-    },
+    Turbulence(TurbulenceFilter),
+
     /// Displace pixels using a displacement map.
     ///
     /// Uses the color values from a second input to spatially displace pixels
     /// in the primary input, creating warping and distortion effects.
-    DisplacementMap {
-        /// Scale factor controlling the displacement intensity.
-        scale: f32,
-        /// Color channel from the displacement map used for X-axis displacement.
-        x_channel: ColorChannel,
-        /// Color channel from the displacement map used for Y-axis displacement.
-        y_channel: ColorChannel,
-    },
+    DisplacementMap(DisplacementMapFilter),
+
     /// Per-channel component transfer using lookup tables or functions.
     ///
     /// Applies independent transfer functions to each color channel,
     /// enabling color corrections, gamma adjustments, and custom mappings.
-    ComponentTransfer {
-        /// Transfer function applied to the red channel (None = identity).
-        red_function: Option<TransferFunction>,
-        /// Transfer function applied to the green channel (None = identity).
-        green_function: Option<TransferFunction>,
-        /// Transfer function applied to the blue channel (None = identity).
-        blue_function: Option<TransferFunction>,
-        /// Transfer function applied to the alpha channel (None = identity).
-        alpha_function: Option<TransferFunction>,
-    },
-    /// Reference an external image as filter input.
-    ///
-    /// Allows using pre-existing images (from an atlas or resource) as
-    /// input to filter operations, useful for texturing and overlays.
-    Image {
-        /// Identifier referencing an image in the resource atlas.
-        image_id: u32,
-        /// Optional 2D affine transformation matrix [a, b, c, d, e, f].
-        /// Transforms the image before using it as filter input.
-        transform: Option<[f32; 6]>,
-    },
+    ComponentTransfer(ComponentTransferFilter),
+
+    Image(ExternalImageSource),
+
     /// Tile the input to fill the filter region.
     ///
     /// Repeats the input image to fill the entire filter primitive subregion,
     /// creating a tiling/repeating pattern.
     Tile,
+
     /// Diffuse lighting simulation.
     ///
     /// Creates a lighting effect by treating the input's alpha channel as a height map
     /// and calculating diffuse (matte) reflection from a light source.
-    DiffuseLighting {
-        /// Surface scale factor for converting alpha values to heights.
-        surface_scale: f32,
-        /// Diffuse reflection constant (kd). Controls lighting intensity.
-        diffuse_constant: f32,
-        /// Kernel unit length for gradient calculations in user space.
-        kernel_unit_length: f32,
-        /// Configuration of the light source (point, distant, or spot).
-        light_source: LightSource,
-    },
+    DiffuseLighting(DiffuseLightingFilter),
+
     /// Specular lighting simulation.
     ///
     /// Creates a lighting effect by treating the input's alpha channel as a height map
     /// and calculating specular (shiny) reflection highlights from a light source.
-    SpecularLighting {
-        /// Surface scale factor for converting alpha values to heights.
-        surface_scale: f32,
-        /// Specular reflection constant (ks). Controls highlight intensity.
-        specular_constant: f32,
-        /// Specular reflection exponent. Controls highlight sharpness (higher = sharper).
-        specular_exponent: f32,
-        /// Kernel unit length for gradient calculations in user space.
-        kernel_unit_length: f32,
-        /// Configuration of the light source (point, distant, or spot).
-        light_source: LightSource,
-    },
+    SpecularLighting(SpecularLightingFilter),
 }
 
 impl FilterEffect {
@@ -433,23 +346,23 @@ impl FilterEffect {
     /// Most filters that don't sample neighboring pixels return `Rect::ZERO`.
     pub fn expansion_rect(&self) -> Rect {
         match self {
-            Self::GaussianBlur { std_deviation, .. } => {
+            Self::GaussianBlur(blur) => {
                 // Gaussian blur expands uniformly by 3*sigma (covers 99.7% of distribution)
-                let radius = (*std_deviation * 3.0) as f64;
+                let radius = (blur.std_deviation * 3.0) as f64;
                 Rect::new(-radius, -radius, radius, radius)
             }
-            Self::Offset { dx, dy } => {
+            Self::Offset(offset) => {
                 // Offset shifts pixels; expand bounds asymmetrically so shifted content isn't cut.
-                let dx = *dx as f64;
-                let dy = *dy as f64;
+                let dx = offset.x;
+                let dy = offset.y;
                 Rect::new(dx.min(0.0), dy.min(0.0), dx.max(0.0), dy.max(0.0))
             }
-            Self::DropShadow {
+            Self::DropShadow(DropShadow {
                 std_deviation,
                 dx,
                 dy,
                 ..
-            } => {
+            }) => {
                 // Drop shadow = blur + offset + composite with original
                 // The expansion rect encompasses both the blur and the offset
                 let blur_radius = (*std_deviation * 3.0) as f64;
@@ -472,11 +385,11 @@ impl FilterEffect {
 #[cfg(test)]
 mod offset_expansion_tests {
     use super::FilterEffect;
-    use kurbo::Rect;
+    use kurbo::{Rect, Vec2};
 
     #[test]
     fn offset_expands_in_direction_of_shift() {
-        let p = FilterEffect::Offset { dx: 2.5, dy: -3.0 };
+        let p = FilterEffect::Offset(Vec2 { x: 2.5, y: -3.0 });
         assert_eq!(
             p.expansion_rect(),
             Rect::new(0.0, -3.0, 2.5, 0.0),
@@ -567,53 +480,6 @@ pub enum FilterSource {
     StrokePaint,
 }
 
-/// Composite operators for combining filter inputs.
-///
-/// These are the Porter-Duff compositing operators used to combine two images.
-/// Each operator defines how the source (input 1) and destination (input 2)
-/// are combined based on their color and alpha values.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CompositeOperator {
-    /// Source over destination (standard alpha blending).
-    ///
-    /// The source is composited over the destination. This is the most common
-    /// blending mode where source alpha determines visibility.
-    Over,
-    /// Source in destination (intersection).
-    ///
-    /// The source is only visible where the destination is opaque.
-    /// Result alpha = `source_alpha` × `dest_alpha`.
-    In,
-    /// Source out destination (subtract).
-    ///
-    /// The source is only visible where the destination is transparent.
-    /// Useful for masking/cutting out regions.
-    Out,
-    /// Source atop destination.
-    ///
-    /// Source is composited over destination, but only where destination is opaque.
-    Atop,
-    /// Source XOR destination (exclusive or).
-    ///
-    /// Shows source where destination is transparent and vice versa,
-    /// but not where both are opaque.
-    Xor,
-    /// Arithmetic combination with custom coefficients.
-    ///
-    /// Custom linear combination: result = k1*src*dst + k2*src + k3*dst + k4.
-    /// Allows creating custom compositing operations beyond the standard Porter-Duff set.
-    Arithmetic {
-        /// Coefficient k1 for the (source * destination) term.
-        k1: f32,
-        /// Coefficient k2 for the source term.
-        k2: f32,
-        /// Coefficient k3 for the destination term.
-        k3: f32,
-        /// Constant offset k4 added to the result.
-        k4: f32,
-    },
-}
-
 /// Blend modes for combining colors.
 ///
 /// These are blend modes that define how to combine the colors
@@ -623,7 +489,127 @@ pub enum CompositeOperator {
 /// See: <https://drafts.fxtf.org/compositing/#blending>
 pub type BlendMode = peniko::Mix;
 
-mod morphology {
+pub mod composite {
+    /// Composite operators for combining filter inputs.
+    ///
+    /// These are the Porter-Duff compositing operators used to combine two images.
+    /// Each operator defines how the source (input 1) and destination (input 2)
+    /// are combined based on their color and alpha values.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum CompositeOperator {
+        /// Source over destination (standard alpha blending).
+        ///
+        /// The source is composited over the destination. This is the most common
+        /// blending mode where source alpha determines visibility.
+        Over,
+        /// Source in destination (intersection).
+        ///
+        /// The source is only visible where the destination is opaque.
+        /// Result alpha = `source_alpha` × `dest_alpha`.
+        In,
+        /// Source out destination (subtract).
+        ///
+        /// The source is only visible where the destination is transparent.
+        /// Useful for masking/cutting out regions.
+        Out,
+        /// Source atop destination.
+        ///
+        /// Source is composited over destination, but only where destination is opaque.
+        Atop,
+        /// Source XOR destination (exclusive or).
+        ///
+        /// Shows source where destination is transparent and vice versa,
+        /// but not where both are opaque.
+        Xor,
+
+        Arithmetic(ArithmeticCompositeOperator),
+    }
+
+    /// Arithmetic combination with custom coefficients.
+    ///
+    /// Custom linear combination: result = k1*src*dst + k2*src + k3*dst + k4.
+    /// Allows creating custom compositing operations beyond the standard Porter-Duff set.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct ArithmeticCompositeOperator {
+        pub k1: f32,
+        pub k2: f32,
+        pub k3: f32,
+        pub k4: f32,
+    }
+}
+
+mod blur {
+    use crate::filters::EdgeMode;
+
+    /// Gaussian blur filter.
+    ///
+    /// Applies a Gaussian blur using the specified standard deviation (σ).
+    /// The effective blur range (distance over which pixels are sampled) is
+    /// approximately 3 × `std_deviation`, as this captures ~99.7% of the
+    /// Gaussian distribution.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct GaussianBlurFilter {
+        /// Standard deviation for the blur kernel. Larger values create more blur.
+        /// Must be non-negative. A value of 0 means no blur.
+        ///
+        /// This directly corresponds to the σ (sigma) parameter in the Gaussian
+        /// function. The visible blur effect extends approximately 3σ in each direction.
+        ///
+        /// TODO: Per the W3C specification, this should support separate x and y values.
+        /// The spec allows `stdDeviation` to be either one number (applied to both axes)
+        /// or two numbers (first for x-axis, second for y-axis). Currently only uniform
+        /// blur is supported. Consider changing to `(f32, f32)` or a dedicated type.
+        pub std_deviation: f32,
+        /// Edge mode determining how pixels beyond the input bounds are handled.
+        pub edge_mode: EdgeMode,
+    }
+}
+
+pub mod shadow {
+    use super::EdgeMode;
+    use peniko::color::{AlphaColor, Srgb};
+
+    /// Drop shadow effect (compound primitive).
+    ///
+    /// Creates a drop shadow by blurring the input's alpha channel, offsetting it,
+    /// and compositing it with the original. This is a compound operation that
+    /// combines multiple primitive operations into one.
+    ///
+    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct DropShadow {
+        pub dx: f32,
+        pub dy: f32,
+        pub std_deviation: f32,
+        pub color: AlphaColor<Srgb>,
+        pub edge_mode: EdgeMode,
+    }
+}
+
+/// Reference an external image as filter input.
+///
+/// Allows using pre-existing images (from an atlas or resource) as
+/// input to filter operations, useful for texturing and overlays.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalImageSource {
+    pub image_id: u32,
+    pub transform: Option<[f32; 6]>,
+}
+
+pub mod morphology {
+
+    /// Morphological operations (dilate/erode).
+    ///
+    /// Expands (dilate) or contracts (erode) the shapes in the input image.
+    /// Useful for creating outline effects or cleaning up edges.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct MorphologyFilter {
+        /// Morphological operator determining whether to erode or dilate.
+        pub operator: MorphologyOperator,
+        /// Operation radius in pixels. Larger values create stronger effects.
+        pub radius: f32,
+    }
+
     /// Morphological operators for dilate/erode operations.
     ///
     /// These operators modify the shape of objects by expanding or contracting them.
@@ -643,7 +629,23 @@ mod morphology {
     }
 }
 
-mod turbulence {
+pub mod turbulence {
+    /// Generate Perlin noise/turbulence patterns.
+    ///
+    /// Creates procedural noise patterns useful for textures, clouds,
+    /// marble effects, and other organic-looking randomness.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct TurbulenceFilter {
+        /// Base frequency for noise generation. Higher values create finer detail.
+        pub base_frequency: f32,
+        /// Number of octaves for fractal noise. More octaves add finer detail.
+        pub num_octaves: u32,
+        /// Random seed for reproducible noise generation.
+        pub seed: u32,
+        /// Type of noise: smooth fractal or more chaotic turbulence.
+        pub turbulence_type: TurbulenceType,
+    }
+
     /// Types of turbulence noise generation.
     ///
     /// Determines the algorithm used for generating procedural noise patterns.
@@ -662,23 +664,57 @@ mod turbulence {
     }
 }
 
-/// Color channels for displacement mapping and channel selection.
-///
-/// Specifies which color channel to use for operations that need to
-/// extract or reference individual channels from an image.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColorChannel {
-    /// Red color channel (R component).
-    Red,
-    /// Green color channel (G component).
-    Green,
-    /// Blue color channel (B component).
-    Blue,
-    /// Alpha channel (transparency/opacity).
-    Alpha,
+pub mod displacement {
+
+    /// Displace pixels using a displacement map.
+    ///
+    /// Uses the color values from a second input to spatially displace pixels
+    /// in the primary input, creating warping and distortion effects.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct DisplacementMapFilter {
+        /// Scale factor controlling the displacement intensity.
+        pub scale: f32,
+        /// Color channel from the displacement map used for X-axis displacement.
+        pub x_channel: ColorChannel,
+        /// Color channel from the displacement map used for Y-axis displacement.
+        pub y_channel: ColorChannel,
+    }
+
+    /// Color channels for displacement mapping and channel selection.
+    ///
+    /// Specifies which color channel to use for operations that need to
+    /// extract or reference individual channels from an image.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ColorChannel {
+        /// Red color channel (R component).
+        Red,
+        /// Green color channel (G component).
+        Green,
+        /// Blue color channel (B component).
+        Blue,
+        /// Alpha channel (transparency/opacity).
+        Alpha,
+    }
 }
 
 pub mod component_transfer {
+
+    /// Per-channel component transfer using lookup tables or functions.
+    ///
+    /// Applies independent transfer functions to each color channel,
+    /// enabling color corrections, gamma adjustments, and custom mappings.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ComponentTransferFilter {
+        /// Transfer function applied to the red channel (None = identity).
+        pub red_function: Option<TransferFunction>,
+        /// Transfer function applied to the green channel (None = identity).
+        pub green_function: Option<TransferFunction>,
+        /// Transfer function applied to the blue channel (None = identity).
+        pub blue_function: Option<TransferFunction>,
+        /// Transfer function applied to the alpha channel (None = identity).
+        pub alpha_function: Option<TransferFunction>,
+    }
+
     /// Transfer functions for component transfer operations.
     ///
     /// These functions map input color channel values to output values,
@@ -688,49 +724,89 @@ pub mod component_transfer {
     pub enum TransferFunction {
         /// Identity function (output = input, no change).
         Identity,
+
         /// Table lookup with linear interpolation.
         ///
         /// Maps input values using a lookup table with linear interpolation between entries.
         /// Input 0.0 maps to values\[0\], 1.0 maps to values\[n-1\], intermediate values interpolate.
-        Table {
-            /// Lookup table values defining the transfer curve.
-            /// More values provide smoother curves. Minimum 2 values required.
-            values: Vec<f32>,
-        },
+        ///
+        /// Lookup table values defining the transfer curve.
+        /// More values provide smoother curves. Minimum 2 values required.
+        Table(Vec<f32>),
+
         /// Discrete step function (posterization).
         ///
         /// Maps input to discrete output values without interpolation, creating step/banding effects.
         /// Each segment gets a constant output value from the table.
-        Discrete {
-            /// Step values for each discrete output level.
-            /// Input range is divided into len(values) segments, each mapping to one value.
-            values: Vec<f32>,
-        },
+        ///
+        /// Step values for each discrete output level.
+        /// Input range is divided into len(values) segments, each mapping to one value.
+        Discrete(Vec<f32>),
+
         /// Linear function: output = slope × input + intercept.
-        ///
-        /// Simple linear transformation of the input value.
-        Linear {
-            /// Slope coefficient (rate of change).
-            slope: f32,
-            /// Intercept offset (constant added to result).
-            intercept: f32,
-        },
-        /// Gamma correction: output = amplitude × input^exponent + offset.
-        ///
-        /// Applies power-law transformation, commonly used for gamma correction and
-        /// adjusting midtone brightness without affecting blacks or whites.
-        Gamma {
-            /// Amplitude multiplier applied to the result.
-            amplitude: f32,
-            /// Gamma exponent (< 1 brightens, > 1 darkens midtones).
-            exponent: f32,
-            /// Offset added to the final result.
-            offset: f32,
-        },
+        Linear(Linearfunction),
+
+        // Gamma correction: output = amplitude × input^exponent + offset.
+        Gamma(Gammafunction),
+    }
+
+    /// Linear function: output = slope × input + intercept.
+    ///
+    /// Simple linear transformation of the input value.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Linearfunction {
+        pub slope: f32,
+        pub intercept: f32,
+    }
+
+    /// Gamma correction: output = amplitude × input^exponent + offset.
+    ///
+    /// Applies power-law transformation, commonly used for gamma correction and
+    /// adjusting midtone brightness without affecting blacks or whites.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Gammafunction {
+        pub amplitude: f32,
+        pub exponent: f32,
+        pub offset: f32,
     }
 }
 
 pub mod lighting {
+
+    /// Diffuse lighting simulation.
+    ///
+    /// Creates a lighting effect by treating the input's alpha channel as a height map
+    /// and calculating diffuse (matte) reflection from a light source.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct DiffuseLightingFilter {
+        /// Surface scale factor for converting alpha values to heights.
+        pub surface_scale: f32,
+        /// Diffuse reflection constant (kd). Controls lighting intensity.
+        pub diffuse_constant: f32,
+        /// Kernel unit length for gradient calculations in user space.
+        pub kernel_unit_length: f32,
+        /// Configuration of the light source (point, distant, or spot).
+        pub light_source: LightSource,
+    }
+
+    /// Specular lighting simulation.
+    ///
+    /// Creates a lighting effect by treating the input's alpha channel as a height map
+    /// and calculating specular (shiny) reflection highlights from a light source.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct SpecularLightingFilter {
+        /// Surface scale factor for converting alpha values to heights.
+        pub surface_scale: f32,
+        /// Specular reflection constant (ks). Controls highlight intensity.
+        pub specular_constant: f32,
+        /// Specular reflection exponent. Controls highlight sharpness (higher = sharper).
+        pub specular_exponent: f32,
+        /// Kernel unit length for gradient calculations in user space.
+        pub kernel_unit_length: f32,
+        /// Configuration of the light source (point, distant, or spot).
+        pub light_source: LightSource,
+    }
+
     /// Light source configurations for lighting effects.
     ///
     /// Defines different types of light sources used in diffuse and specular lighting
@@ -738,54 +814,48 @@ pub mod lighting {
     #[derive(Debug, Clone, PartialEq)]
     pub enum LightSource {
         /// Distant light source (infinitely far away, like the sun).
-        ///
-        /// All rays are parallel, creating uniform lighting across the surface.
-        /// Direction is specified using spherical coordinates (azimuth and elevation).
-        Distant {
-            /// Azimuth angle in degrees (0° = pointing right, 90° = pointing up).
-            /// Defines the horizontal direction of the light.
-            azimuth: f32,
-            /// Elevation angle in degrees (0° = horizon, 90° = directly overhead).
-            /// Defines the vertical angle of the light source.
-            elevation: f32,
-        },
+        Distant(DistantLightSource),
         /// Point light source at a specific 3D position.
-        ///
-        /// Light radiates uniformly in all directions from a single point.
-        /// Intensity decreases with distance. Like a light bulb.
-        Point {
-            /// Light source X coordinate in user space.
-            x: f32,
-            /// Light source Y coordinate in user space.
-            y: f32,
-            /// Light source Z coordinate (height above the surface).
-            /// Larger values create softer lighting across larger areas.
-            z: f32,
-        },
+        Point(PointLightSource),
         /// Spot light with position, direction, and cone angle.
-        ///
-        /// Light emanates from a point in a specific direction with limited spread.
-        /// Like a flashlight or stage spotlight with adjustable focus.
-        Spot {
-            /// Light source X coordinate in user space.
-            x: f32,
-            /// Light source Y coordinate in user space.
-            y: f32,
-            /// Light source Z coordinate (height above the surface).
-            z: f32,
-            /// X coordinate the spotlight is aimed at.
-            points_at_x: f32,
-            /// Y coordinate the spotlight is aimed at.
-            points_at_y: f32,
-            /// Z coordinate the spotlight is aimed at.
-            points_at_z: f32,
-            /// Specular exponent controlling the focus/sharpness of the spotlight beam.
-            /// Higher values create tighter, more focused beams.
-            specular_exponent: f32,
-            /// Optional cone angle in degrees limiting the spotlight spread.
-            /// If None, the light spreads based only on the specular exponent.
-            limiting_cone_angle: Option<f32>,
-        },
+        Spot(SpotLightSource),
+    }
+
+    /// Distant light source (infinitely far away, like the sun).
+    ///
+    /// All rays are parallel, creating uniform lighting across the surface.
+    /// Direction is specified using spherical coordinates (azimuth and elevation).
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct DistantLightSource {
+        pub azimuth: f32,
+        pub elevation: f32,
+    }
+
+    /// Point light source at a specific 3D position.
+    ///
+    /// Light radiates uniformly in all directions from a single point.
+    /// Intensity decreases with distance. Like a light bulb.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct PointLightSource {
+        pub x: f32,
+        pub y: f32,
+        pub z: f32,
+    }
+
+    /// Spot light with position, direction, and cone angle.
+    ///
+    /// Light emanates from a point in a specific direction with limited spread.
+    /// Like a flashlight or stage spotlight with adjustable focus.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct SpotLightSource {
+        pub x: f32,
+        pub y: f32,
+        pub z: f32,
+        pub points_at_x: f32,
+        pub points_at_y: f32,
+        pub points_at_z: f32,
+        pub specular_exponent: f32,
+        pub limiting_cone_angle: Option<f32>,
     }
 }
 
@@ -793,7 +863,7 @@ pub mod lighting {
 ///
 /// These 4x5 matrices are used with the `ColorMatrix` filter primitive.
 /// Each row transforms a color channel: [R, G, B, A, offset].
-pub mod matrices {
+pub mod color_transformation {
     /// Identity matrix (no change).
     pub const IDENTITY: [f32; 20] = [
         1.0, 0.0, 0.0, 0.0, 0.0, // Red
