@@ -332,6 +332,10 @@ pub enum FilterEffect {
     SpecularLighting(SpecularLightingFilter),
 }
 
+// Assert size of FilterEffect.
+// This is just for documentation purposes. Feel free to update the value as necessary
+const _: [u8; 128] = [0; std::mem::size_of::<FilterEffect>()];
+
 impl FilterEffect {
     /// Calculate the bounds expansion as a `Rect` in user space.
     ///
