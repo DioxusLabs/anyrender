@@ -567,67 +567,6 @@ pub enum FilterSource {
     StrokePaint,
 }
 
-/// Pre-built compound effects for common use cases.
-///
-/// These effects combine multiple filter primitives into commonly-used visual effects.
-/// They provide a convenient high-level API for complex multi-step filter operations.
-///
-/// **Note:** These are planned but not yet implemented. Use `FilterGraph` to manually
-/// construct these effects from primitives.
-#[derive(Debug, Clone)]
-pub enum CompoundFilter {
-    /// Inner shadow effect (shadow inside the shape).
-    ///
-    /// Creates a shadow that appears inside the boundaries of the shape,
-    /// giving a recessed or inset appearance. This is the opposite of a drop shadow.
-    InnerShadow {
-        /// Horizontal offset of the shadow in pixels. Positive values shift right.
-        dx: f32,
-        /// Vertical offset of the shadow in pixels. Positive values shift down.
-        dy: f32,
-        /// Blur radius for the shadow in pixels. Larger values create softer shadows.
-        blur: f32,
-        /// Shadow color with alpha channel.
-        color: AlphaColor<Srgb>,
-    },
-    /// Glow effect around the shape.
-    ///
-    /// Creates a soft glowing halo around the shape by blurring and
-    /// compositing a colored version with the original.
-    Glow {
-        /// Blur radius for the glow in pixels. Larger values create softer glows.
-        blur: f32,
-        /// Glow color with alpha channel.
-        color: AlphaColor<Srgb>,
-    },
-    /// Bevel effect (3D raised/recessed appearance).
-    ///
-    /// Creates a 3D beveled edge effect using lighting simulation,
-    /// making the shape appear raised or recessed from the surface.
-    Bevel {
-        /// Light source angle in degrees (0° = right, 90° = up).
-        angle: f32,
-        /// Width of the bevel edge in pixels.
-        distance: f32,
-        /// Color for the highlight (lit) side of the bevel.
-        highlight: AlphaColor<Srgb>,
-        /// Color for the shadow (dark) side of the bevel.
-        shadow: AlphaColor<Srgb>,
-    },
-    /// Emboss effect for a raised relief appearance.
-    ///
-    /// Creates an embossed/stamped appearance by simulating lighting
-    /// on a raised surface based on the shape's alpha channel.
-    Emboss {
-        /// Light angle in degrees determining emboss direction.
-        angle: f32,
-        /// Depth of the emboss effect.
-        depth: f32,
-        /// Overall strength/intensity of the effect (0.0 = none, 1.0 = full).
-        amount: f32,
-    },
-}
-
 /// Composite operators for combining filter inputs.
 ///
 /// These are the Porter-Duff compositing operators used to combine two images.
