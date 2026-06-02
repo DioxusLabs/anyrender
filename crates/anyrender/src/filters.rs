@@ -27,6 +27,11 @@ use kurbo::{Affine, Rect};
 use peniko::color::{AlphaColor, Srgb};
 use smallvec::SmallVec;
 
+use crate::filters::{
+    component_transfer::TransferFunction, convolution::ConvolutionKernel, lighting::LightSource,
+    morphology::MorphologyOperator, turbulence::TurbulenceType,
+};
+
 /// A directed acyclic graph (DAG) of filter operations.
 ///
 /// The graph represents a pipeline of filter primitives where outputs of some
@@ -679,63 +684,43 @@ pub enum CompositeOperator {
 /// See: <https://drafts.fxtf.org/compositing/#blending>
 pub type BlendMode = peniko::Mix;
 
-/// Morphological operators for dilate/erode operations.
-///
-/// These operators modify the shape of objects by expanding or contracting them.
-/// They work by examining neighborhoods of pixels and applying min/max operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MorphologyOperator {
-    /// Erode operation (shrink/thin shapes).
+mod morphology {
+    /// Morphological operators for dilate/erode operations.
     ///
-    /// Makes objects smaller by removing pixels at the edges. Takes the minimum
-    /// value in the neighborhood. Useful for removing noise or separating touching objects.
-    Erode,
-    /// Dilate operation (expand/thicken shapes).
-    ///
-    /// Makes objects larger by adding pixels at the edges. Takes the maximum
-    /// value in the neighborhood. Useful for filling holes or connecting nearby objects.
-    Dilate,
+    /// These operators modify the shape of objects by expanding or contracting them.
+    /// They work by examining neighborhoods of pixels and applying min/max operations.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MorphologyOperator {
+        /// Erode operation (shrink/thin shapes).
+        ///
+        /// Makes objects smaller by removing pixels at the edges. Takes the minimum
+        /// value in the neighborhood. Useful for removing noise or separating touching objects.
+        Erode,
+        /// Dilate operation (expand/thicken shapes).
+        ///
+        /// Makes objects larger by adding pixels at the edges. Takes the maximum
+        /// value in the neighborhood. Useful for filling holes or connecting nearby objects.
+        Dilate,
+    }
 }
 
-/// Convolution kernel for custom filtering operations.
-///
-/// Defines a square matrix of weights used for convolution-based image processing.
-/// The kernel is applied to each pixel by multiplying surrounding pixels by the weights,
-/// summing the results, dividing by the divisor, and adding the bias.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConvolutionKernel {
-    /// Kernel size (e.g., 3 for a 3×3 kernel, 5 for 5×5).
-    /// The kernel must be square, so this defines both width and height.
-    pub size: u32,
-    /// Kernel weight values in row-major order.
-    /// Length must equal size × size. Center of kernel is typically at (size/2, size/2).
-    pub values: Vec<f32>,
-    /// Normalization divisor applied to the convolution result.
-    /// Common practice is to use the sum of all weights for averaging, or 1.0 otherwise.
-    pub divisor: f32,
-    /// Bias value added to the result after normalization.
-    /// Useful for edge detection or emboss effects to shift the result range.
-    pub bias: f32,
-    /// Whether to preserve the alpha channel unchanged.
-    /// If true, convolution only applies to RGB; if false, it applies to RGBA.
-    pub preserve_alpha: bool,
-}
-
-/// Types of turbulence noise generation.
-///
-/// Determines the algorithm used for generating procedural noise patterns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TurbulenceType {
-    /// Fractal noise (smooth, natural-looking Perlin noise).
+mod turbulence {
+    /// Types of turbulence noise generation.
     ///
-    /// Creates smooth, continuous patterns suitable for natural textures
-    /// like clouds, marble, wood grain, or terrain.
-    FractalNoise,
-    /// Turbulence noise (more chaotic and energetic).
-    ///
-    /// Creates more chaotic patterns with sharper transitions,
-    /// suitable for fire, smoke, or turbulent effects.
-    Turbulence,
+    /// Determines the algorithm used for generating procedural noise patterns.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TurbulenceType {
+        /// Fractal noise (smooth, natural-looking Perlin noise).
+        ///
+        /// Creates smooth, continuous patterns suitable for natural textures
+        /// like clouds, marble, wood grain, or terrain.
+        FractalNoise,
+        /// Turbulence noise (more chaotic and energetic).
+        ///
+        /// Creates more chaotic patterns with sharper transitions,
+        /// suitable for fire, smoke, or turbulent effects.
+        Turbulence,
+    }
 }
 
 /// Color channels for displacement mapping and channel selection.
@@ -754,111 +739,115 @@ pub enum ColorChannel {
     Alpha,
 }
 
-/// Transfer functions for component transfer operations.
-///
-/// These functions map input color channel values to output values,
-/// enabling gamma correction, color grading, and custom color curves.
-/// Input and output values are typically in the range [0, 1].
-#[derive(Debug, Clone, PartialEq)]
-pub enum TransferFunction {
-    /// Identity function (output = input, no change).
-    Identity,
-    /// Table lookup with linear interpolation.
+pub mod component_transfer {
+    /// Transfer functions for component transfer operations.
     ///
-    /// Maps input values using a lookup table with linear interpolation between entries.
-    /// Input 0.0 maps to values\[0\], 1.0 maps to values\[n-1\], intermediate values interpolate.
-    Table {
-        /// Lookup table values defining the transfer curve.
-        /// More values provide smoother curves. Minimum 2 values required.
-        values: Vec<f32>,
-    },
-    /// Discrete step function (posterization).
-    ///
-    /// Maps input to discrete output values without interpolation, creating step/banding effects.
-    /// Each segment gets a constant output value from the table.
-    Discrete {
-        /// Step values for each discrete output level.
-        /// Input range is divided into len(values) segments, each mapping to one value.
-        values: Vec<f32>,
-    },
-    /// Linear function: output = slope × input + intercept.
-    ///
-    /// Simple linear transformation of the input value.
-    Linear {
-        /// Slope coefficient (rate of change).
-        slope: f32,
-        /// Intercept offset (constant added to result).
-        intercept: f32,
-    },
-    /// Gamma correction: output = amplitude × input^exponent + offset.
-    ///
-    /// Applies power-law transformation, commonly used for gamma correction and
-    /// adjusting midtone brightness without affecting blacks or whites.
-    Gamma {
-        /// Amplitude multiplier applied to the result.
-        amplitude: f32,
-        /// Gamma exponent (< 1 brightens, > 1 darkens midtones).
-        exponent: f32,
-        /// Offset added to the final result.
-        offset: f32,
-    },
+    /// These functions map input color channel values to output values,
+    /// enabling gamma correction, color grading, and custom color curves.
+    /// Input and output values are typically in the range [0, 1].
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum TransferFunction {
+        /// Identity function (output = input, no change).
+        Identity,
+        /// Table lookup with linear interpolation.
+        ///
+        /// Maps input values using a lookup table with linear interpolation between entries.
+        /// Input 0.0 maps to values\[0\], 1.0 maps to values\[n-1\], intermediate values interpolate.
+        Table {
+            /// Lookup table values defining the transfer curve.
+            /// More values provide smoother curves. Minimum 2 values required.
+            values: Vec<f32>,
+        },
+        /// Discrete step function (posterization).
+        ///
+        /// Maps input to discrete output values without interpolation, creating step/banding effects.
+        /// Each segment gets a constant output value from the table.
+        Discrete {
+            /// Step values for each discrete output level.
+            /// Input range is divided into len(values) segments, each mapping to one value.
+            values: Vec<f32>,
+        },
+        /// Linear function: output = slope × input + intercept.
+        ///
+        /// Simple linear transformation of the input value.
+        Linear {
+            /// Slope coefficient (rate of change).
+            slope: f32,
+            /// Intercept offset (constant added to result).
+            intercept: f32,
+        },
+        /// Gamma correction: output = amplitude × input^exponent + offset.
+        ///
+        /// Applies power-law transformation, commonly used for gamma correction and
+        /// adjusting midtone brightness without affecting blacks or whites.
+        Gamma {
+            /// Amplitude multiplier applied to the result.
+            amplitude: f32,
+            /// Gamma exponent (< 1 brightens, > 1 darkens midtones).
+            exponent: f32,
+            /// Offset added to the final result.
+            offset: f32,
+        },
+    }
 }
 
-/// Light source configurations for lighting effects.
-///
-/// Defines different types of light sources used in diffuse and specular lighting
-/// filter primitives. Each type has different characteristics and use cases.
-#[derive(Debug, Clone, PartialEq)]
-pub enum LightSource {
-    /// Distant light source (infinitely far away, like the sun).
+pub mod lighting {
+    /// Light source configurations for lighting effects.
     ///
-    /// All rays are parallel, creating uniform lighting across the surface.
-    /// Direction is specified using spherical coordinates (azimuth and elevation).
-    Distant {
-        /// Azimuth angle in degrees (0° = pointing right, 90° = pointing up).
-        /// Defines the horizontal direction of the light.
-        azimuth: f32,
-        /// Elevation angle in degrees (0° = horizon, 90° = directly overhead).
-        /// Defines the vertical angle of the light source.
-        elevation: f32,
-    },
-    /// Point light source at a specific 3D position.
-    ///
-    /// Light radiates uniformly in all directions from a single point.
-    /// Intensity decreases with distance. Like a light bulb.
-    Point {
-        /// Light source X coordinate in user space.
-        x: f32,
-        /// Light source Y coordinate in user space.
-        y: f32,
-        /// Light source Z coordinate (height above the surface).
-        /// Larger values create softer lighting across larger areas.
-        z: f32,
-    },
-    /// Spot light with position, direction, and cone angle.
-    ///
-    /// Light emanates from a point in a specific direction with limited spread.
-    /// Like a flashlight or stage spotlight with adjustable focus.
-    Spot {
-        /// Light source X coordinate in user space.
-        x: f32,
-        /// Light source Y coordinate in user space.
-        y: f32,
-        /// Light source Z coordinate (height above the surface).
-        z: f32,
-        /// X coordinate the spotlight is aimed at.
-        points_at_x: f32,
-        /// Y coordinate the spotlight is aimed at.
-        points_at_y: f32,
-        /// Z coordinate the spotlight is aimed at.
-        points_at_z: f32,
-        /// Specular exponent controlling the focus/sharpness of the spotlight beam.
-        /// Higher values create tighter, more focused beams.
-        specular_exponent: f32,
-        /// Optional cone angle in degrees limiting the spotlight spread.
-        /// If None, the light spreads based only on the specular exponent.
-        limiting_cone_angle: Option<f32>,
-    },
+    /// Defines different types of light sources used in diffuse and specular lighting
+    /// filter primitives. Each type has different characteristics and use cases.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum LightSource {
+        /// Distant light source (infinitely far away, like the sun).
+        ///
+        /// All rays are parallel, creating uniform lighting across the surface.
+        /// Direction is specified using spherical coordinates (azimuth and elevation).
+        Distant {
+            /// Azimuth angle in degrees (0° = pointing right, 90° = pointing up).
+            /// Defines the horizontal direction of the light.
+            azimuth: f32,
+            /// Elevation angle in degrees (0° = horizon, 90° = directly overhead).
+            /// Defines the vertical angle of the light source.
+            elevation: f32,
+        },
+        /// Point light source at a specific 3D position.
+        ///
+        /// Light radiates uniformly in all directions from a single point.
+        /// Intensity decreases with distance. Like a light bulb.
+        Point {
+            /// Light source X coordinate in user space.
+            x: f32,
+            /// Light source Y coordinate in user space.
+            y: f32,
+            /// Light source Z coordinate (height above the surface).
+            /// Larger values create softer lighting across larger areas.
+            z: f32,
+        },
+        /// Spot light with position, direction, and cone angle.
+        ///
+        /// Light emanates from a point in a specific direction with limited spread.
+        /// Like a flashlight or stage spotlight with adjustable focus.
+        Spot {
+            /// Light source X coordinate in user space.
+            x: f32,
+            /// Light source Y coordinate in user space.
+            y: f32,
+            /// Light source Z coordinate (height above the surface).
+            z: f32,
+            /// X coordinate the spotlight is aimed at.
+            points_at_x: f32,
+            /// Y coordinate the spotlight is aimed at.
+            points_at_y: f32,
+            /// Z coordinate the spotlight is aimed at.
+            points_at_z: f32,
+            /// Specular exponent controlling the focus/sharpness of the spotlight beam.
+            /// Higher values create tighter, more focused beams.
+            specular_exponent: f32,
+            /// Optional cone angle in degrees limiting the spotlight spread.
+            /// If None, the light spreads based only on the specular exponent.
+            limiting_cone_angle: Option<f32>,
+        },
+    }
 }
 
 /// Common color transformation matrices.
@@ -903,8 +892,31 @@ pub mod matrices {
 ///
 /// These kernels are used with the `ConvolveMatrix` filter primitive
 /// for various image processing effects. All provided kernels are 3x3.
-pub mod kernels {
-    use super::ConvolutionKernel;
+pub mod convolution {
+
+    /// Convolution kernel for custom filtering operations.
+    ///
+    /// Defines a square matrix of weights used for convolution-based image processing.
+    /// The kernel is applied to each pixel by multiplying surrounding pixels by the weights,
+    /// summing the results, dividing by the divisor, and adding the bias.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ConvolutionKernel {
+        /// Kernel size (e.g., 3 for a 3×3 kernel, 5 for 5×5).
+        /// The kernel must be square, so this defines both width and height.
+        pub size: u32,
+        /// Kernel weight values in row-major order.
+        /// Length must equal size × size. Center of kernel is typically at (size/2, size/2).
+        pub values: Vec<f32>,
+        /// Normalization divisor applied to the convolution result.
+        /// Common practice is to use the sum of all weights for averaging, or 1.0 otherwise.
+        pub divisor: f32,
+        /// Bias value added to the result after normalization.
+        /// Useful for edge detection or emboss effects to shift the result range.
+        pub bias: f32,
+        /// Whether to preserve the alpha channel unchanged.
+        /// If true, convolution only applies to RGB; if false, it applies to RGBA.
+        pub preserve_alpha: bool,
+    }
 
     /// 3x3 Gaussian blur kernel for basic smoothing.
     pub fn gaussian_3x3() -> ConvolutionKernel {
