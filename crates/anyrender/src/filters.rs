@@ -23,24 +23,34 @@
 //! - `Offset` - Translation/shift (single primitive)
 //!
 
-use std::sync::Arc;
-
 use kurbo::{Affine, Rect};
 use peniko::color::{AlphaColor, Srgb};
 use smallvec::SmallVec;
 
-/// The main filter system.
+/// A directed acyclic graph (DAG) of filter operations.
 ///
-/// A filter combines a graph of filter primitives with optional spatial bounds.
-/// If bounds are specified, the filter only applies within that region.
+/// The graph represents a pipeline of filter primitives where outputs of some
+/// primitives can be used as inputs to others. Each primitive has a unique `FilterId`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Filter {
-    /// Filter graph defining the effect pipeline.
-    graph: Arc<FilterGraph>,
+    /// All filter primitives in the graph, stored in insertion order.
+    primitives: SmallVec<[FilterEffect; 1]>,
+    /// The final output filter ID whose result is the output of this graph.
+    output: FilterId,
+    /// Accumulated bounds expansion from all primitives in the graph, cached in user space.
+    /// This is the axis-aligned bounding box of the expansion region (centered at origin),
+    /// which can be transformed to device space when needed.
+    expansion_rect: Rect,
     // TODO: Add bounds restricting where the filter applies.
     // Optional bounds restricting where the filter applies.
     // If `None`, the filter applies to the entire filtered element.
     // pub bounds: Option<Rect>,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl Filter {
@@ -49,7 +59,7 @@ impl Filter {
     /// Applies a Gaussian blur to the input image. Larger radius values
     /// produce more blur. The blur is applied equally in all directions.
     pub fn blur(radius: f32) -> Self {
-        Self::from_primitive(FilterEffect::GaussianBlur {
+        Self::single(FilterEffect::GaussianBlur {
             std_deviation: radius,
             edge_mode: EdgeMode::None,
         })
@@ -63,7 +73,7 @@ impl Filter {
     ///
     /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
     pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
-        Self::from_primitive(FilterEffect::DropShadow {
+        Self::single(FilterEffect::DropShadow {
             dx,
             dy,
             std_deviation,
@@ -72,66 +82,8 @@ impl Filter {
         })
     }
 
-    /// Create a filter system from a filter primitive.
-    ///
-    /// Creates a simple filter graph with a single primitive.
-    /// Use this for direct access to low-level SVG filter operations.
-    pub fn from_primitive(primitive: FilterEffect) -> Self {
-        Self {
-            graph: Arc::new(FilterGraph::single(primitive)),
-        }
-    }
-
-    /// Calculate the bounds expansion for this filter in pixel/device space.
-    ///
-    /// Returns a `Rect` representing how many extra pixels are needed around the
-    /// filtered region to correctly compute the filter effect. For example, a blur
-    /// filter needs to sample beyond the original bounds to avoid edge artifacts.
-    ///
-    /// The expansion accounts for the transform (rotation, scale, and shear) to compute
-    /// the correct axis-aligned bounding box expansion in device space.
-    ///
-    /// The returned rect is centered at origin:
-    /// - x0: negative left expansion (in pixels)
-    /// - y0: negative top expansion (in pixels)
-    /// - x1: positive right expansion (in pixels)
-    /// - y1: positive bottom expansion (in pixels)
-    ///
-    /// # Arguments
-    /// * `transform` - The transform applied to this filter layer
-    pub fn bounds_expansion(&self, transform: &Affine) -> Rect {
-        let [a, b, c, d, _e, _f] = transform.as_coeffs();
-        let linear_only = Affine::new([a, b, c, d, 0.0, 0.0]);
-
-        self.graph.bounds_expansion(&linear_only)
-    }
-}
-
-/// A directed acyclic graph (DAG) of filter operations.
-///
-/// The graph represents a pipeline of filter primitives where outputs of some
-/// primitives can be used as inputs to others. Each primitive has a unique `FilterId`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FilterGraph {
-    /// All filter primitives in the graph, stored in insertion order.
-    pub primitives: SmallVec<[FilterEffect; 1]>,
-    /// The final output filter ID whose result is the output of this graph.
-    pub output: FilterId,
-    /// Accumulated bounds expansion from all primitives in the graph, cached in user space.
-    /// This is the axis-aligned bounding box of the expansion region (centered at origin),
-    /// which can be transformed to device space when needed.
-    expansion_rect: Rect,
-}
-
-impl Default for FilterGraph {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FilterGraph {
     /// Create a new empty filter graph.
-    pub fn new() -> Self {
+    pub fn empty() -> Self {
         Self {
             primitives: SmallVec::new(),
             output: FilterId(0),
@@ -139,9 +91,12 @@ impl FilterGraph {
         }
     }
 
-    /// Create a new filter graph containing a single filter with no inputs
+    /// Create a filter from a single filter effect.
+    ///
+    /// Creates a simple filter graph with a single primitive.
+    /// Use this for direct access to low-level SVG filter operations.
     pub fn single(primitive: FilterEffect) -> Self {
-        let mut graph = Self::new();
+        let mut graph = Self::empty();
         let filter_id = graph.add(primitive, None);
         graph.set_output(filter_id);
         graph
@@ -163,9 +118,43 @@ impl FilterGraph {
         id
     }
 
+    /// The list of primitives in the graph
+    pub fn primitives(&mut self) -> &[FilterEffect] {
+        &self.primitives
+    }
+
+    /// The output filter for the graph.
+    pub fn output(&mut self) -> FilterId {
+        self.output
+    }
+
     /// Set the output filter for the graph.
-    pub fn set_output(&mut self, output: FilterId) {
+    fn set_output(&mut self, output: FilterId) {
         self.output = output;
+    }
+
+    /// Calculate the bounds expansion for this filter in pixel/device space.
+    ///
+    /// Returns a `Rect` representing how many extra pixels are needed around the
+    /// filtered region to correctly compute the filter effect. For example, a blur
+    /// filter needs to sample beyond the original bounds to avoid edge artifacts.
+    ///
+    /// The expansion accounts for the transform (rotation, scale, and shear) to compute
+    /// the correct axis-aligned bounding box expansion in device space.
+    ///
+    /// The returned rect is centered at origin:
+    /// - x0: negative left expansion (in pixels)
+    /// - y0: negative top expansion (in pixels)
+    /// - x1: positive right expansion (in pixels)
+    /// - y1: positive bottom expansion (in pixels)
+    ///
+    /// # Arguments
+    /// * `transform` - The transform applied to this filter layer
+    pub fn linear_bounds_expansion(&self, transform: &Affine) -> Rect {
+        let [a, b, c, d, _e, _f] = transform.as_coeffs();
+        let linear_only = Affine::new([a, b, c, d, 0.0, 0.0]);
+
+        self.bounds_expansion(&linear_only)
     }
 
     /// Get the accumulated bounds expansion for all primitives in this graph.
