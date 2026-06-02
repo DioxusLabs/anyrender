@@ -43,6 +43,7 @@ use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
+pub mod filters;
 pub mod wasm_send_sync;
 pub use wasm_send_sync::*;
 pub mod types;

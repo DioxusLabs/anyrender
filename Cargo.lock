@@ -159,6 +159,7 @@ dependencies = [
  "peniko",
  "raw-window-handle",
  "serde",
+ "smallvec",
 ]
 
 [[package]]

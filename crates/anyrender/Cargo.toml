@@ -23,3 +23,4 @@ raw-window-handle = { workspace = true }
 
 # Serde
 serde = { workspace = true, features = ["derive"], optional = true }
+smallvec = "1.15.1"
