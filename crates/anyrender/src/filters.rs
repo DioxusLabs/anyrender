@@ -69,21 +69,32 @@ pub struct Filter {
 }
 
 impl Filter {
-    /// Create a simple filter system from a filter function.
+    /// Gaussian blur effect.
     ///
-    /// Converts a high-level CSS-style filter function into a filter graph.
-    /// Use this for simple effects like blur, brightness, etc.
-    pub fn from_function(function: FilterFunction) -> Self {
-        // Convert function to primitive
-        let primitive = match function {
-            FilterFunction::Blur { radius } => FilterPrimitive::GaussianBlur {
-                std_deviation: radius,
-                edge_mode: EdgeMode::default(),
-            },
-            _ => unimplemented!("Filter function {:?} not supported", function),
-        };
+    /// Applies a Gaussian blur to the input image. Larger radius values
+    /// produce more blur. The blur is applied equally in all directions.
+    pub fn blur(radius: f32) -> Self {
+        Self::from_primitive(FilterPrimitive::GaussianBlur {
+            std_deviation: radius,
+            edge_mode: EdgeMode::None,
+        })
+    }
 
-        Self::from_primitive(primitive)
+    /// Drop shadow effect (compound primitive).
+    ///
+    /// Creates a drop shadow by blurring the input's alpha channel, offsetting it,
+    /// and compositing it with the original. This is a compound operation that
+    /// combines multiple primitive operations into one.
+    ///
+    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
+        Self::from_primitive(FilterPrimitive::DropShadow {
+            dx,
+            dy,
+            std_deviation,
+            color,
+            edge_mode: EdgeMode::None,
+        })
     }
 
     /// Create a filter system from a filter primitive.
@@ -91,12 +102,8 @@ impl Filter {
     /// Creates a simple filter graph with a single primitive.
     /// Use this for direct access to low-level SVG filter operations.
     pub fn from_primitive(primitive: FilterPrimitive) -> Self {
-        let mut graph = FilterGraph::new();
-        let filter_id = graph.add(primitive, None);
-        graph.set_output(filter_id);
-
         Self {
-            graph: Arc::new(graph),
+            graph: Arc::new(FilterGraph::single(primitive)),
         }
     }
 
@@ -157,6 +164,14 @@ impl FilterGraph {
         }
     }
 
+    /// Create a new filter graph containing a single filter with no inputs
+    pub fn single(primitive: FilterPrimitive) -> Self {
+        let mut graph = Self::new();
+        let filter_id = graph.add(primitive, None);
+        graph.set_output(filter_id);
+        graph
+    }
+
     /// Add a filter primitive with optional inputs.
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
@@ -193,117 +208,6 @@ impl FilterGraph {
         // transform_rect_bbox computes the axis-aligned bounding box of the transformed rect
         transform.transform_rect_bbox(self.expansion_rect)
     }
-}
-
-/// All possible filter effects.
-///
-/// This enum allows choosing between high-level filter functions (simple CSS-style effects)
-/// and low-level filter primitives (complex SVG-style effects with full control).
-/// Use `FilterFunction` for common effects like blur, and `FilterPrimitive` for
-/// advanced composition and custom filter graphs.
-#[derive(Debug, Clone)]
-pub enum FilterEffect {
-    /// Simple, high-level filter functions.
-    Function(FilterFunction),
-    /// Low-level filter primitives (granular control).
-    Primitive(FilterPrimitive),
-}
-
-/// High-level filter functions for common effects (CSS filter functions).
-///
-/// These match the CSS Filter Effects specification and provide simple,
-/// commonly-used visual effects without needing to construct a filter graph.
-///
-/// See: <https://drafts.fxtf.org/filter-effects/#filter-functions>
-#[derive(Debug, Clone)]
-pub enum FilterFunction {
-    /// Gaussian blur effect.
-    ///
-    /// Applies a Gaussian blur to the input image. Larger radius values
-    /// produce more blur. The blur is applied equally in all directions.
-    ///
-    /// Note: Per the W3C Filter Effects specification, this `radius` parameter
-    /// represents the standard deviation (σ) of the Gaussian function, not the
-    /// effective blur range. The effective blur range is approximately 3× this value.
-    Blur {
-        /// Standard deviation of the Gaussian blur in pixels. Must be non-negative.
-        /// A value of 0 means no blur.
-        ///
-        /// Despite being called "radius" (to match CSS filter syntax), this is
-        /// actually the standard deviation. The visible blur effect extends
-        /// approximately 3 times this value in each direction.
-        radius: f32,
-    },
-    //
-    // ============================================================
-    // TODO: The following filter functions are not yet implemented
-    // ============================================================
-    //
-    /// Brightness adjustment.
-    ///
-    /// Adjusts the brightness of the input image using a linear multiplier.
-    Brightness {
-        /// Brightness amount: 0.0 = completely black, 1.0 = no change, >1.0 = brighter.
-        /// Must be non-negative.
-        amount: f32,
-    },
-    /// Contrast adjustment.
-    ///
-    /// Adjusts the contrast of the input image.
-    Contrast {
-        /// Contrast amount: 0.0 = uniform gray, 1.0 = no change, >1.0 = higher contrast.
-        /// Must be non-negative.
-        amount: f32,
-    },
-    /// Grayscale conversion.
-    ///
-    /// Converts the input to grayscale. Amount controls the strength of the conversion.
-    Grayscale {
-        /// Grayscale amount: 0.0 = original colors, 1.0 = full grayscale.
-        /// Values should be in range [0.0, 1.0].
-        amount: f32,
-    },
-    /// Hue rotation.
-    ///
-    /// Rotates the hue of all colors in the input image by the specified angle.
-    HueRotate {
-        /// Rotation angle in degrees. Can be negative.
-        /// 0° = no change, 180° = opposite hue, 360° = back to original.
-        angle: f32,
-    },
-    /// Color inversion.
-    ///
-    /// Inverts the colors of the input image.
-    Invert {
-        /// Inversion amount: 0.0 = original colors, 1.0 = fully inverted.
-        /// Values should be in range [0.0, 1.0].
-        amount: f32,
-    },
-    /// Opacity adjustment.
-    ///
-    /// Multiplies the alpha channel by the specified amount.
-    Opacity {
-        /// Opacity amount: 0.0 = fully transparent, 1.0 = no change.
-        /// Values should be in range [0.0, 1.0].
-        amount: f32,
-    },
-    /// Saturation adjustment.
-    ///
-    /// Adjusts the color saturation of the input image.
-    Saturate {
-        /// Saturation amount: 0.0 = completely desaturated (grayscale),
-        /// 1.0 = no change, >1.0 = oversaturated.
-        /// Must be non-negative.
-        amount: f32,
-    },
-    /// Sepia tone effect.
-    ///
-    /// Applies a sepia tone effect (vintage/old photo appearance).
-    Sepia {
-        /// Sepia amount: 0.0 = original colors, 1.0 = full sepia tone.
-        /// Values should be in range [0.0, 1.0].
-        amount: f32,
-    },
 }
 
 /// Edge mode for filter operations.
