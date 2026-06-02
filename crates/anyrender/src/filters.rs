@@ -28,6 +28,7 @@ use smallvec::SmallVec;
 
 use self::{
     blur::GaussianBlurFilter,
+    color_transformation::ColorMatrix,
     component_transfer::ComponentTransferFilter,
     composite::CompositeOperator,
     convolution::ConvolutionKernel,
@@ -377,7 +378,7 @@ pub enum FilterEffect {
     ///
     /// 4x5 color transformation matrix: 4 rows (R,G,B,A) × 5 columns (R,G,B,A,offset).
     /// Each output channel is computed as a linear combination of input channels plus offset.
-    ColorMatrix([f32; 20]),
+    ColorMatrix(ColorMatrix),
 
     /// Geometric offset/translation.
     ///
@@ -770,6 +771,58 @@ pub mod component_transfer {
         pub alpha_function: Option<TransferFunction>,
     }
 
+    impl ComponentTransferFilter {
+        /// Component transfer filter for the CSS opacity() filter
+        pub fn opacity(amount: f32) -> Self {
+            let func = TransferFunction::Table(SmallVec::from([0.0, amount]));
+            Self {
+                red_function: None,
+                green_function: None,
+                blue_function: None,
+                alpha_function: Some(func),
+            }
+        }
+
+        /// Component transfer filter for the CSS invert() filter
+        pub fn invert(amount: f32) -> Self {
+            let func = TransferFunction::Table(SmallVec::from([amount, 1.0 - amount]));
+            Self {
+                red_function: Some(func.clone()),
+                green_function: Some(func.clone()),
+                blue_function: Some(func.clone()),
+                alpha_function: None,
+            }
+        }
+
+        /// Component transfer filter for the CSS brightness() filter
+        pub fn brightness(amount: f32) -> Self {
+            let func = TransferFunction::Linear(LinearTransferFunction {
+                slope: amount,
+                intercept: 0.0,
+            });
+            Self {
+                red_function: Some(func.clone()),
+                green_function: Some(func.clone()),
+                blue_function: Some(func.clone()),
+                alpha_function: None,
+            }
+        }
+
+        /// Component transfer filter for the CSS contrast() filter
+        pub fn contrast(amount: f32) -> Self {
+            let func = TransferFunction::Linear(LinearTransferFunction {
+                slope: amount,
+                intercept: -(0.5 * amount) + 0.5,
+            });
+            Self {
+                red_function: Some(func.clone()),
+                green_function: Some(func.clone()),
+                blue_function: Some(func.clone()),
+                alpha_function: None,
+            }
+        }
+    }
+
     /// Transfer functions for component transfer operations.
     ///
     /// These functions map input color channel values to output values,
@@ -928,37 +981,48 @@ pub mod lighting {
 /// These 4x5 matrices are used with the `ColorMatrix` filter primitive.
 /// Each row transforms a color channel: [R, G, B, A, offset].
 pub mod color_transformation {
-    /// Identity matrix (no change).
-    pub const IDENTITY: [f32; 20] = [
-        1.0, 0.0, 0.0, 0.0, 0.0, // Red
-        0.0, 1.0, 0.0, 0.0, 0.0, // Green
-        0.0, 0.0, 1.0, 0.0, 0.0, // Blue
-        0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
-    ];
 
-    /// Extract alpha channel to RGB (for shadow effects).
-    pub const ALPHA_TO_BLACK: [f32; 20] = [
-        0.0, 0.0, 0.0, 1.0, 0.0, // Red = Alpha
-        0.0, 0.0, 0.0, 1.0, 0.0, // Green = Alpha
-        0.0, 0.0, 0.0, 1.0, 0.0, // Blue = Alpha
-        0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
-    ];
+    /// Matrix-based color transformation.
+    ///
+    /// 4x5 color transformation matrix: 4 rows (R,G,B,A) × 5 columns (R,G,B,A,offset).
+    /// Each output channel is computed as a linear combination of input channels plus offset.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct ColorMatrix(pub [f32; 20]);
 
-    /// Grayscale conversion matrix using luminosity weights.
-    pub const GRAYSCALE: [f32; 20] = [
-        0.2126, 0.7152, 0.0722, 0.0, 0.0, // Red
-        0.2126, 0.7152, 0.0722, 0.0, 0.0, // Green
-        0.2126, 0.7152, 0.0722, 0.0, 0.0, // Blue
-        0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
-    ];
+    impl ColorMatrix {
+        /// Identity matrix (no change).
+        pub const IDENTITY: Self = Self([
+            1.0, 0.0, 0.0, 0.0, 0.0, // Red
+            0.0, 1.0, 0.0, 0.0, 0.0, // Green
+            0.0, 0.0, 1.0, 0.0, 0.0, // Blue
+            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+        ]);
 
-    /// Sepia tone matrix for vintage photo effect.
-    pub const SEPIA: [f32; 20] = [
-        0.393, 0.769, 0.189, 0.0, 0.0, // Red
-        0.349, 0.686, 0.168, 0.0, 0.0, // Green
-        0.272, 0.534, 0.131, 0.0, 0.0, // Blue
-        0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
-    ];
+        /// Extract alpha channel to RGB (for shadow effects).
+        pub const ALPHA_TO_BLACK: Self = Self([
+            0.0, 0.0, 0.0, 1.0, 0.0, // Red = Alpha
+            0.0, 0.0, 0.0, 1.0, 0.0, // Green = Alpha
+            0.0, 0.0, 0.0, 1.0, 0.0, // Blue = Alpha
+            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
+        ]);
+
+        /// Grayscale conversion matrix using luminosity weights.
+        pub const GRAYSCALE: Self = Self([
+            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Red
+            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Green
+            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Blue
+            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+        ]);
+
+        /// Sepia tone matrix for vintage photo effect.
+        pub const SEPIA: Self = Self([
+            0.393, 0.769, 0.189, 0.0, 0.0, // Red
+            0.349, 0.686, 0.168, 0.0, 0.0, // Green
+            0.272, 0.534, 0.131, 0.0, 0.0, // Blue
+            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+        ]);
+    }
 }
 
 /// Common convolution kernels.
