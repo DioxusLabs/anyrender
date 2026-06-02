@@ -1,4 +1,6 @@
-use anyrender::{PaintScene, RenderContext};
+use std::sync::Arc;
+
+use anyrender::{Filter, PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
@@ -411,6 +413,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         alpha: f32,
         transform: kurbo::Affine,
         clip: &impl kurbo::Shape,
+        _filter: Option<Arc<Filter>>,
+        _backdrop_filter: Option<Arc<Filter>>,
     ) {
         let blend: peniko::BlendMode = blend.into();
 

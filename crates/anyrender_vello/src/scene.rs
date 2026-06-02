@@ -1,4 +1,6 @@
-use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
+use std::sync::Arc;
+
+use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
@@ -70,6 +72,8 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
+        _filter: Option<Arc<Filter>>,
+        _backdrop_filter: Option<Arc<Filter>>,
     ) {
         self.inner
             .push_layer(Fill::NonZero, blend, alpha, transform, clip);

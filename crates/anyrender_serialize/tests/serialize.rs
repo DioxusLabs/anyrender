@@ -30,6 +30,8 @@ fn test_all_command_types_roundtrip() {
         0.75,
         Affine::translate((5.0, 5.0)),
         &Rect::new(0.0, 0.0, 500.0, 500.0),
+        None,
+        None,
     );
 
     // Fill (NonZero)
@@ -85,6 +87,8 @@ fn test_all_command_types_roundtrip() {
         1.0,
         Affine::IDENTITY,
         &Rect::new(0.0, 0.0, 500.0, 500.0),
+        None,
+        None,
     );
     scene.fill(
         Fill::NonZero,

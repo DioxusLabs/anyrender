@@ -1,6 +1,6 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use crate::{Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -102,6 +102,8 @@ impl PaintScene for NullScenePainter {
         _alpha: f32,
         _transform: kurbo::Affine,
         _clip: &impl kurbo::Shape,
+        _filter: Option<Arc<Filter>>,
+        _backdrop_filter: Option<Arc<Filter>>,
     ) {
     }
 

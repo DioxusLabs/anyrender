@@ -44,6 +44,7 @@ use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
 pub mod filters;
+pub use filters::Filter;
 pub mod wasm_send_sync;
 pub use wasm_send_sync::*;
 pub mod types;
@@ -192,6 +193,8 @@ pub trait PaintScene: RenderContext {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
+        filter: Option<Arc<Filter>>,
+        backdrop_filter: Option<Arc<Filter>>,
     );
 
     /// Pushes a new clip layer clipped by the specified shape.
@@ -260,6 +263,8 @@ pub trait PaintScene: RenderContext {
                     cmd.alpha,
                     scene_transform * cmd.transform,
                     &cmd.clip,
+                    cmd.filter,
+                    cmd.backdrop_filter,
                 ),
                 RenderCommand::PushClipLayer(cmd) => {
                     self.push_clip_layer(scene_transform * cmd.transform, &cmd.clip)

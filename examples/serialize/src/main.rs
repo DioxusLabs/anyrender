@@ -107,6 +107,8 @@ fn create_demo_scene() -> Scene {
         0.8,
         Affine::IDENTITY,
         &Rect::new(0.0, 0.0, WIDTH as f64, HEIGHT as f64),
+        None,
+        None,
     );
 
     // Red circle

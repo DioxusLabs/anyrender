@@ -1,4 +1,6 @@
-use crate::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use std::sync::Arc;
+
+use crate::{Filter, Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
 
@@ -58,6 +60,8 @@ pub struct LayerCommand {
     pub transform: Affine,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
+    pub filter: Option<Arc<Filter>>,
+    pub backdrop_filter: Option<Arc<Filter>>,
 }
 
 /// Pushes a new clip layer clipped by the specified shape.
@@ -178,6 +182,8 @@ impl PaintScene for Scene {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
+        filter: Option<Arc<Filter>>,
+        backdrop_filter: Option<Arc<Filter>>,
     ) {
         let blend = blend.into();
         let clip = clip.into_path(self.tolerance);
@@ -186,6 +192,8 @@ impl PaintScene for Scene {
             alpha,
             transform,
             clip,
+            filter,
+            backdrop_filter,
         };
         self.commands.push(RenderCommand::PushLayer(layer));
     }

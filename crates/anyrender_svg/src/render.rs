@@ -39,6 +39,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             alpha,
                             global_transform * transform,
                             &local_path,
+                            None,
+                            None,
                         );
 
                         true
@@ -60,6 +62,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             alpha,
                             global_transform * transform,
                             &rect,
+                            None,
+                            None,
                         );
 
                         true

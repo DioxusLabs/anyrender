@@ -1,4 +1,6 @@
-use anyrender::{NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
+use std::sync::Arc;
+
+use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
@@ -176,6 +178,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
+        _filter: Option<Arc<Filter>>,
+        _backdrop_filter: Option<Arc<Filter>>,
     ) {
         self.scene.set_transform(transform);
         self.layer_stack.push(LayerKind::Layer);

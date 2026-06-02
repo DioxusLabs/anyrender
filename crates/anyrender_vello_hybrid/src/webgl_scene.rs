@@ -107,6 +107,8 @@ impl PaintScene for WebGlScenePainter<'_> {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
+        _filter: Option<Arc<Filter>>,
+        _backdrop_filter: Option<Arc<Filter>>,
     ) {
         self.scene.set_transform(transform);
         self.layer_stack.push(LayerKind::Layer);
