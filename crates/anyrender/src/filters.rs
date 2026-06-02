@@ -49,7 +49,7 @@ impl Filter {
     /// Applies a Gaussian blur to the input image. Larger radius values
     /// produce more blur. The blur is applied equally in all directions.
     pub fn blur(radius: f32) -> Self {
-        Self::from_primitive(FilterPrimitive::GaussianBlur {
+        Self::from_primitive(FilterEffect::GaussianBlur {
             std_deviation: radius,
             edge_mode: EdgeMode::None,
         })
@@ -63,7 +63,7 @@ impl Filter {
     ///
     /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
     pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
-        Self::from_primitive(FilterPrimitive::DropShadow {
+        Self::from_primitive(FilterEffect::DropShadow {
             dx,
             dy,
             std_deviation,
@@ -76,7 +76,7 @@ impl Filter {
     ///
     /// Creates a simple filter graph with a single primitive.
     /// Use this for direct access to low-level SVG filter operations.
-    pub fn from_primitive(primitive: FilterPrimitive) -> Self {
+    pub fn from_primitive(primitive: FilterEffect) -> Self {
         Self {
             graph: Arc::new(FilterGraph::single(primitive)),
         }
@@ -114,7 +114,7 @@ impl Filter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterGraph {
     /// All filter primitives in the graph, stored in insertion order.
-    pub primitives: SmallVec<[FilterPrimitive; 1]>,
+    pub primitives: SmallVec<[FilterEffect; 1]>,
     /// The final output filter ID whose result is the output of this graph.
     pub output: FilterId,
     /// Accumulated bounds expansion from all primitives in the graph, cached in user space.
@@ -140,7 +140,7 @@ impl FilterGraph {
     }
 
     /// Create a new filter graph containing a single filter with no inputs
-    pub fn single(primitive: FilterPrimitive) -> Self {
+    pub fn single(primitive: FilterEffect) -> Self {
         let mut graph = Self::new();
         let filter_id = graph.add(primitive, None);
         graph.set_output(filter_id);
@@ -151,7 +151,7 @@ impl FilterGraph {
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
-    pub fn add(&mut self, primitive: FilterPrimitive, _inputs: Option<FilterInputs>) -> FilterId {
+    pub fn add(&mut self, primitive: FilterEffect, _inputs: Option<FilterInputs>) -> FilterId {
         let id = FilterId(self.primitives.len() as u16);
 
         // Update accumulated expansion by taking the union of rects
@@ -225,7 +225,7 @@ pub enum EdgeMode {
 ///
 /// See: <https://drafts.fxtf.org/filter-effects/#FilterPrimitivesOverview>
 #[derive(Debug, Clone, PartialEq)]
-pub enum FilterPrimitive {
+pub enum FilterEffect {
     /// Generate a solid color fill.
     ///
     /// Creates a rectangle filled with the specified color, typically used as
@@ -422,7 +422,7 @@ pub enum FilterPrimitive {
     },
 }
 
-impl FilterPrimitive {
+impl FilterEffect {
     /// Calculate the bounds expansion as a `Rect` in user space.
     ///
     /// Returns a rectangle centered at the origin representing how much the filter
@@ -477,12 +477,12 @@ impl FilterPrimitive {
 
 #[cfg(test)]
 mod offset_expansion_tests {
-    use super::FilterPrimitive;
+    use super::FilterEffect;
     use kurbo::Rect;
 
     #[test]
     fn offset_expands_in_direction_of_shift() {
-        let p = FilterPrimitive::Offset { dx: 2.5, dy: -3.0 };
+        let p = FilterEffect::Offset { dx: 2.5, dy: -3.0 };
         assert_eq!(
             p.expansion_rect(),
             Rect::new(0.0, -3.0, 2.5, 0.0),
