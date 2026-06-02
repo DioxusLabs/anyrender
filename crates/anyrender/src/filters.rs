@@ -50,8 +50,8 @@
 
 use std::sync::Arc;
 
-use peniko::color::{AlphaColor, Srgb};
 use kurbo::{Affine, Rect};
+use peniko::color::{AlphaColor, Srgb};
 use smallvec::SmallVec;
 
 /// The main filter system.
@@ -135,8 +135,6 @@ pub struct FilterGraph {
     pub primitives: SmallVec<[FilterPrimitive; 1]>,
     /// The final output filter ID whose result is the output of this graph.
     pub output: FilterId,
-    /// Next available filter ID (monotonically increasing counter).
-    next_id: u16,
     /// Accumulated bounds expansion from all primitives in the graph, cached in user space.
     /// This is the axis-aligned bounding box of the expansion region (centered at origin),
     /// which can be transformed to device space when needed.
@@ -155,7 +153,6 @@ impl FilterGraph {
         Self {
             primitives: SmallVec::new(),
             output: FilterId(0),
-            next_id: 0,
             expansion_rect: Rect::ZERO,
         }
     }
@@ -165,8 +162,7 @@ impl FilterGraph {
     /// Returns a `FilterId` that can be referenced by other primitives.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
     pub fn add(&mut self, primitive: FilterPrimitive, _inputs: Option<FilterInputs>) -> FilterId {
-        let id = FilterId(self.next_id);
-        self.next_id += 1;
+        let id = FilterId(self.primitives.len() as u16);
 
         // Update accumulated expansion by taking the union of rects
         let primitive_rect = primitive.expansion_rect();
