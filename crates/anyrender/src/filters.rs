@@ -11,7 +11,7 @@
 //!
 //! ## Implementation Status
 //!
-//! ### ✅ Implemented
+//! ### Implemented
 //!
 //! **Filter Functions:**
 //! - `Blur` - Gaussian blur effect
@@ -22,31 +22,6 @@
 //! - `DropShadow` - Drop shadow effect (compound primitive)
 //! - `Offset` - Translation/shift (single primitive)
 //!
-//! **Note:** Currently only single primitive filters are supported. Filter graphs with
-//! multiple connected primitives are not yet implemented.
-//!
-//! ### 🚧 Not Yet Implemented
-//!
-//! **Core Features:**
-//! - `FilterGraph` execution - Chaining multiple filter primitives together
-//! - `FilterInputs` - Connecting primitives to create complex effects
-//!
-//! **Filter Functions:**
-//! - `Brightness`, `Contrast`, `Grayscale`, `HueRotate`, `Invert`,
-//!   `Opacity`, `Saturate`, `Sepia`
-//!
-//! **Filter Primitives:**
-//! - `ColorMatrix` - Matrix-based color transformation
-//! - `Composite` - Porter-Duff compositing operations
-//! - `Blend` - Blend mode operations
-//! - `Morphology` - Dilate/erode operations
-//! - `ConvolveMatrix` - Custom convolution kernels
-//! - `Turbulence` - Perlin noise generation
-//! - `DisplacementMap` - Pixel displacement
-//! - `ComponentTransfer` - Per-channel transfer functions
-//! - `Image` - External image reference
-//! - `Tile` - Tiling operation
-//! - `DiffuseLighting`, `SpecularLighting` - Lighting effects
 
 use std::sync::Arc;
 
