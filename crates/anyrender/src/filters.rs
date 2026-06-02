@@ -44,6 +44,7 @@ use self::{
 /// The graph represents a pipeline of filter primitives where outputs of some
 /// primitives can be used as inputs to others. Each primitive has a unique `FilterId`.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Filter {
     /// All filter primitives in the graph, stored in insertion order.
     primitives: SmallVec<[FilterEffect; 1]>,
@@ -194,6 +195,7 @@ impl Filter {
 ///
 /// See: <https://drafts.fxtf.org/filter-effects/#element-attrdef-filter-primitive-edgemode>
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EdgeMode {
     /// Extend by duplicating edge pixels (clamp to edge).
     ///
@@ -226,6 +228,7 @@ pub enum EdgeMode {
 ///
 /// See: <https://drafts.fxtf.org/filter-effects/#FilterPrimitivesOverview>
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FilterEffect {
     /// Generate a solid color fill.
     ///
@@ -400,10 +403,12 @@ mod offset_expansion_tests {
 
 /// Unique identifier for a filter primitive in the graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FilterId(pub u16);
 
 /// Input connections for a filter primitive.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FilterInputs {
     /// Primary input ("in" attribute in SVG).
     pub primary: FilterInput,
@@ -435,6 +440,7 @@ impl FilterInputs {
 
 /// A single filter input.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FilterInput {
     /// Input from a source (`SourceGraphic`, `SourceAlpha`, etc.).
     Source(FilterSource),
@@ -448,6 +454,7 @@ pub enum FilterInput {
 /// matching the SVG filter primitive input types. These represent implicit
 /// inputs available to any filter primitive without requiring previous operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FilterSource {
     /// The original graphic content being filtered.
     ///
@@ -496,6 +503,7 @@ pub mod composite {
     /// Each operator defines how the source (input 1) and destination (input 2)
     /// are combined based on their color and alpha values.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum CompositeOperator {
         /// Source over destination (standard alpha blending).
         ///
@@ -530,6 +538,7 @@ pub mod composite {
     /// Custom linear combination: result = k1*src*dst + k2*src + k3*dst + k4.
     /// Allows creating custom compositing operations beyond the standard Porter-Duff set.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ArithmeticCompositeOperator {
         pub k1: f32,
         pub k2: f32,
@@ -548,6 +557,7 @@ mod blur {
     /// approximately 3 × `std_deviation`, as this captures ~99.7% of the
     /// Gaussian distribution.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct GaussianBlurFilter {
         /// Standard deviation for the blur kernel. Larger values create more blur.
         /// Must be non-negative. A value of 0 means no blur.
@@ -577,6 +587,7 @@ pub mod shadow {
     ///
     /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct DropShadow {
         pub dx: f32,
         pub dy: f32,
@@ -591,6 +602,7 @@ pub mod shadow {
 /// Allows using pre-existing images (from an atlas or resource) as
 /// input to filter operations, useful for texturing and overlays.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExternalImageSource {
     pub image_id: u32,
     pub transform: Option<[f32; 6]>,
@@ -603,6 +615,7 @@ pub mod morphology {
     /// Expands (dilate) or contracts (erode) the shapes in the input image.
     /// Useful for creating outline effects or cleaning up edges.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct MorphologyFilter {
         /// Morphological operator determining whether to erode or dilate.
         pub operator: MorphologyOperator,
@@ -615,6 +628,7 @@ pub mod morphology {
     /// These operators modify the shape of objects by expanding or contracting them.
     /// They work by examining neighborhoods of pixels and applying min/max operations.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum MorphologyOperator {
         /// Erode operation (shrink/thin shapes).
         ///
@@ -635,6 +649,7 @@ pub mod turbulence {
     /// Creates procedural noise patterns useful for textures, clouds,
     /// marble effects, and other organic-looking randomness.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TurbulenceFilter {
         /// Base frequency for noise generation. Higher values create finer detail.
         pub base_frequency: f32,
@@ -650,6 +665,7 @@ pub mod turbulence {
     ///
     /// Determines the algorithm used for generating procedural noise patterns.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum TurbulenceType {
         /// Fractal noise (smooth, natural-looking Perlin noise).
         ///
@@ -671,6 +687,7 @@ pub mod displacement {
     /// Uses the color values from a second input to spatially displace pixels
     /// in the primary input, creating warping and distortion effects.
     #[derive(Debug, Clone, Copy, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct DisplacementMapFilter {
         /// Scale factor controlling the displacement intensity.
         pub scale: f32,
@@ -685,6 +702,7 @@ pub mod displacement {
     /// Specifies which color channel to use for operations that need to
     /// extract or reference individual channels from an image.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum ColorChannel {
         /// Red color channel (R component).
         Red,
@@ -704,6 +722,7 @@ pub mod component_transfer {
     /// Applies independent transfer functions to each color channel,
     /// enabling color corrections, gamma adjustments, and custom mappings.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ComponentTransferFilter {
         /// Transfer function applied to the red channel (None = identity).
         pub red_function: Option<TransferFunction>,
@@ -721,6 +740,7 @@ pub mod component_transfer {
     /// enabling gamma correction, color grading, and custom color curves.
     /// Input and output values are typically in the range [0, 1].
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum TransferFunction {
         /// Identity function (output = input, no change).
         Identity,
@@ -754,6 +774,7 @@ pub mod component_transfer {
     ///
     /// Simple linear transformation of the input value.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct Linearfunction {
         pub slope: f32,
         pub intercept: f32,
@@ -764,6 +785,7 @@ pub mod component_transfer {
     /// Applies power-law transformation, commonly used for gamma correction and
     /// adjusting midtone brightness without affecting blacks or whites.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct Gammafunction {
         pub amplitude: f32,
         pub exponent: f32,
@@ -778,6 +800,7 @@ pub mod lighting {
     /// Creates a lighting effect by treating the input's alpha channel as a height map
     /// and calculating diffuse (matte) reflection from a light source.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct DiffuseLightingFilter {
         /// Surface scale factor for converting alpha values to heights.
         pub surface_scale: f32,
@@ -794,6 +817,7 @@ pub mod lighting {
     /// Creates a lighting effect by treating the input's alpha channel as a height map
     /// and calculating specular (shiny) reflection highlights from a light source.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct SpecularLightingFilter {
         /// Surface scale factor for converting alpha values to heights.
         pub surface_scale: f32,
@@ -812,6 +836,7 @@ pub mod lighting {
     /// Defines different types of light sources used in diffuse and specular lighting
     /// filter primitives. Each type has different characteristics and use cases.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub enum LightSource {
         /// Distant light source (infinitely far away, like the sun).
         Distant(DistantLightSource),
@@ -826,6 +851,7 @@ pub mod lighting {
     /// All rays are parallel, creating uniform lighting across the surface.
     /// Direction is specified using spherical coordinates (azimuth and elevation).
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct DistantLightSource {
         pub azimuth: f32,
         pub elevation: f32,
@@ -836,6 +862,7 @@ pub mod lighting {
     /// Light radiates uniformly in all directions from a single point.
     /// Intensity decreases with distance. Like a light bulb.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct PointLightSource {
         pub x: f32,
         pub y: f32,
@@ -847,6 +874,7 @@ pub mod lighting {
     /// Light emanates from a point in a specific direction with limited spread.
     /// Like a flashlight or stage spotlight with adjustable focus.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct SpotLightSource {
         pub x: f32,
         pub y: f32,
@@ -909,6 +937,7 @@ pub mod convolution {
     /// The kernel is applied to each pixel by multiplying surrounding pixels by the weights,
     /// summing the results, dividing by the divisor, and adding the bias.
     #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ConvolutionKernel {
         /// Kernel size (e.g., 3 for a 3×3 kernel, 5 for 5×5).
         /// The kernel must be square, so this defines both width and height.
