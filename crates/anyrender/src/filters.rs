@@ -800,10 +800,10 @@ pub mod component_transfer {
         Discrete(Vec<f32>),
 
         /// Linear function: output = slope × input + intercept.
-        Linear(Linearfunction),
+        Linear(LinearTransferFunction),
 
         // Gamma correction: output = amplitude × input^exponent + offset.
-        Gamma(Gammafunction),
+        Gamma(GammaTransferFunction),
     }
 
     /// Linear function: output = slope × input + intercept.
@@ -811,7 +811,7 @@ pub mod component_transfer {
     /// Simple linear transformation of the input value.
     #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct Linearfunction {
+    pub struct LinearTransferFunction {
         pub slope: f32,
         pub intercept: f32,
     }
@@ -822,7 +822,7 @@ pub mod component_transfer {
     /// adjusting midtone brightness without affecting blacks or whites.
     #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct Gammafunction {
+    pub struct GammaTransferFunction {
         pub amplitude: f32,
         pub exponent: f32,
         pub offset: f32,
