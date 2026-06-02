@@ -751,6 +751,7 @@ pub mod displacement {
 }
 
 pub mod component_transfer {
+    use smallvec::SmallVec;
 
     /// Per-channel component transfer using lookup tables or functions.
     ///
@@ -787,7 +788,7 @@ pub mod component_transfer {
         ///
         /// Lookup table values defining the transfer curve.
         /// More values provide smoother curves. Minimum 2 values required.
-        Table(Vec<f32>),
+        Table(SmallVec<[f32; 2]>),
 
         /// Discrete step function (posterization).
         ///
