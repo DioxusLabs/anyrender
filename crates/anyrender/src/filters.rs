@@ -882,100 +882,6 @@ pub mod component_transfer {
     }
 }
 
-pub mod lighting {
-
-    /// Diffuse lighting simulation.
-    ///
-    /// Creates a lighting effect by treating the input's alpha channel as a height map
-    /// and calculating diffuse (matte) reflection from a light source.
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct DiffuseLightingFilter {
-        /// Surface scale factor for converting alpha values to heights.
-        pub surface_scale: f32,
-        /// Diffuse reflection constant (kd). Controls lighting intensity.
-        pub diffuse_constant: f32,
-        /// Kernel unit length for gradient calculations in user space.
-        pub kernel_unit_length: f32,
-        /// Configuration of the light source (point, distant, or spot).
-        pub light_source: LightSource,
-    }
-
-    /// Specular lighting simulation.
-    ///
-    /// Creates a lighting effect by treating the input's alpha channel as a height map
-    /// and calculating specular (shiny) reflection highlights from a light source.
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct SpecularLightingFilter {
-        /// Surface scale factor for converting alpha values to heights.
-        pub surface_scale: f32,
-        /// Specular reflection constant (ks). Controls highlight intensity.
-        pub specular_constant: f32,
-        /// Specular reflection exponent. Controls highlight sharpness (higher = sharper).
-        pub specular_exponent: f32,
-        /// Kernel unit length for gradient calculations in user space.
-        pub kernel_unit_length: f32,
-        /// Configuration of the light source (point, distant, or spot).
-        pub light_source: LightSource,
-    }
-
-    /// Light source configurations for lighting effects.
-    ///
-    /// Defines different types of light sources used in diffuse and specular lighting
-    /// filter primitives. Each type has different characteristics and use cases.
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub enum LightSource {
-        /// Distant light source (infinitely far away, like the sun).
-        Distant(DistantLightSource),
-        /// Point light source at a specific 3D position.
-        Point(PointLightSource),
-        /// Spot light with position, direction, and cone angle.
-        Spot(SpotLightSource),
-    }
-
-    /// Distant light source (infinitely far away, like the sun).
-    ///
-    /// All rays are parallel, creating uniform lighting across the surface.
-    /// Direction is specified using spherical coordinates (azimuth and elevation).
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct DistantLightSource {
-        pub azimuth: f32,
-        pub elevation: f32,
-    }
-
-    /// Point light source at a specific 3D position.
-    ///
-    /// Light radiates uniformly in all directions from a single point.
-    /// Intensity decreases with distance. Like a light bulb.
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct PointLightSource {
-        pub x: f32,
-        pub y: f32,
-        pub z: f32,
-    }
-
-    /// Spot light with position, direction, and cone angle.
-    ///
-    /// Light emanates from a point in a specific direction with limited spread.
-    /// Like a flashlight or stage spotlight with adjustable focus.
-    #[derive(Debug, Clone, PartialEq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct SpotLightSource {
-        pub x: f32,
-        pub y: f32,
-        pub z: f32,
-        pub points_at_x: f32,
-        pub points_at_y: f32,
-        pub points_at_z: f32,
-        pub specular_exponent: f32,
-        pub limiting_cone_angle: Option<f32>,
-    }
-}
-
 /// Common color transformation matrices.
 ///
 /// These 4x5 matrices are used with the `ColorMatrix` filter primitive.
@@ -1081,6 +987,100 @@ pub mod color_transformation {
             0.272, 0.534, 0.131, 0.0, 0.0, // Blue
             0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
         ]);
+    }
+}
+
+pub mod lighting {
+
+    /// Diffuse lighting simulation.
+    ///
+    /// Creates a lighting effect by treating the input's alpha channel as a height map
+    /// and calculating diffuse (matte) reflection from a light source.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct DiffuseLightingFilter {
+        /// Surface scale factor for converting alpha values to heights.
+        pub surface_scale: f32,
+        /// Diffuse reflection constant (kd). Controls lighting intensity.
+        pub diffuse_constant: f32,
+        /// Kernel unit length for gradient calculations in user space.
+        pub kernel_unit_length: f32,
+        /// Configuration of the light source (point, distant, or spot).
+        pub light_source: LightSource,
+    }
+
+    /// Specular lighting simulation.
+    ///
+    /// Creates a lighting effect by treating the input's alpha channel as a height map
+    /// and calculating specular (shiny) reflection highlights from a light source.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct SpecularLightingFilter {
+        /// Surface scale factor for converting alpha values to heights.
+        pub surface_scale: f32,
+        /// Specular reflection constant (ks). Controls highlight intensity.
+        pub specular_constant: f32,
+        /// Specular reflection exponent. Controls highlight sharpness (higher = sharper).
+        pub specular_exponent: f32,
+        /// Kernel unit length for gradient calculations in user space.
+        pub kernel_unit_length: f32,
+        /// Configuration of the light source (point, distant, or spot).
+        pub light_source: LightSource,
+    }
+
+    /// Light source configurations for lighting effects.
+    ///
+    /// Defines different types of light sources used in diffuse and specular lighting
+    /// filter primitives. Each type has different characteristics and use cases.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub enum LightSource {
+        /// Distant light source (infinitely far away, like the sun).
+        Distant(DistantLightSource),
+        /// Point light source at a specific 3D position.
+        Point(PointLightSource),
+        /// Spot light with position, direction, and cone angle.
+        Spot(SpotLightSource),
+    }
+
+    /// Distant light source (infinitely far away, like the sun).
+    ///
+    /// All rays are parallel, creating uniform lighting across the surface.
+    /// Direction is specified using spherical coordinates (azimuth and elevation).
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct DistantLightSource {
+        pub azimuth: f32,
+        pub elevation: f32,
+    }
+
+    /// Point light source at a specific 3D position.
+    ///
+    /// Light radiates uniformly in all directions from a single point.
+    /// Intensity decreases with distance. Like a light bulb.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct PointLightSource {
+        pub x: f32,
+        pub y: f32,
+        pub z: f32,
+    }
+
+    /// Spot light with position, direction, and cone angle.
+    ///
+    /// Light emanates from a point in a specific direction with limited spread.
+    /// Like a flashlight or stage spotlight with adjustable focus.
+    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct SpotLightSource {
+        pub x: f32,
+        pub y: f32,
+        pub z: f32,
+        pub points_at_x: f32,
+        pub points_at_y: f32,
+        pub points_at_z: f32,
+        pub specular_exponent: f32,
+        pub limiting_cone_angle: Option<f32>,
     }
 }
 
