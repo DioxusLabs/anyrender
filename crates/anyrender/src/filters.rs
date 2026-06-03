@@ -67,34 +67,6 @@ impl Default for Filter {
 }
 
 impl Filter {
-    /// Gaussian blur effect.
-    ///
-    /// Applies a Gaussian blur to the input image. Larger radius values
-    /// produce more blur. The blur is applied equally in all directions.
-    pub fn blur(radius: f32) -> Self {
-        Self::single(FilterEffect::GaussianBlur(GaussianBlurFilter {
-            std_deviation: radius,
-            edge_mode: EdgeMode::None,
-        }))
-    }
-
-    /// Drop shadow effect (compound primitive).
-    ///
-    /// Creates a drop shadow by blurring the input's alpha channel, offsetting it,
-    /// and compositing it with the original. This is a compound operation that
-    /// combines multiple primitive operations into one.
-    ///
-    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
-    pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
-        Self::single(FilterEffect::DropShadow(DropShadow {
-            dx,
-            dy,
-            std_deviation,
-            color,
-            edge_mode: EdgeMode::None,
-        }))
-    }
-
     /// Create a new empty filter graph.
     pub fn empty() -> Self {
         Self {
@@ -455,6 +427,34 @@ pub enum FilterEffect {
 const _: [u8; 128] = [0; std::mem::size_of::<FilterEffect>()];
 
 impl FilterEffect {
+    /// Gaussian blur effect.
+    ///
+    /// Applies a Gaussian blur to the input image. Larger radius values
+    /// produce more blur. The blur is applied equally in all directions.
+    pub fn blur(radius: f32) -> Self {
+        Self::GaussianBlur(GaussianBlurFilter {
+            std_deviation: radius,
+            edge_mode: EdgeMode::None,
+        })
+    }
+
+    /// Drop shadow effect (compound primitive).
+    ///
+    /// Creates a drop shadow by blurring the input's alpha channel, offsetting it,
+    /// and compositing it with the original. This is a compound operation that
+    /// combines multiple primitive operations into one.
+    ///
+    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
+        Self::DropShadow(DropShadow {
+            dx,
+            dy,
+            std_deviation,
+            color,
+            edge_mode: EdgeMode::None,
+        })
+    }
+
     /// Calculate the bounds expansion as a `Rect` in user space.
     ///
     /// Returns a rectangle centered at the origin representing how much the filter
