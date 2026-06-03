@@ -122,12 +122,12 @@ impl Filter {
     }
 
     /// The list of nodes in the graph
-    pub fn nodes(&mut self) -> &[FilterGraphNode] {
+    pub fn nodes(&self) -> &[FilterGraphNode] {
         &self.primitives
     }
 
     /// The output filter for the graph.
-    pub fn output(&mut self) -> FilterId {
+    pub fn output(&self) -> FilterId {
         self.output
     }
 
