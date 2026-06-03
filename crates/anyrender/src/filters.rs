@@ -455,6 +455,46 @@ impl FilterEffect {
         })
     }
 
+    /// Construct a CSS opacity() filter effect
+    pub fn opacity(amount: f32) -> Self {
+        Self::ComponentTransfer(ComponentTransferFilter::opacity(amount))
+    }
+
+    /// Construct a CSS invert() filter effect
+    pub fn invert(amount: f32) -> Self {
+        Self::ComponentTransfer(ComponentTransferFilter::invert(amount))
+    }
+
+    /// Construct a CSS brightness() filter effect
+    pub fn brightness(amount: f32) -> Self {
+        Self::ComponentTransfer(ComponentTransferFilter::brightness(amount))
+    }
+
+    /// Construct a CSS contrast() filter effect
+    pub fn contrast(amount: f32) -> Self {
+        Self::ComponentTransfer(ComponentTransferFilter::contrast(amount))
+    }
+
+    /// Construct a CSS hue-rotate() filter effect
+    pub fn hue_rotate(angle_radians: f32) -> Self {
+        Self::ColorMatrix(ColorMatrix::hue_rotate(angle_radians))
+    }
+
+    /// Construct a CSS saturate() filter effect
+    pub fn saturate(amount: f32) -> Self {
+        Self::ColorMatrix(ColorMatrix::saturate(amount))
+    }
+
+    /// Construct a CSS sepia() filter effect
+    pub fn sepia(amount: f32) -> Self {
+        Self::ColorMatrix(ColorMatrix::sepia(amount))
+    }
+
+    /// Construct a CSS grayscale() filter effect
+    pub fn grayscale(amount: f32) -> Self {
+        Self::ColorMatrix(ColorMatrix::grayscale(amount))
+    }
+
     /// Calculate the bounds expansion as a `Rect` in user space.
     ///
     /// Returns a rectangle centered at the origin representing how much the filter
