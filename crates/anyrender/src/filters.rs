@@ -982,6 +982,10 @@ pub mod lighting {
 /// Each row transforms a color channel: [R, G, B, A, offset].
 pub mod color_transformation {
 
+    const LUMA_R: f32 = 0.213;
+    const LUMA_G: f32 = 0.715;
+    const LUMA_B: f32 = 0.072;
+
     /// Matrix-based color transformation.
     ///
     /// 4x5 color transformation matrix: 4 rows (R,G,B,A) × 5 columns (R,G,B,A,offset).
@@ -991,6 +995,61 @@ pub mod color_transformation {
     pub struct ColorMatrix(pub [f32; 20]);
 
     impl ColorMatrix {
+        /// Color matrix filter for the CSS hue-rotate() filter
+        pub fn hue_rotate(angle_radians: f32) -> Self {
+            let sin = angle_radians.sin();
+            let cos = angle_radians.cos();
+
+            Self([
+                LUMA_R + cos * (1.0 - LUMA_R) - sin * LUMA_R,
+                LUMA_G - cos * LUMA_G - sin * LUMA_G,
+                LUMA_B - cos * LUMA_B + sin * (1.0 - LUMA_B),
+                0.0,
+                0.0,
+                LUMA_R - cos * LUMA_R + sin * 0.143,
+                LUMA_G + cos * (1.0 - LUMA_G) + sin * 0.140,
+                LUMA_B - cos * LUMA_B - sin * 0.283,
+                0.0,
+                0.0,
+                LUMA_R - cos * LUMA_R - sin * (1.0 - LUMA_R),
+                LUMA_G - cos * LUMA_G + sin * LUMA_G,
+                LUMA_B + cos * (1.0 - LUMA_B) + sin * LUMA_B,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ])
+        }
+
+        /// Color matrix filter for the CSS saturate() filter
+        pub fn saturate(amount: f32) -> Self {
+            Self([
+                LUMA_R + amount * (1.0 - LUMA_R),
+                LUMA_G - amount * LUMA_G,
+                LUMA_B - amount * LUMA_B,
+                0.0,
+                0.0,
+                LUMA_R - amount * LUMA_R,
+                LUMA_G + amount * (1.0 - LUMA_G),
+                LUMA_B - amount * LUMA_B,
+                0.0,
+                0.0,
+                LUMA_R - amount * LUMA_R,
+                LUMA_G - amount * LUMA_G,
+                LUMA_B + amount * (1.0 - LUMA_B),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ])
+        }
+
         /// Identity matrix (no change).
         pub const IDENTITY: Self = Self([
             1.0, 0.0, 0.0, 0.0, 0.0, // Red
