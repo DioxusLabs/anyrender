@@ -956,6 +956,60 @@ pub mod color_transformation {
             ])
         }
 
+        /// Color matrix filter for the CSS sepia() filter
+        /// <https://www.w3.org/TR/filter-effects-1/#sepiaEquivalent>
+        pub fn sepia(amount: f32) -> Self {
+            Self([
+                (0.393 + 0.607 * (1.0 - amount)),
+                (0.769 - 0.769 * (1.0 - amount)),
+                (0.189 - 0.189 * (1.0 - amount)),
+                0.0,
+                0.0,
+                (0.349 - 0.349 * (1.0 - amount)),
+                (0.686 + 0.314 * (1.0 - amount)),
+                (0.168 - 0.168 * (1.0 - amount)),
+                0.0,
+                0.0,
+                (0.272 - 0.272 * (1.0 - amount)),
+                (0.534 - 0.534 * (1.0 - amount)),
+                (0.131 + 0.869 * (1.0 - amount)),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ])
+        }
+
+        /// Color matrix filter for the CSS grayscale() filter
+        /// <https://www.w3.org/TR/filter-effects-1/#grayscaleEquivalent>
+        pub fn grayscale(amount: f32) -> Self {
+            Self([
+                (0.2126 + 0.7874 * (1.0 - amount)),
+                (0.7152 - 0.7152 * (1.0 - amount)),
+                (0.0722 - 0.0722 * (1.0 - amount)),
+                0.0,
+                0.0,
+                (0.2126 - 0.2126 * (1.0 - amount)),
+                (0.7152 + 0.2848 * (1.0 - amount)),
+                (0.0722 - 0.0722 * (1.0 - amount)),
+                0.0,
+                0.0,
+                (0.2126 - 0.2126 * (1.0 - amount)),
+                (0.7152 - 0.7152 * (1.0 - amount)),
+                (0.0722 + 0.9278 * (1.0 - amount)),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+            ])
+        }
+
         /// Identity matrix (no change).
         pub const IDENTITY: Self = Self([
             1.0, 0.0, 0.0, 0.0, 0.0, // Red
@@ -970,22 +1024,6 @@ pub mod color_transformation {
             0.0, 0.0, 0.0, 1.0, 0.0, // Green = Alpha
             0.0, 0.0, 0.0, 1.0, 0.0, // Blue = Alpha
             0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
-        ]);
-
-        /// Grayscale conversion matrix using luminosity weights.
-        pub const GRAYSCALE: Self = Self([
-            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Red
-            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Green
-            0.2126, 0.7152, 0.0722, 0.0, 0.0, // Blue
-            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
-        ]);
-
-        /// Sepia tone matrix for vintage photo effect.
-        pub const SEPIA: Self = Self([
-            0.393, 0.769, 0.189, 0.0, 0.0, // Red
-            0.349, 0.686, 0.168, 0.0, 0.0, // Green
-            0.272, 0.534, 0.131, 0.0, 0.0, // Blue
-            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
         ]);
     }
 }
