@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use anyrender::{Filter, PaintScene, RenderContext};
+use anyrender::filters::component_transfer::TransferFunction;
+use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
+use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
-    MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, PathEffect, Point, RRect, Rect, Shader,
-    Typeface,
+    ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, PathEffect, Point, RRect,
+    Rect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -15,6 +17,7 @@ use crate::cache::{
     FontCacheKey, FontCacheKeyBorrowed, GenerationalCache, NormalizedTypefaceCacheKey,
     NormalizedTypefaceCacheKeyBorrowed,
 };
+use crate::scene::sk_peniko::color4f_from_alpha_color;
 
 pub struct SkiaSceneCache {
     paint: Paint,
@@ -83,6 +86,10 @@ impl SkiaScenePainter<'_> {
 
     fn set_paint_alpha(&mut self, alpha: f32) {
         self.cache.paint.set_alpha_f(alpha);
+    }
+
+    fn set_paint_filter(&mut self, filter: ImageFilter) {
+        self.cache.paint.set_image_filter(filter);
     }
 
     fn set_paint_blend_mode(&mut self, blend_mode: impl Into<peniko::BlendMode>) {
@@ -413,8 +420,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         alpha: f32,
         transform: kurbo::Affine,
         clip: &impl kurbo::Shape,
-        _filter: Option<Arc<Filter>>,
-        _backdrop_filter: Option<Arc<Filter>>,
+        filter: Option<Arc<Filter>>,
+        backdrop_filter: Option<Arc<Filter>>,
     ) {
         let blend: peniko::BlendMode = blend.into();
 
@@ -422,13 +429,22 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.set_paint_alpha(alpha);
         self.set_paint_blend_mode(blend);
 
+        if let Some(filter) = filter.as_ref().and_then(|f| convert_filter(f)) {
+            self.set_paint_filter(filter);
+        }
+
         self.inner.save();
 
         self.set_matrix(transform);
         self.clip(clip);
 
-        self.inner
-            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
+        let backdrop_filter = backdrop_filter.as_ref().and_then(|f| convert_filter(f));
+        let mut save_layer_rec = SaveLayerRec::default().paint(&self.cache.paint);
+        if let Some(backdrop_filter) = backdrop_filter.as_ref() {
+            save_layer_rec = save_layer_rec.backdrop(backdrop_filter);
+        }
+
+        self.inner.save_layer(&save_layer_rec);
     }
 
     fn push_clip_layer(&mut self, transform: kurbo::Affine, clip: &impl kurbo::Shape) {
@@ -565,6 +581,140 @@ impl PaintScene for SkiaScenePainter<'_> {
 
 fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
+    convert_filter_effect(filter, filter.output())
+}
+
+fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
+    let node = &filter.nodes()[id.0 as usize];
+    let input = node.inputs.primary.as_ref().and_then(|input| match input {
+        FilterInput::Source(_) => None,
+        FilterInput::Result(input_id) => convert_filter_effect(filter, *input_id),
+    });
+
+    // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
+    let input_clone = input.clone();
+
+    use skia_safe::{color_filters, image_filters};
+
+    let filter: Option<ImageFilter> = match &node.effect {
+        FilterEffect::Flood(color) => {
+            let rgba8 = color.to_rgba8();
+            let sk_color = Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
+            let shader = skia_safe::shaders::color(sk_color);
+            image_filters::shader(shader, None)
+        }
+        FilterEffect::GaussianBlur(blur) => {
+            image_filters::blur((blur.std_deviation, blur.std_deviation), None, input, None)
+        }
+        FilterEffect::DropShadow(drop_shadow) => image_filters::drop_shadow(
+            (drop_shadow.dx, drop_shadow.dy),
+            (drop_shadow.std_deviation, drop_shadow.std_deviation),
+            color4f_from_alpha_color(drop_shadow.color),
+            None,
+            input,
+            None,
+        ),
+        FilterEffect::ComponentTransfer(ct) => {
+            fn map_transfer_function(func: &TransferFunction) -> Option<[u8; 256]> {
+                match func {
+                    TransferFunction::Identity => None,
+                    TransferFunction::Table(table) => {
+                        if table.is_empty() {
+                            None
+                        } else {
+                            let table = table.as_slice();
+                            let n = table.len();
+
+                            let mut values = [0; 256];
+                            for (i, out) in values.iter_mut().enumerate() {
+                                let c = i as f64 / 255.0;
+                                let k = (c * (n - 1) as f64) as usize;
+                                let v1 = table[k] as f64;
+                                let v2 = table[(k + 1).min(n - 1)] as f64;
+                                let val =
+                                    255.0 * (v1 + (c * (n - 1) as f64 - k as f64) * (v2 - v1));
+                                *out = val.clamp(0.0, 255.0) as u8;
+                            }
+                            Some(values)
+                        }
+                    }
+                    TransferFunction::Discrete(items) => {
+                        if items.is_empty() {
+                            None
+                        } else {
+                            let items = items.as_slice();
+                            let n = items.len();
+
+                            let mut values = [0; 256];
+                            for (i, out) in values.iter_mut().enumerate() {
+                                let k = (((i * n) as f64 / 255.0) as usize).min(n - 1);
+                                let val = 255.0 * items[k] as f64;
+                                *out = val.clamp(0.0, 255.0) as u8;
+                            }
+                            Some(values)
+                        }
+                    }
+                    TransferFunction::Linear(tf) => {
+                        let mut values = [0; 256];
+                        for (i, out) in values.iter_mut().enumerate() {
+                            let val: f64 =
+                                (tf.slope as f64 * i as f64) + (255.0 * tf.intercept as f64);
+                            *out = val.clamp(0.0, 255.0) as u8;
+                        }
+                        Some(values)
+                    }
+                    TransferFunction::Gamma(tf) => {
+                        let mut values = [0; 256];
+                        for (i, out) in values.iter_mut().enumerate() {
+                            let val: f64 = 255.0
+                                * (tf.amplitude as f64
+                                    * (i as f64 / 255.0).powf(tf.exponent as f64))
+                                + tf.offset as f64;
+                            *out = val.clamp(0.0, 255.0) as u8;
+                        }
+                        Some(values)
+                    }
+                }
+            }
+
+            let color_filter = color_filters::table_argb(
+                map_transfer_function(&ct.alpha_function).as_ref(),
+                map_transfer_function(&ct.red_function).as_ref(),
+                map_transfer_function(&ct.green_function).as_ref(),
+                map_transfer_function(&ct.blue_function).as_ref(),
+            );
+
+            color_filter.and_then(|cf| image_filters::color_filter(cf, input, None))
+        }
+        FilterEffect::ColorMatrix(color_matrix) => {
+            let color_filter =
+                color_filters::matrix_row_major(&color_matrix.0, color_filters::Clamp::Yes);
+            image_filters::color_filter(color_filter, input, None)
+        }
+        FilterEffect::Offset(offset) => {
+            image_filters::offset((offset.x as f32, offset.y as f32), input, None)
+        }
+
+        // TODO: implement remaining filter effect types
+        FilterEffect::Composite(_composite_operator) => None,
+        FilterEffect::Blend(_mix) => None,
+        FilterEffect::Morphology(_morphology_filter) => None,
+        FilterEffect::ConvolveMatrix(_convolution_kernel) => None,
+        FilterEffect::Turbulence(_turbulence_filter) => None,
+        FilterEffect::DisplacementMap(_displacement_map_filter) => None,
+        FilterEffect::Image(_external_image_source) => None,
+        FilterEffect::Tile => None,
+        FilterEffect::DiffuseLighting(_diffuse_lighting_filter) => None,
+        FilterEffect::SpecularLighting(_specular_lighting_filter) => None,
+    };
+
+    // If we do not implement given type of filter then the match statement above returns None
+    // In that case, if we have an input then we pass that along instead. In the case of filter chains
+    // with some unimplemented filters that allows the remaining filters to work
+    filter.or(input_clone)
 }
 
 mod sk_peniko {
