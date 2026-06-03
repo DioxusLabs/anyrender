@@ -762,13 +762,13 @@ pub mod component_transfer {
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ComponentTransferFilter {
         /// Transfer function applied to the red channel (None = identity).
-        pub red_function: Option<TransferFunction>,
+        pub red_function: TransferFunction,
         /// Transfer function applied to the green channel (None = identity).
-        pub green_function: Option<TransferFunction>,
+        pub green_function: TransferFunction,
         /// Transfer function applied to the blue channel (None = identity).
-        pub blue_function: Option<TransferFunction>,
+        pub blue_function: TransferFunction,
         /// Transfer function applied to the alpha channel (None = identity).
-        pub alpha_function: Option<TransferFunction>,
+        pub alpha_function: TransferFunction,
     }
 
     impl ComponentTransferFilter {
@@ -776,10 +776,10 @@ pub mod component_transfer {
         pub fn opacity(amount: f32) -> Self {
             let func = TransferFunction::Table(SmallVec::from([0.0, amount]));
             Self {
-                red_function: None,
-                green_function: None,
-                blue_function: None,
-                alpha_function: Some(func),
+                red_function: TransferFunction::Identity,
+                green_function: TransferFunction::Identity,
+                blue_function: TransferFunction::Identity,
+                alpha_function: func,
             }
         }
 
@@ -787,10 +787,10 @@ pub mod component_transfer {
         pub fn invert(amount: f32) -> Self {
             let func = TransferFunction::Table(SmallVec::from([amount, 1.0 - amount]));
             Self {
-                red_function: Some(func.clone()),
-                green_function: Some(func.clone()),
-                blue_function: Some(func.clone()),
-                alpha_function: None,
+                red_function: func.clone(),
+                green_function: func.clone(),
+                blue_function: func.clone(),
+                alpha_function: TransferFunction::Identity,
             }
         }
 
@@ -801,10 +801,10 @@ pub mod component_transfer {
                 intercept: 0.0,
             });
             Self {
-                red_function: Some(func.clone()),
-                green_function: Some(func.clone()),
-                blue_function: Some(func.clone()),
-                alpha_function: None,
+                red_function: func.clone(),
+                green_function: func.clone(),
+                blue_function: func.clone(),
+                alpha_function: TransferFunction::Identity,
             }
         }
 
@@ -815,10 +815,10 @@ pub mod component_transfer {
                 intercept: -(0.5 * amount) + 0.5,
             });
             Self {
-                red_function: Some(func.clone()),
-                green_function: Some(func.clone()),
-                blue_function: Some(func.clone()),
-                alpha_function: None,
+                red_function: func.clone(),
+                green_function: func.clone(),
+                blue_function: func.clone(),
+                alpha_function: TransferFunction::Identity,
             }
         }
     }
