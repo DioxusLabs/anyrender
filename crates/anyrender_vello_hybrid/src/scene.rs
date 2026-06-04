@@ -14,8 +14,6 @@ use vello_hybrid::{Renderer, Resources, SampleRect};
 use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
 use wgpu_context::DeviceHandle;
 
-use crate::filters::convert_filter;
-
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
@@ -183,17 +181,13 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
+        let filter = filter.and_then(crate::filters::convert_filter);
         self.scene.set_transform(transform);
         self.layer_stack.push(LayerKind::Layer);
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
-        self.scene.push_layer(
-            None,
-            Some(blend.into()),
-            Some(alpha),
-            None,
-            filter.and_then(convert_filter),
-        );
+        self.scene
+            .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
     }
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {

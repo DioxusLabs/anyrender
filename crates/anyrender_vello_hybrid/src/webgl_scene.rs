@@ -10,7 +10,6 @@ use peniko::ImageBrush;
 use rustc_hash::FxHashMap;
 use vello_common::paint::{ImageId, ImageSource};
 
-use crate::filters::convert_filter;
 use std::sync::Arc;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
@@ -113,17 +112,13 @@ impl PaintScene for WebGlScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
+        let filter = filter.and_then(crate::filters::convert_filter);
         self.scene.set_transform(transform);
         self.layer_stack.push(LayerKind::Layer);
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
-        self.scene.push_layer(
-            None,
-            Some(blend.into()),
-            Some(alpha),
-            None,
-            filter.and_then(convert_filter),
-        );
+        self.scene
+            .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
     }
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
