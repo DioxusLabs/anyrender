@@ -428,7 +428,10 @@ pub enum FilterEffect {
 
 // Assert size of FilterEffect.
 // This is just for documentation purposes. Feel free to update the value as necessary
+#[cfg(not(target_arch = "wasm32"))]
 const _: [u8; 128] = [0; std::mem::size_of::<FilterEffect>()];
+#[cfg(target_arch = "wasm32")]
+const _: [u8; 88] = [0; std::mem::size_of::<FilterEffect>()];
 
 impl FilterEffect {
     /// Gaussian blur effect.
