@@ -1,6 +1,6 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_hybrid::Scene`].
 
-use anyrender::{Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use anyrender::{Filter, Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
@@ -9,6 +9,9 @@ use vello_common::paint::PaintType;
 use peniko::ImageBrush;
 use rustc_hash::FxHashMap;
 use vello_common::paint::{ImageId, ImageSource};
+
+use crate::filters::convert_filter;
+use std::sync::Arc;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
@@ -107,15 +110,20 @@ impl PaintScene for WebGlScenePainter<'_> {
         alpha: f32,
         transform: Affine,
         clip: &impl Shape,
-        _filter: Option<Arc<Filter>>,
+        filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
         self.scene.set_transform(transform);
         self.layer_stack.push(LayerKind::Layer);
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
-        self.scene
-            .push_layer(None, Some(blend.into()), Some(alpha), None, None);
+        self.scene.push_layer(
+            None,
+            Some(blend.into()),
+            Some(alpha),
+            None,
+            filter.and_then(convert_filter),
+        );
     }
 
     fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
