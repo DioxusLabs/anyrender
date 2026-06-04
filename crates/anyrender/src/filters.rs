@@ -175,6 +175,10 @@ impl Filter {
         // transform_rect_bbox computes the axis-aligned bounding box of the transformed rect
         transform.transform_rect_bbox(self.expansion_rect)
     }
+
+    pub fn expansion_rect(&self) -> Rect {
+        self.expansion_rect
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
