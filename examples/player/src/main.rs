@@ -1,8 +1,11 @@
 use anyrender::{NullWindowRenderer, PaintScene, Scene, WindowRenderer};
 use anyrender_serialize::SceneArchive;
-#[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
-use anyrender_skia::pick_x11_gl_visual;
 use anyrender_skia::SkiaWindowRenderer;
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+use anyrender_skia::pick_x11_gl_visual;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
@@ -143,14 +146,17 @@ impl App {
             // On X11, pre-pick a visual that's compatible with the OpenGL backend's EGL
             // configs. winit otherwise inherits the root window's visual via COPY_FROM_PARENT,
             // which may have no matching EGL config and causes EGL_BAD_MATCH at surface creation.
-            #[cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android"))))]
+            #[cfg(all(
+                unix,
+                not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+            ))]
             {
                 use winit::platform::x11::WindowAttributesExtX11;
                 use winit::raw_window_handle::HasDisplayHandle;
-                if let Ok(display_handle) = event_loop.display_handle() {
-                    if let Some(visual_id) = pick_x11_gl_visual(display_handle.as_raw()) {
-                        attr = attr.with_x11_visual(visual_id);
-                    }
+                if let Ok(display_handle) = event_loop.display_handle()
+                    && let Some(visual_id) = pick_x11_gl_visual(display_handle.as_raw())
+                {
+                    attr = attr.with_x11_visual(visual_id);
                 }
             }
 
