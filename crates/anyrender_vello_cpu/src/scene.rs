@@ -4,7 +4,7 @@ use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderCont
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
-use vello_cpu::{ImageSource, PaintType, Pixmap};
+use vello_cpu::{ImageSource, PaintType, Pixmap, RasterizerSettings};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
@@ -47,8 +47,11 @@ pub struct VelloCpuScenePainter {
 impl VelloCpuScenePainter {
     pub fn finish(mut self) -> Pixmap {
         let mut pixmap = Pixmap::new(self.render_ctx.width(), self.render_ctx.height());
-        self.render_ctx
-            .render_to_pixmap(&mut self.resources, &mut pixmap);
+        self.render_ctx.render(
+            pixmap.as_mut(),
+            &mut self.resources,
+            RasterizerSettings::default(),
+        );
         pixmap
     }
 }
