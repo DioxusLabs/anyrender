@@ -89,7 +89,7 @@ pub struct SurfaceRenderer<'s> {
     pub surface: Surface<'s>,
     pub config: SurfaceConfiguration,
 
-    current_surface_texture: Option<CurrentSurfaceTexture>,
+    current_surface_texture: Option<SurfaceTexture>,
     intermediate_texture: Option<Box<IntermediateTextureStuff>>,
 }
 
@@ -193,28 +193,43 @@ impl<'s> SurfaceRenderer<'s> {
         self.current_surface_texture = None;
     }
 
+    /// Acquire the next surface frame.
+    fn acquire(&self) -> CurrentSurfaceTexture {
+        self.surface.get_current_texture()
+    }
+
+    /// Acquire a usable surface texture. A `Suboptimal` texture is still
+    /// presentable, so it is rendered as-is — size changes are reconfigured in
+    /// `resize`, so this path does not churn the swapchain every frame when the
+    /// surface stays suboptimal. `Outdated`/`Lost` surfaces are genuinely
+    /// unusable: reconfigure and re-acquire once.
+    fn acquire_reconfiguring_if_stale(&self) -> Option<SurfaceTexture> {
+        match self.acquire() {
+            CurrentSurfaceTexture::Success(surface_texture)
+            | CurrentSurfaceTexture::Suboptimal(surface_texture) => Some(surface_texture),
+            CurrentSurfaceTexture::Outdated | CurrentSurfaceTexture::Lost => {
+                self.configure();
+                match self.acquire() {
+                    CurrentSurfaceTexture::Success(surface_texture)
+                    | CurrentSurfaceTexture::Suboptimal(surface_texture) => Some(surface_texture),
+                    _ => None,
+                }
+            }
+            // Timeout / occluded / validation error: skip this frame.
+            _ => None,
+        }
+    }
+
     pub fn ensure_current_surface_texture(
         &mut self,
     ) -> Result<&SurfaceTexture, GetCurrentSurfaceTextureErr> {
         if self.current_surface_texture.is_none() {
-            let tex = self.surface.get_current_texture();
-            match &tex {
-                CurrentSurfaceTexture::Lost
-                | CurrentSurfaceTexture::Outdated
-                | CurrentSurfaceTexture::Suboptimal(_) => {
-                    self.surface
-                        .configure(&self.device_handle.device, &self.config);
-                }
-                _ => {}
-            }
-
-            self.current_surface_texture = Some(tex);
+            self.current_surface_texture = self.acquire_reconfiguring_if_stale();
         }
 
-        match self.current_surface_texture.as_ref().unwrap() {
-            CurrentSurfaceTexture::Success(surface_texture) => Ok(surface_texture),
-            _ => Err(GetCurrentSurfaceTextureErr),
-        }
+        self.current_surface_texture
+            .as_ref()
+            .ok_or(GetCurrentSurfaceTextureErr)
     }
 
     /// Get a target texture view to render to.
@@ -242,11 +257,7 @@ impl<'s> SurfaceRenderer<'s> {
             return Err(GetCurrentSurfaceTextureErr);
         }
 
-        let CurrentSurfaceTexture::Success(surface_texture) =
-            self.current_surface_texture.take().unwrap()
-        else {
-            unreachable!("Surface texture was set in ensure_current_surface_texture above");
-        };
+        let surface_texture = self.current_surface_texture.take().unwrap();
 
         if let Some(its) = &self.intermediate_texture {
             self.blit_from_intermediate_texture_to_surface(&surface_texture, its);
