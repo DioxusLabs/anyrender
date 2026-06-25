@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::{ffi::CString, num::NonZeroU32, sync::Arc};
 
+use glutin::config::Config;
 use glutin::display::DisplayApiPreference;
 use glutin::{
     config::{ConfigTemplateBuilder, GetGlConfig, GlConfig},
@@ -8,6 +11,7 @@ use glutin::{
     prelude::{GlDisplay, NotCurrentGlContext, PossiblyCurrentGlContext},
     surface::{GlSurface, SurfaceAttributesBuilder, WindowSurface},
 };
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use skia_safe::{
     Surface,
     gpu::{
@@ -17,6 +21,120 @@ use skia_safe::{
 };
 
 use crate::window_renderer::SkiaBackend;
+
+fn build_gl_display(
+    raw_display_handle: RawDisplayHandle,
+    _raw_window: Option<RawWindowHandle>,
+) -> Display {
+    unsafe {
+        Display::new(
+            raw_display_handle,
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            DisplayApiPreference::Cgl,
+            #[cfg(target_os = "windows")]
+            DisplayApiPreference::Wgl(_raw_window),
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
+            DisplayApiPreference::Egl,
+        )
+        .unwrap()
+    }
+}
+
+fn pick_gl_config(display: &Display, raw_window: Option<RawWindowHandle>) -> Option<Config> {
+    let mut template = ConfigTemplateBuilder::new().with_transparency(true);
+    if let Some(rwh) = raw_window {
+        template = template.compatible_with_native_window(rwh);
+    }
+    let template = template.build();
+    unsafe {
+        display
+            .find_configs(template)
+            .ok()?
+            .reduce(|accum, config| {
+                let transparency_check = config.supports_transparency().unwrap_or(false)
+                    & !accum.supports_transparency().unwrap_or(false);
+
+                if transparency_check || config.num_samples() < accum.num_samples() {
+                    config
+                } else {
+                    accum
+                }
+            })
+    }
+}
+
+/// Cache of glutin `Display`s keyed by the raw X display/connection pointer, to avoid
+/// double-initializing EGL for the same X server connection (once in `pick_x11_gl_visual`
+/// and again in `OpenGLBackend::new`).
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+fn display_cache() -> &'static Mutex<HashMap<usize, Display>> {
+    static CACHE: OnceLock<Mutex<HashMap<usize, Display>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+fn display_cache_key(raw_display_handle: RawDisplayHandle) -> Option<usize> {
+    match raw_display_handle {
+        RawDisplayHandle::Xlib(h) => h.display.map(|p| p.as_ptr() as usize),
+        RawDisplayHandle::Xcb(h) => h.connection.map(|p| p.as_ptr() as usize),
+        _ => None,
+    }
+}
+
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+fn get_or_build_gl_display(
+    raw_display_handle: RawDisplayHandle,
+    raw_window: Option<RawWindowHandle>,
+) -> Display {
+    if let Some(key) = display_cache_key(raw_display_handle) {
+        let mut cache = display_cache().lock().unwrap();
+        if let Some(d) = cache.get(&key) {
+            return d.clone();
+        }
+        let display = build_gl_display(raw_display_handle, raw_window);
+        cache.insert(key, display.clone());
+        return display;
+    }
+    build_gl_display(raw_display_handle, raw_window)
+}
+
+/// Pick an X11 visual ID compatible with the OpenGL backend used by [`SkiaWindowRenderer`].
+///
+/// Apply the returned visual to the winit window with [`WindowAttributesExtX11::with_x11_visual`]
+/// before creating the window. This avoids `EGL_BAD_MATCH` at surface creation, which happens
+/// when winit's default visual doesn't match any EGL config.
+///
+/// Returns `None` on non-Xlib/Xcb display handles, if no compatible EGL config can be
+/// found, or if the platform's EGL implementation doesn't expose an X11 visual ID for the
+/// picked config.
+///
+/// [`SkiaWindowRenderer`]: crate::SkiaWindowRenderer
+/// [`WindowAttributesExtX11::with_x11_visual`]: https://docs.rs/winit/latest/winit/platform/x11/trait.WindowAttributesExtX11.html#tymethod.with_x11_visual
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+pub fn pick_x11_gl_visual(raw_display_handle: RawDisplayHandle) -> Option<u32> {
+    if !matches!(
+        raw_display_handle,
+        RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_)
+    ) {
+        return None;
+    }
+    let display = get_or_build_gl_display(raw_display_handle, None);
+    let config = pick_gl_config(&display, None)?;
+    use glutin::platform::x11::X11GlConfigExt;
+    config.x11_visual().map(|v| v.visual_id() as u32)
+}
 
 pub(crate) struct OpenGLBackend {
     surface: Option<Surface>,
@@ -35,36 +153,19 @@ impl OpenGLBackend {
         let raw_display_handle = window.display_handle().unwrap().as_raw();
         let raw_window_handle = window.window_handle().unwrap().as_raw();
 
-        let gl_display = unsafe {
-            Display::new(
-                raw_display_handle,
-                #[cfg(any(target_os = "macos", target_os = "ios"))]
-                DisplayApiPreference::Cgl,
-                #[cfg(target_os = "windows")]
-                DisplayApiPreference::Wgl(Some(raw_window_handle.clone())),
-                #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
-                DisplayApiPreference::Egl,
-            )
-            .unwrap()
-        };
+        #[cfg(all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        ))]
+        let gl_display = get_or_build_gl_display(raw_display_handle, Some(raw_window_handle));
+        #[cfg(not(all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        )))]
+        let gl_display = build_gl_display(raw_display_handle, Some(raw_window_handle));
 
-        let gl_config_template = ConfigTemplateBuilder::new().with_transparency(true).build();
-        let gl_config = unsafe {
-            gl_display
-                .find_configs(gl_config_template)
-                .unwrap()
-                .reduce(|accum, config| {
-                    let transparency_check = config.supports_transparency().unwrap_or(false)
-                        & !accum.supports_transparency().unwrap_or(false);
-
-                    if transparency_check || config.num_samples() < accum.num_samples() {
-                        config
-                    } else {
-                        accum
-                    }
-                })
-                .unwrap()
-        };
+        let gl_config = pick_gl_config(&gl_display, Some(raw_window_handle))
+            .expect("no GL config found for display");
 
         let gl_context_attrs = ContextAttributesBuilder::new().build(Some(raw_window_handle));
         let gl_surface_attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(

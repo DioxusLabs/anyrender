@@ -1,4 +1,9 @@
 use anyrender::{PaintScene, WindowRenderer};
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+use anyrender_skia::pick_x11_gl_visual;
 use anyrender_skia::{SkiaImageRenderer, SkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
@@ -134,7 +139,7 @@ impl App {
             RenderState::Suspended(cached_window) => cached_window.clone(),
         };
         let window = window.take().unwrap_or_else(|| {
-            let attr = Window::default_attributes()
+            let mut attr = Window::default_attributes()
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.logical_width,
                     self.logical_height,
@@ -143,6 +148,24 @@ impl App {
                 .with_title("anyrender + winit demo")
                 .with_visible(true)
                 .with_active(true);
+
+            // On X11, pre-pick a visual that's compatible with the OpenGL backend's EGL
+            // configs. winit otherwise inherits the root window's visual via COPY_FROM_PARENT,
+            // which may have no matching EGL config and causes EGL_BAD_MATCH at surface creation.
+            #[cfg(all(
+                unix,
+                not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+            ))]
+            {
+                use winit::platform::x11::WindowAttributesExtX11;
+                use winit::raw_window_handle::HasDisplayHandle;
+                if let Ok(display_handle) = event_loop.display_handle()
+                    && let Some(visual_id) = pick_x11_gl_visual(display_handle.as_raw())
+                {
+                    attr = attr.with_x11_visual(visual_id);
+                }
+            }
+
             Arc::new(event_loop.create_window(attr).unwrap())
         });
         self.scale_factor = window.scale_factor();
