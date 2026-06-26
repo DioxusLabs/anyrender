@@ -6,8 +6,8 @@ use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
     BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments, FontHinting, FontMgr, GlyphId,
-    ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, PathEffect, Point, RRect,
-    Rect, Shader, Typeface,
+    ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle, Path, PathEffect,
+    PathFillType, Point, RRect, Rect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -576,7 +576,13 @@ impl PaintScene for SkiaScenePainter<'_> {
             radius as f32,
         );
 
-        self.inner.draw_rrect(rrect, &self.cache.paint);
+        if inset {
+            let mut path = Path::rrect(rrect, None);
+            path.set_fill_type(PathFillType::InverseWinding);
+            self.inner.draw_path(&path, &self.cache.paint);
+        } else {
+            self.inner.draw_rrect(rrect, &self.cache.paint);
+        }
     }
 }
 
