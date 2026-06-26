@@ -154,6 +154,7 @@ impl PaintScene for NullScenePainter {
         _brush: peniko::Color,
         _radius: f64,
         _std_dev: f64,
+        _inset: bool,
     ) {
     }
 }

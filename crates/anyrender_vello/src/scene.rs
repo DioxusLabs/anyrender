@@ -179,7 +179,9 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush: Color,
         radius: f64,
         std_dev: f64,
+        _inset: bool,
     ) {
+        // TODO: implement inset/inverted blurred rounded rects
         self.inner
             .draw_blurred_rounded_rect(transform, rect, brush, radius, std_dev);
     }

@@ -126,6 +126,7 @@ pub struct BoxShadowCommand {
     pub brush: Color,
     pub radius: f64,
     pub std_dev: f64,
+    pub inset: bool,
 }
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
@@ -286,6 +287,7 @@ impl PaintScene for Scene {
         brush: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         let box_shadow = BoxShadowCommand {
             transform,
@@ -293,6 +295,7 @@ impl PaintScene for Scene {
             brush,
             radius,
             std_dev,
+            inset,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
     }
