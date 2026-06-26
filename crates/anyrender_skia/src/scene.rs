@@ -549,6 +549,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush: peniko::Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         self.set_matrix(transform);
 

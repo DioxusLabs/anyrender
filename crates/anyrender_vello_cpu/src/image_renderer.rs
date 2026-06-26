@@ -1,7 +1,7 @@
 use crate::VelloCpuScenePainter;
 use anyrender::{ImageRenderer, RenderContext as AnyRenderContext};
 use debug_timer::debug_timer;
-use vello_cpu::{RenderContext, PixmapMut, RasterizerSettings, Resources};
+use vello_cpu::{PixmapMut, RenderContext, Resources};
 
 pub struct VelloCpuImageRenderer {
     scene: VelloCpuScenePainter,
@@ -42,9 +42,9 @@ impl ImageRenderer for VelloCpuImageRenderer {
                 self.scene.render_ctx.width(),
                 self.scene.render_ctx.height(),
                 buffer,
-            ).unwrap(),
+            )
+            .unwrap(),
             &mut self.scene.resources,
-            RasterizerSettings::default(),
         );
         timer.record_time("render");
 

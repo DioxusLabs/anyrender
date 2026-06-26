@@ -53,15 +53,15 @@ linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13.1"
 color = "0.3"
-glifo = { version = "0.1" }
-vello = { version = "0.9", features = ["wgpu"] }
-vello_cpu = { version = "0.0.9", default-features = false, features = [
+glifo = {  git = "https://github.com/linebender/vello", rev = "3ac0aaa1edfd42eedf909799bd0ee78802bdd652", }
+vello = {  git = "https://github.com/linebender/vello", rev = "3ac0aaa1edfd42eedf909799bd0ee78802bdd652", features = ["wgpu"] }
+vello_cpu = {  git = "https://github.com/linebender/vello", rev = "3ac0aaa1edfd42eedf909799bd0ee78802bdd652", default-features = false, features = [
   "std",
   "text",
   "u8_pipeline",
 ] }
-vello_hybrid = { version = "0.0.9" }
-vello_common = { version = "0.0.9" }
+vello_hybrid = { git = "https://github.com/linebender/vello", rev = "3ac0aaa1edfd42eedf909799bd0ee78802bdd652" }
+vello_common = { git = "https://github.com/linebender/vello", rev = "3ac0aaa1edfd42eedf909799bd0ee78802bdd652" }
 
 # Rendering
 wgpu = "29"

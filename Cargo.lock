@@ -1248,6 +1248,7 @@ dependencies = [
 [[package]]
 name = "glifo"
 version = "0.1.1"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -3611,6 +3612,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "vello"
 version = "0.9.0"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "futures-intrusive",
@@ -3628,6 +3630,7 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.9"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -3643,6 +3646,7 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.0.9"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "crossbeam-channel",
@@ -3657,6 +3661,7 @@ dependencies = [
 [[package]]
 name = "vello_encoding"
 version = "0.9.0"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "guillotiere",
@@ -3668,6 +3673,7 @@ dependencies = [
 [[package]]
 name = "vello_hybrid"
 version = "0.0.9"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "glifo",
@@ -3684,6 +3690,7 @@ dependencies = [
 [[package]]
 name = "vello_shaders"
 version = "0.9.0"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "bytemuck",
  "log",
@@ -3695,6 +3702,7 @@ dependencies = [
 [[package]]
 name = "vello_sparse_shaders"
 version = "0.0.9"
+source = "git+https://github.com/linebender/vello?rev=3ac0aaa1edfd42eedf909799bd0ee78802bdd652#3ac0aaa1edfd42eedf909799bd0ee78802bdd652"
 dependencies = [
  "naga",
 ]

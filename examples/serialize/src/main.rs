@@ -79,6 +79,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgba8(0, 0, 0, 60),
         12.0,
         8.0,
+        false,
     );
 
     // Card background

@@ -253,6 +253,7 @@ pub trait PaintScene: RenderContext {
         brush: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     );
 
     // --- Provided methods
@@ -324,6 +325,7 @@ pub trait PaintScene: RenderContext {
                     cmd.brush,
                     cmd.radius,
                     cmd.std_dev,
+                    cmd.inset,
                 ),
             }
         }
