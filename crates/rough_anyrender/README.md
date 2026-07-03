@@ -7,18 +7,19 @@
 <!-- cargo-sync-readme start -->
 
 
-This crate is an adapter crate between [roughr](https://github.com/orhanbalci/rough-rs/main/roughr) and
-[anyrender](https://github.com/dioxuslabs/anyrender) crates. Converts from roughr drawing
-primitives to AnyRender's PaintScene types. Also has convenience traits for drawing onto AnyRender scenes. For more detailed
-information you can check roughr crate.
-
-Below examples are output of [rough_vello](https://github.com/orhanbalci/rough-rs/tree/main/rough_vello) adapter.
+This crate is an adapter crate between [roughr](https://github.com/orhanbalci/rough-rs/tree/main/roughr) and
+[anyrender](https://github.com/dioxuslabs/anyrender). It converts roughr drawing
+primitives into calls on AnyRender's `PaintScene`, so hand-sketched shapes can be
+rendered with any AnyRender backend. For more detailed information you can check the
+roughr crate.
 
 ## 📦 Cargo.toml
 
 ```toml
 [dependencies]
 rough_anyrender = "0.1"
+# Plus any AnyRender backend, e.g.:
+anyrender_vello_hybrid = "0.8"
 ```
 
 ## 🔧 Example
@@ -26,9 +27,9 @@ rough_anyrender = "0.1"
 ### Rust Logo
 
 ```rust
-use rough_vello::VelloGenerator;
-use vello::Scene;
+use anyrender::{PaintScene, Scene};
 use palette::Srgba;
+use rough_anyrender::VelloGenerator;
 use roughr::core::{FillStyle, OptionsBuilder};
 
 let options = OptionsBuilder::default()
@@ -42,8 +43,11 @@ let options = OptionsBuilder::default()
 
 let generator = VelloGenerator::new(options);
 let rust_logo_svg_path = "..."; // SVG path data for the Rust logo
-let rust_logo_drawing = generator.path::<f32>(rust_logo_svg_path);
+let rust_logo_drawing = generator.path::<f32>(rust_logo_svg_path.to_string());
 
+// `draw` accepts any `anyrender::PaintScene`. Here we record into a `Scene`, but you
+// can also draw straight into the scene painter handed to a `WindowRenderer::render`
+// closure (see the examples).
 let mut scene = Scene::new();
 rust_logo_drawing.draw(&mut scene);
 ```
@@ -61,21 +65,19 @@ rust_logo_drawing.draw(&mut scene);
 
 ## 🔭 Examples
 
-For more examples have a look at the
-[examples](https://github.com/orhanbalci/rough-rs/tree/main/rough_vello/examples) folder.
+Runnable [winit](https://docs.rs/winit) examples live in the `examples/` directory
+(`rectangle`, `rust_logo` and `animate`). Run one with, for example:
+
+```sh
+cargo run --example rust_logo
+```
 
 ## 🔌 Integration
 
-### Bevy Integration
-
-For Bevy game engine integration, you can use [bevy_vello](https://github.com/linebender/bevy_vello) which provides a Bevy plugin for vello. This allows you to render `rough_vello` drawings directly in your Bevy applications by converting the vello Scene to Bevy-compatible rendering.
-
-```toml
-[dependencies]
-rough_vello = "0.1"
-bevy_vello = "0.1"  # Check latest version
-bevy = "0.14"       # Or latest compatible version
-```
+Because drawing targets AnyRender's `PaintScene`, `rough_anyrender` works with any
+AnyRender backend, including `anyrender_vello`, `anyrender_vello_hybrid`,
+`anyrender_vello_cpu` and `anyrender_skia`. The bundled examples use
+`anyrender_vello_hybrid` together with `winit`.
 
 <!-- cargo-sync-readme end -->
 
