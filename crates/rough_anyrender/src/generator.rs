@@ -14,26 +14,26 @@ use roughr::generator::Generator;
 use roughr::PathSegment;
 
 #[derive(Default)]
-pub struct VelloGenerator {
+pub struct AnyRenderGenerator {
     gen: Generator,
     options: Option<Options>,
 }
 
 #[derive(Clone)]
-pub struct VelloOpset<F: Float + Trig> {
+pub struct AnyRenderOpset<F: Float + Trig> {
     pub op_set_type: OpSetType,
     pub ops: BezPath,
     pub size: Option<Point2D<F>>,
     pub path: Option<String>,
 }
 
-pub trait ToVelloOpset<F: Float + Trig> {
-    fn to_vello_opset(self) -> VelloOpset<F>;
+pub trait ToAnyRenderOpset<F: Float + Trig> {
+    fn to_anyrender_opset(self) -> AnyRenderOpset<F>;
 }
 
-impl<F: Float + Trig + FromPrimitive> ToVelloOpset<F> for OpSet<F> {
-    fn to_vello_opset(self) -> VelloOpset<F> {
-        VelloOpset {
+impl<F: Float + Trig + FromPrimitive> ToAnyRenderOpset<F> for OpSet<F> {
+    fn to_anyrender_opset(self) -> AnyRenderOpset<F> {
+        AnyRenderOpset {
             op_set_type: self.op_set_type.clone(),
             size: self.size,
             path: self.path.clone(),
@@ -42,41 +42,45 @@ impl<F: Float + Trig + FromPrimitive> ToVelloOpset<F> for OpSet<F> {
     }
 }
 
-pub struct VelloDrawable<F: Float + Trig> {
+pub struct AnyRenderDrawable<F: Float + Trig> {
     pub shape: String,
     pub options: Options,
-    pub sets: Vec<VelloOpset<F>>,
+    pub sets: Vec<AnyRenderOpset<F>>,
 }
 
-pub trait ToVelloDrawable<F: Float + Trig> {
-    fn to_vello_drawable(self) -> VelloDrawable<F>;
+pub trait ToAnyRenderDrawable<F: Float + Trig> {
+    fn to_anyrender_drawable(self) -> AnyRenderDrawable<F>;
 }
 
-impl<F: Float + Trig + FromPrimitive> ToVelloDrawable<F> for Drawable<F> {
-    fn to_vello_drawable(self) -> VelloDrawable<F> {
-        VelloDrawable {
+impl<F: Float + Trig + FromPrimitive> ToAnyRenderDrawable<F> for Drawable<F> {
+    fn to_anyrender_drawable(self) -> AnyRenderDrawable<F> {
+        AnyRenderDrawable {
             shape: self.shape,
             options: self.options,
-            sets: self.sets.into_iter().map(|s| s.to_vello_opset()).collect(),
+            sets: self
+                .sets
+                .into_iter()
+                .map(|s| s.to_anyrender_opset())
+                .collect(),
         }
     }
 }
 
-impl VelloGenerator {
+impl AnyRenderGenerator {
     pub fn new(options: Options) -> Self {
-        VelloGenerator {
+        AnyRenderGenerator {
             gen: Generator::default(),
             options: Some(options),
         }
     }
 }
 
-impl<F: Float + Trig> VelloDrawable<F> {
+impl<F: Float + Trig> AnyRenderDrawable<F> {
     pub fn draw(&self, scene: &mut impl PaintScene) {
         for set in self.sets.iter() {
             match set.op_set_type {
                 OpSetType::Path => {
-                    // Convert stroke options to Vello stroke
+                    // Convert stroke options to Kurbo stroke
                     let mut stroke = Stroke::new(self.options.stroke_width.unwrap_or(1.0) as f64);
 
                     // Set dash pattern if available
@@ -89,8 +93,8 @@ impl<F: Float + Trig> VelloDrawable<F> {
 
                     // Set line caps and joins
                     stroke = stroke
-                        .with_caps(convert_line_cap_from_roughr_to_vello(self.options.line_cap));
-                    stroke = stroke.with_join(convert_line_join_from_roughr_to_vello(
+                        .with_caps(convert_line_cap_from_roughr_to_kurbo(self.options.line_cap));
+                    stroke = stroke.with_join(convert_line_join_from_roughr_to_kurbo(
                         self.options.line_join,
                     ));
 
@@ -131,8 +135,8 @@ impl<F: Float + Trig> VelloDrawable<F> {
                     }
 
                     stroke = stroke
-                        .with_caps(convert_line_cap_from_roughr_to_vello(self.options.line_cap));
-                    stroke = stroke.with_join(convert_line_join_from_roughr_to_vello(
+                        .with_caps(convert_line_cap_from_roughr_to_kurbo(self.options.line_cap));
+                    stroke = stroke.with_join(convert_line_join_from_roughr_to_kurbo(
                         self.options.line_join,
                     ));
 
@@ -182,16 +186,16 @@ fn opset_to_shape<F: Trig + Float + FromPrimitive>(op_set: &OpSet<F>) -> BezPath
     path
 }
 
-impl VelloGenerator {
+impl AnyRenderGenerator {
     pub fn line<F: Trig + Float + FromPrimitive>(
         &self,
         x1: F,
         y1: F,
         x2: F,
         y2: F,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.line(x1, y1, x2, y2, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn rectangle<F: Trig + Float + FromPrimitive>(
@@ -200,9 +204,9 @@ impl VelloGenerator {
         y: F,
         width: F,
         height: F,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.rectangle(x, y, width, height, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn ellipse<F: Trig + Float + FromPrimitive>(
@@ -211,9 +215,9 @@ impl VelloGenerator {
         y: F,
         width: F,
         height: F,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.ellipse(x, y, width, height, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn circle<F: Trig + Float + FromPrimitive>(
@@ -221,26 +225,26 @@ impl VelloGenerator {
         x: F,
         y: F,
         diameter: F,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.circle(x, y, diameter, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn linear_path<F: Trig + Float + FromPrimitive>(
         &self,
         points: &[Point2D<F>],
         close: bool,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.linear_path(points, close, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn polygon<F: Trig + Float + FromPrimitive + MulAssign + Display>(
         &self,
         points: &[Point2D<F>],
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.polygon(points, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -253,11 +257,11 @@ impl VelloGenerator {
         start: F,
         stop: F,
         closed: bool,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self
             .gen
             .arc(x, y, width, height, start, stop, closed, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn bezier_quadratic<F: Trig + Float + FromPrimitive + MulAssign + Display>(
@@ -265,9 +269,9 @@ impl VelloGenerator {
         start: Point2D<F>,
         cp: Point2D<F>,
         end: Point2D<F>,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.bezier_quadratic(start, cp, end, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn bezier_cubic<F: Trig + Float + FromPrimitive + MulAssign + Display>(
@@ -276,39 +280,39 @@ impl VelloGenerator {
         cp1: Point2D<F>,
         cp2: Point2D<F>,
         end: Point2D<F>,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.bezier_cubic(start, cp1, cp2, end, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn curve<F: Trig + Float + FromPrimitive + MulAssign + Display>(
         &self,
         points: &[Point2D<F>],
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.curve(points, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn path<F: Trig + Float + FromPrimitive + MulAssign + Display>(
         &self,
         svg_path: String,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let drawable = self.gen.path(svg_path, &self.options);
-        drawable.to_vello_drawable()
+        drawable.to_anyrender_drawable()
     }
 
     pub fn bez_path<F: Trig + Float + FromPrimitive + MulAssign + Display>(
         &self,
         bezier_path: BezPath,
-    ) -> VelloDrawable<F> {
+    ) -> AnyRenderDrawable<F> {
         let segments = bezpath_to_svg_segments(&bezier_path);
         self.gen
             .path_from_segments(segments, &self.options)
-            .to_vello_drawable()
+            .to_anyrender_drawable()
     }
 }
 
-fn convert_line_cap_from_roughr_to_vello(roughr_line_cap: Option<roughr::core::LineCap>) -> Cap {
+fn convert_line_cap_from_roughr_to_kurbo(roughr_line_cap: Option<roughr::core::LineCap>) -> Cap {
     match roughr_line_cap {
         Some(roughr::core::LineCap::Butt) => Cap::Butt,
         Some(roughr::core::LineCap::Round) => Cap::Round,
@@ -317,7 +321,7 @@ fn convert_line_cap_from_roughr_to_vello(roughr_line_cap: Option<roughr::core::L
     }
 }
 
-fn convert_line_join_from_roughr_to_vello(
+fn convert_line_join_from_roughr_to_kurbo(
     roughr_line_join: Option<roughr::core::LineJoin>,
 ) -> Join {
     match roughr_line_join {

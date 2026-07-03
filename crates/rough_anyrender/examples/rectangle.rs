@@ -5,7 +5,7 @@ use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use kurbo::{Affine, Rect};
 use palette::Srgba;
 use peniko::{Color, Fill};
-use rough_anyrender::{VelloDrawable, VelloGenerator};
+use rough_anyrender::{AnyRenderDrawable, AnyRenderGenerator};
 use roughr::core::{FillStyle, OptionsBuilder};
 use winit::{
     application::ApplicationHandler,
@@ -30,7 +30,7 @@ struct App {
     render_state: RenderState,
     width: u32,
     height: u32,
-    rectangle: VelloDrawable<f32>,
+    rectangle: AnyRenderDrawable<f32>,
 }
 
 impl App {
@@ -52,7 +52,7 @@ impl App {
     }
 }
 
-fn build_rectangle() -> VelloDrawable<f32> {
+fn build_rectangle() -> AnyRenderDrawable<f32> {
     let options = OptionsBuilder::default()
         .stroke(Srgba::from_components((114u8, 87u8, 82u8, 255u8)).into_format())
         .fill(Srgba::from_components((254u8, 246u8, 201u8, 255)).into_format())
@@ -62,7 +62,7 @@ fn build_rectangle() -> VelloDrawable<f32> {
         .build()
         .unwrap();
 
-    let generator = VelloGenerator::new(options);
+    let generator = AnyRenderGenerator::new(options);
     let rect_width = 300.0;
     let rect_height = 200.0;
     // Center the rectangle within the canvas: (canvas_size - rect_size) / 2

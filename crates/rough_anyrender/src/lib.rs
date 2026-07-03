@@ -27,7 +27,7 @@
 //! ```ignore
 //! use anyrender::{PaintScene, Scene};
 //! use palette::Srgba;
-//! use rough_anyrender::VelloGenerator;
+//! use rough_anyrender::AnyRenderGenerator;
 //! use roughr::core::{FillStyle, OptionsBuilder};
 //!
 //! let options = OptionsBuilder::default()
@@ -39,11 +39,11 @@
 //!     .build()
 //!     .unwrap();
 //!
-//! let generator = VelloGenerator::new(options);
+//! let generator = AnyRenderGenerator::new(options);
 //! let rust_logo_svg_path = "..."; // SVG path data for the Rust logo
 //! let rust_logo_drawing = generator.path::<f32>(rust_logo_svg_path.to_string());
 //!
-//! // `draw` accepts any `anyrender::PaintScene`. Here we record into a `Scene`, but you
+//! // `draw` accepts any `anyrender::PaintScene`. Here we record into a `anyrender::Scene`, but you
 //! // can also draw straight into the scene painter handed to a `WindowRenderer::render`
 //! // closure (see the examples).
 //! let mut scene = Scene::new();
@@ -77,5 +77,5 @@
 //! `anyrender_vello_cpu` and `anyrender_skia`. The bundled examples use
 //! `anyrender_vello_hybrid` together with `winit`.
 
-pub mod vello_generator;
-pub use vello_generator::*;
+mod generator;
+pub use generator::*;

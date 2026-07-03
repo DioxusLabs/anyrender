@@ -5,7 +5,7 @@ use anyrender_vello_hybrid::VelloHybridWindowRenderer;
 use kurbo::{Affine, Rect};
 use palette::Srgba;
 use peniko::{Color, Fill};
-use rough_anyrender::VelloGenerator;
+use rough_anyrender::AnyRenderGenerator;
 use roughr::core::{FillStyle, OptionsBuilder};
 use svg_path_ops::pt::PathTransformer;
 use winit::{
@@ -70,7 +70,7 @@ fn build_logo() -> (Scene, (f64, f64)) {
         .build()
         .unwrap();
 
-    let generator = VelloGenerator::new(options);
+    let generator = AnyRenderGenerator::new(options);
     let drawing = generator.path::<f32>(RUST_LOGO_SVG_PATH.to_string());
 
     let mut logo = Scene::new();
