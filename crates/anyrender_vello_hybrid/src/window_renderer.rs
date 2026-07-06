@@ -226,6 +226,15 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 .expect("Error creating DeviceHandle"),
             };
 
+            let surface_capabilities = surface.get_capabilities(&device_handle.adapter);
+
+            let alpha_mode = surface_capabilities
+                .alpha_modes
+                .iter()
+                .copied()
+                .max_by_key(|mode| *mode as usize)
+                .unwrap_or_default();
+
             let render_surface = SurfaceRenderer::new(
                 surface,
                 SurfaceRendererConfiguration {
@@ -235,7 +244,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     height,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode,
                     view_formats: vec![],
                 },
                 None,
