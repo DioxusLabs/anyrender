@@ -115,6 +115,31 @@ impl VelloRendererOptions {
     }
 }
 
+impl TryFrom<anyrender::RendererConfig> for VelloRendererOptions {
+    type Error = anyrender::ConfigError;
+
+    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            options.base_color = color;
+        }
+        if let Some(mode) = config.composite_alpha_mode {
+            options.composite_alpha_mode = match mode {
+                anyrender::CompositeAlphaMode::Auto => wgpu::CompositeAlphaMode::Auto,
+                anyrender::CompositeAlphaMode::Opaque => wgpu::CompositeAlphaMode::Opaque,
+                anyrender::CompositeAlphaMode::PreMultiplied => {
+                    wgpu::CompositeAlphaMode::PreMultiplied
+                }
+                anyrender::CompositeAlphaMode::PostMultiplied => {
+                    wgpu::CompositeAlphaMode::PostMultiplied
+                }
+                anyrender::CompositeAlphaMode::Inherit => wgpu::CompositeAlphaMode::Inherit,
+            };
+        }
+        Ok(options)
+    }
+}
+
 pub struct VelloWindowRenderer {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
@@ -135,7 +160,12 @@ impl VelloWindowRenderer {
         Self::with_options(VelloRendererOptions::default())
     }
 
-    pub fn with_options(config: VelloRendererOptions) -> Self {
+    pub fn with_options(
+        config: impl TryInto<VelloRendererOptions, Error = impl std::error::Error>,
+    ) -> Self {
+        let config = config
+            .try_into()
+            .expect("Invalid Vello renderer configuration");
         Self {
             render_state: RenderState::Suspended,
             wgpu_context: build_wgpu_context(&config),

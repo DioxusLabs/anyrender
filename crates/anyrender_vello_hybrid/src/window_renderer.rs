@@ -100,6 +100,31 @@ impl VelloHybridRendererOptions {
     }
 }
 
+impl TryFrom<anyrender::RendererConfig> for VelloHybridRendererOptions {
+    type Error = anyrender::ConfigError;
+
+    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+        if config.base_color.is_some() {
+            return Err(anyrender::ConfigError::UnsupportedField("base_color"));
+        }
+        let mut options = Self::default();
+        if let Some(mode) = config.composite_alpha_mode {
+            options.composite_alpha_mode = match mode {
+                anyrender::CompositeAlphaMode::Auto => wgpu::CompositeAlphaMode::Auto,
+                anyrender::CompositeAlphaMode::Opaque => wgpu::CompositeAlphaMode::Opaque,
+                anyrender::CompositeAlphaMode::PreMultiplied => {
+                    wgpu::CompositeAlphaMode::PreMultiplied
+                }
+                anyrender::CompositeAlphaMode::PostMultiplied => {
+                    wgpu::CompositeAlphaMode::PostMultiplied
+                }
+                anyrender::CompositeAlphaMode::Inherit => wgpu::CompositeAlphaMode::Inherit,
+            };
+        }
+        Ok(options)
+    }
+}
+
 pub struct VelloHybridWindowRenderer {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
@@ -117,7 +142,12 @@ impl VelloHybridWindowRenderer {
         Self::with_options(VelloHybridRendererOptions::default())
     }
 
-    pub fn with_options(config: VelloHybridRendererOptions) -> Self {
+    pub fn with_options(
+        config: impl TryInto<VelloHybridRendererOptions, Error = impl std::error::Error>,
+    ) -> Self {
+        let config = config
+            .try_into()
+            .expect("Invalid Vello Hybrid renderer configuration");
         let render_settings = config.render_settings;
         let wgpu_context = build_wgpu_context(&config);
         Self {

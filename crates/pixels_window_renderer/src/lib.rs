@@ -58,6 +58,37 @@ impl PixelsRendererOptions {
     }
 }
 
+impl TryFrom<anyrender::RendererConfig> for PixelsRendererOptions {
+    type Error = anyrender::ConfigError;
+
+    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            let rgba8 = color.to_rgba8();
+            options.base_color = pixels::wgpu::Color {
+                r: rgba8.r as f64 / 255.0,
+                g: rgba8.g as f64 / 255.0,
+                b: rgba8.b as f64 / 255.0,
+                a: rgba8.a as f64 / 255.0,
+            };
+        }
+        if let Some(mode) = config.composite_alpha_mode {
+            options.composite_alpha_mode = match mode {
+                anyrender::CompositeAlphaMode::Auto => pixels::wgpu::CompositeAlphaMode::Auto,
+                anyrender::CompositeAlphaMode::Opaque => pixels::wgpu::CompositeAlphaMode::Opaque,
+                anyrender::CompositeAlphaMode::PreMultiplied => {
+                    pixels::wgpu::CompositeAlphaMode::PreMultiplied
+                }
+                anyrender::CompositeAlphaMode::PostMultiplied => {
+                    pixels::wgpu::CompositeAlphaMode::PostMultiplied
+                }
+                anyrender::CompositeAlphaMode::Inherit => pixels::wgpu::CompositeAlphaMode::Inherit,
+            };
+        }
+        Ok(options)
+    }
+}
+
 pub struct PixelsWindowRenderer<Renderer: ImageRenderer> {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
@@ -82,24 +113,30 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
         }
     }
 
-    pub fn with_options(config: PixelsRendererOptions) -> Self {
+    pub fn with_options(
+        config: impl TryInto<PixelsRendererOptions, Error = impl std::error::Error>,
+    ) -> Self {
         Self {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer: Renderer::new(0, 0),
-            config,
+            config: config
+                .try_into()
+                .expect("Invalid Pixels renderer configuration"),
         }
     }
 
     pub fn with_options_and_renderer<R: ImageRenderer>(
         renderer: R,
-        config: PixelsRendererOptions,
+        config: impl TryInto<PixelsRendererOptions, Error = impl std::error::Error>,
     ) -> PixelsWindowRenderer<R> {
         PixelsWindowRenderer {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer,
-            config,
+            config: config
+                .try_into()
+                .expect("Invalid Pixels renderer configuration"),
         }
     }
 }
