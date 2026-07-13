@@ -31,6 +31,7 @@ impl OpenGLBackend {
         window: Arc<dyn anyrender::WindowHandle>,
         width: u32,
         height: u32,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
     ) -> OpenGLBackend {
         let raw_display_handle = window.display_handle().unwrap().as_raw();
         let raw_window_handle = window.window_handle().unwrap().as_raw();
@@ -48,7 +49,13 @@ impl OpenGLBackend {
             .unwrap()
         };
 
-        let gl_config_template = ConfigTemplateBuilder::new().with_transparency(true).build();
+        let transparency = !matches!(
+            composite_alpha_mode,
+            anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto
+        );
+        let gl_config_template = ConfigTemplateBuilder::new()
+            .with_transparency(transparency)
+            .build();
         let gl_config = unsafe {
             gl_display
                 .find_configs(gl_config_template)

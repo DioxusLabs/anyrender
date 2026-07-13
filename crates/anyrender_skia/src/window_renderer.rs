@@ -29,6 +29,8 @@ struct ActiveRenderState {
 pub struct SkiaRendererOptions {
     /// Background color used to clear the canvas.
     pub base_color: Color,
+    /// Alpha mode used when compositing the window surface.
+    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
 
 impl Default for SkiaRendererOptions {
@@ -41,11 +43,22 @@ impl SkiaRendererOptions {
     pub const fn new() -> Self {
         Self {
             base_color: Color::WHITE,
+            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
         }
     }
 
     pub const fn base_color(self, base_color: Color) -> Self {
         Self { base_color, ..self }
+    }
+
+    pub const fn composite_alpha_mode(
+        self,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
+    ) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
+        }
     }
 }
 
@@ -53,15 +66,13 @@ impl TryFrom<anyrender::RendererConfig> for SkiaRendererOptions {
     type Error = anyrender::ConfigError;
 
     fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
-        if config.composite_alpha_mode.is_some() {
-            return Err(anyrender::ConfigError::UnsupportedField(
-                "composite_alpha_mode",
-            ));
-        }
         let mut options = Self::default();
         if let Some(color) = config.base_color {
             let rgba8 = color.to_rgba8();
             options.base_color = skia_safe::Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
+        }
+        if let Some(mode) = config.composite_alpha_mode {
+            options.composite_alpha_mode = mode;
         }
         Ok(options)
     }
@@ -118,9 +129,19 @@ impl WindowRenderer for SkiaWindowRenderer {
         graphics::set_resource_cache_total_bytes_limit(10485760);
 
         #[cfg(any(target_os = "macos", target_os = "ios"))]
-        let backend = crate::metal::MetalBackend::new(window, width, height);
+        let backend = crate::metal::MetalBackend::new(
+            window,
+            width,
+            height,
+            self.options.composite_alpha_mode,
+        );
         #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-        let backend = crate::opengl::OpenGLBackend::new(window, width, height);
+        let backend = crate::opengl::OpenGLBackend::new(
+            window,
+            width,
+            height,
+            self.options.composite_alpha_mode,
+        );
 
         self.render_state = RenderState::Active(Box::new(ActiveRenderState {
             backend: Box::new(backend),
