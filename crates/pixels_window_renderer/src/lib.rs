@@ -22,10 +22,13 @@ pub enum RenderState {
     Suspended,
 }
 
+/// Configuration options for the Pixels renderer.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct PixelsRendererOptions {
+    /// Background color used to clear the frame.
     pub base_color: Color,
+    /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: CompositeAlphaMode,
 }
 

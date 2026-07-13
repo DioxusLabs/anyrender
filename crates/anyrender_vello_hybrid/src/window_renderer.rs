@@ -61,6 +61,7 @@ pub struct VelloHybridRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub render_settings: RenderSettings,
+    /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: CompositeAlphaMode,
 }
 
