@@ -49,6 +49,24 @@ impl SkiaRendererOptions {
     }
 }
 
+impl TryFrom<anyrender::RendererConfig> for SkiaRendererOptions {
+    type Error = anyrender::ConfigError;
+
+    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+        if config.composite_alpha_mode.is_some() {
+            return Err(anyrender::ConfigError::UnsupportedField(
+                "composite_alpha_mode",
+            ));
+        }
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            let rgba8 = color.to_rgba8();
+            options.base_color = skia_safe::Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
+        }
+        Ok(options)
+    }
+}
+
 pub struct SkiaWindowRenderer {
     render_state: RenderState,
     options: SkiaRendererOptions,
@@ -67,10 +85,14 @@ impl SkiaWindowRenderer {
             options: SkiaRendererOptions::default(),
         }
     }
-    pub fn with_options(options: SkiaRendererOptions) -> Self {
+    pub fn with_options(
+        options: impl TryInto<SkiaRendererOptions, Error = impl std::error::Error>,
+    ) -> Self {
         Self {
             render_state: RenderState::Suspended,
-            options,
+            options: options
+                .try_into()
+                .expect("Invalid Skia renderer configuration"),
         }
     }
 }
