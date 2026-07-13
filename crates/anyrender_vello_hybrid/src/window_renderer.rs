@@ -212,6 +212,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
+        let composite_alpha_mode = self.config.composite_alpha_mode;
         let existing_device_handle = self
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
@@ -238,7 +239,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     height,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: self.config.composite_alpha_mode,
+                    alpha_mode: composite_alpha_mode,
                     view_formats: vec![],
                 },
                 None,
