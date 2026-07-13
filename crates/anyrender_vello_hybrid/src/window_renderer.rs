@@ -56,6 +56,7 @@ enum RenderState {
 }
 
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct VelloHybridRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
