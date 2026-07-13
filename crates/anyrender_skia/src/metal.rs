@@ -24,13 +24,22 @@ pub struct MetalBackend {
 }
 
 impl MetalBackend {
-    pub fn new(window: Arc<dyn anyrender::WindowHandle>, width: u32, height: u32) -> Self {
+    pub fn new(
+        window: Arc<dyn anyrender::WindowHandle>,
+        width: u32,
+        height: u32,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
+    ) -> Self {
         let device = MTLCreateSystemDefaultDevice().expect("no device found");
 
         let metal_layer = {
             let layer = CAMetalLayer::new();
             layer.setDevice(Some(&device));
             layer.setPixelFormat(objc2_metal::MTLPixelFormat::BGRA8Unorm);
+            layer.setOpaque(matches!(
+                composite_alpha_mode,
+                anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto
+            ));
             layer.setPresentsWithTransaction(false);
             // Disabling this option allows Skia's Blend Mode to work.
             // More about: https://developer.apple.com/documentation/quartzcore/cametallayer/1478168-framebufferonly

@@ -60,6 +60,7 @@ pub(crate) struct VulkanBackend {
     in_flight_fence: Fence,
     cmd_pool: CommandPool,
     cmd_buf: CommandBuffer,
+    composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
 
 impl VulkanBackend {
@@ -67,6 +68,7 @@ impl VulkanBackend {
         window: Arc<dyn anyrender::WindowHandle>,
         width: u32,
         height: u32,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
     ) -> VulkanBackend {
         let entry = unsafe { Entry::load().unwrap() };
 
@@ -100,6 +102,7 @@ impl VulkanBackend {
                 surface,
                 queue_family_index,
                 swapchain_size,
+                composite_alpha_mode,
                 None,
             );
 
@@ -161,6 +164,7 @@ impl VulkanBackend {
             in_flight_fence,
             cmd_pool,
             cmd_buf,
+            composite_alpha_mode,
         }
     }
 
@@ -180,6 +184,7 @@ impl VulkanBackend {
                 self.surface,
                 self.queue_family_index,
                 self.swapchain_size,
+                self.composite_alpha_mode,
                 Some(old_swapchain),
             );
         self.swapchain = swapchain;
@@ -468,6 +473,7 @@ fn create_swapchain(
     surface: SurfaceKHR,
     queue_family_index: u32,
     size: (u32, u32),
+    composite_alpha_mode: anyrender::CompositeAlphaMode,
     old_swapchain: Option<SwapchainKHR>,
 ) -> (
     SwapchainKHR,
@@ -524,6 +530,43 @@ fn create_swapchain(
 
     let image_count = surface_caps.min_image_count.max(2);
 
+    let supported = surface_caps.supported_composite_alpha;
+    let composite_alpha = match composite_alpha_mode {
+        anyrender::CompositeAlphaMode::Opaque
+            if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) =>
+        {
+            CompositeAlphaFlagsKHR::OPAQUE
+        }
+        anyrender::CompositeAlphaMode::PreMultiplied
+            if supported.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) =>
+        {
+            CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+        }
+        anyrender::CompositeAlphaMode::PostMultiplied
+            if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) =>
+        {
+            CompositeAlphaFlagsKHR::POST_MULTIPLIED
+        }
+        anyrender::CompositeAlphaMode::Inherit
+            if supported.contains(CompositeAlphaFlagsKHR::INHERIT) =>
+        {
+            CompositeAlphaFlagsKHR::INHERIT
+        }
+        _ => {
+            if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) {
+                CompositeAlphaFlagsKHR::OPAQUE
+            } else if supported.contains(CompositeAlphaFlagsKHR::INHERIT) {
+                CompositeAlphaFlagsKHR::INHERIT
+            } else if supported.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+                CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+            } else if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
+                CompositeAlphaFlagsKHR::POST_MULTIPLIED
+            } else {
+                supported
+            }
+        }
+    };
+
     let create_info = SwapchainCreateInfoKHR::default()
         .surface(surface)
         .min_image_count(image_count)
@@ -540,7 +583,7 @@ fn create_swapchain(
         .image_sharing_mode(SharingMode::EXCLUSIVE)
         .queue_family_indices(std::slice::from_ref(&queue_family_index))
         .pre_transform(surface_caps.current_transform)
-        .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
+        .composite_alpha(composite_alpha)
         .present_mode(present_mode)
         .clipped(true)
         .old_swapchain(old_swapchain.unwrap_or(SwapchainKHR::null()));
