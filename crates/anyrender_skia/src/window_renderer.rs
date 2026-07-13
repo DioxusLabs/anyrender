@@ -23,8 +23,23 @@ struct ActiveRenderState {
     scene_cache: SkiaSceneCache,
 }
 
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SkiaRendererOptions {
+    pub base_color: Color,
+}
+
+impl Default for SkiaRendererOptions {
+    fn default() -> Self {
+        Self {
+            base_color: Color::WHITE,
+        }
+    }
+}
+
 pub struct SkiaWindowRenderer {
     render_state: RenderState,
+    options: SkiaRendererOptions,
 }
 
 impl Default for SkiaWindowRenderer {
@@ -37,6 +52,13 @@ impl SkiaWindowRenderer {
     pub fn new() -> Self {
         Self {
             render_state: RenderState::Suspended,
+            options: SkiaRendererOptions::default(),
+        }
+    }
+    pub fn with_options(options: SkiaRendererOptions) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            options,
         }
     }
 }
@@ -104,7 +126,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         };
 
         surface.canvas().restore_to_count(1);
-        surface.canvas().clear(Color::WHITE);
+        surface.canvas().clear(self.options.base_color);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
