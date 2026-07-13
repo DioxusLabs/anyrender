@@ -150,13 +150,19 @@ impl WindowRenderer for SkiaWindowRenderer {
 ))]
 pub mod raster {
     #[cfg(feature = "pixels_window_renderer")]
+    pub use pixels_window_renderer::PixelsRendererOptions;
+    #[cfg(feature = "pixels_window_renderer")]
     pub use pixels_window_renderer::PixelsWindowRenderer;
+
     #[cfg(feature = "softbuffer_window_renderer")]
     pub use softbuffer_window_renderer::SoftbufferWindowRenderer;
 
     #[cfg(feature = "pixels_window_renderer")]
     pub type SkiaRasterWindowRenderer =
         PixelsWindowRenderer<crate::image_renderer::SkiaImageRenderer>;
+    #[cfg(feature = "pixels_window_renderer")]
+    pub type SkiaRasterRendererOptions = PixelsRendererOptions;
+
     #[cfg(all(
         feature = "softbuffer_window_renderer",
         not(feature = "pixels_window_renderer")

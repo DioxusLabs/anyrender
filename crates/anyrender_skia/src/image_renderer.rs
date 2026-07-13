@@ -62,7 +62,7 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        surface.canvas().clear(Color::WHITE);
+        surface.canvas().clear(Color::TRANSPARENT);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
@@ -87,7 +87,7 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        surface.canvas().clear(Color::WHITE);
+        surface.canvas().clear(Color::TRANSPARENT);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
