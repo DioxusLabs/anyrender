@@ -19,12 +19,32 @@ pub enum RenderState {
     Suspended,
 }
 
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct PixelsRendererOptions {
+    pub base_color: Color,
+}
+
+impl Default for PixelsRendererOptions {
+    fn default() -> Self {
+        Self {
+            base_color: Color {
+                r: 1.0,
+                g: 1.0,
+                b: 1.0,
+                a: 1.0,
+            },
+        }
+    }
+}
+
 pub struct PixelsWindowRenderer<Renderer: ImageRenderer> {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
     renderer: Renderer,
+    config: PixelsRendererOptions,
 }
 
 impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
@@ -38,6 +58,28 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer,
+            config: PixelsRendererOptions::default(),
+        }
+    }
+
+    pub fn with_options(config: PixelsRendererOptions) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            config,
+        }
+    }
+
+    pub fn with_options_and_renderer<R: ImageRenderer>(
+        renderer: R,
+        config: PixelsRendererOptions,
+    ) -> PixelsWindowRenderer<R> {
+        PixelsWindowRenderer {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer,
+            config,
         }
     }
 }
@@ -74,12 +116,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
         let mut pixels = Pixels::new(width, height, surface).unwrap();
         pixels.enable_vsync(true);
-        pixels.clear_color(Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        });
+        pixels.clear_color(self.config.base_color);
         self.render_state = RenderState::Active(ActiveRenderState { pixels });
         self.window_handle = Some(window_handle);
 
