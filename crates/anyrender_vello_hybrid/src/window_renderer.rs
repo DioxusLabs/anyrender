@@ -65,6 +65,41 @@ pub struct VelloHybridRendererOptions {
     pub composite_alpha_mode: CompositeAlphaMode,
 }
 
+impl VelloHybridRendererOptions {
+    pub fn new() -> Self {
+        // Within default of RenderSettings there are calls to non const methods so no const for new
+        Self::default()
+    }
+
+    pub const fn features(self, features: Features) -> Self {
+        Self {
+            features: Some(features),
+            ..self
+        }
+    }
+
+    pub const fn limits(self, limits: Limits) -> Self {
+        Self {
+            limits: Some(limits),
+            ..self
+        }
+    }
+
+    pub const fn render_settings(self, render_settings: RenderSettings) -> Self {
+        Self {
+            render_settings,
+            ..self
+        }
+    }
+
+    pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
+        }
+    }
+}
+
 pub struct VelloHybridWindowRenderer {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
