@@ -23,9 +23,11 @@ struct ActiveRenderState {
     scene_cache: SkiaSceneCache,
 }
 
+/// Options for configuring the Skia renderer.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SkiaRendererOptions {
+    /// Background color used to clear the canvas.
     pub base_color: Color,
 }
 

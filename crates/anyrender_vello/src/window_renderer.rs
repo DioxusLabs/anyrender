@@ -61,6 +61,7 @@ pub struct VelloRendererOptions {
     pub limits: Option<Limits>,
     pub base_color: Color,
     pub antialiasing_method: AaConfig,
+    /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: CompositeAlphaMode,
 }
 
