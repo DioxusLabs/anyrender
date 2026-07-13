@@ -67,12 +67,50 @@ pub struct VelloRendererOptions {
 
 impl Default for VelloRendererOptions {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VelloRendererOptions {
+    pub const fn new() -> Self {
         Self {
             features: None,
             limits: None,
             base_color: Color::WHITE,
             antialiasing_method: AaConfig::Msaa16,
             composite_alpha_mode: CompositeAlphaMode::Auto,
+        }
+    }
+
+    pub const fn features(self, features: Features) -> Self {
+        Self {
+            features: Some(features),
+            ..self
+        }
+    }
+
+    pub const fn limits(self, limits: Limits) -> Self {
+        Self {
+            limits: Some(limits),
+            ..self
+        }
+    }
+
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
+    }
+
+    pub const fn antialiasing_method(self, antialiasing_method: AaConfig) -> Self {
+        Self {
+            antialiasing_method,
+            ..self
+        }
+    }
+
+    pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
         }
     }
 }
