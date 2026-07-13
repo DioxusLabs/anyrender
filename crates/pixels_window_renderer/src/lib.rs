@@ -34,14 +34,26 @@ pub struct PixelsRendererOptions {
 
 impl Default for PixelsRendererOptions {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PixelsRendererOptions {
+    pub const fn new() -> Self {
         Self {
-            base_color: Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            },
+            base_color: Color::WHITE,
             composite_alpha_mode: CompositeAlphaMode::Auto,
+        }
+    }
+
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
+    }
+
+    pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
         }
     }
 }
