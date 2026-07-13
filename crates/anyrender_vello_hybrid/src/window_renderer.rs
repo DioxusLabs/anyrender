@@ -12,8 +12,8 @@ use vello_hybrid::{
     Scene as VelloHybridScene, TextureBindings,
 };
 use wgpu::{
-    CommandEncoderDescriptor, Features, Limits, PresentMode, Texture, TextureFormat, TextureView,
-    TextureViewDescriptor,
+    CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
+    TextureFormat, TextureView, TextureViewDescriptor,
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
@@ -61,6 +61,7 @@ pub struct VelloHybridRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub render_settings: RenderSettings,
+    pub composite_alpha_mode: CompositeAlphaMode,
 }
 
 pub struct VelloHybridWindowRenderer {
@@ -236,7 +237,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     height,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode: self.config.composite_alpha_mode,
                     view_formats: vec![],
                 },
                 None,
