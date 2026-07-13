@@ -33,9 +33,19 @@ pub struct SkiaRendererOptions {
 
 impl Default for SkiaRendererOptions {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SkiaRendererOptions {
+    pub const fn new() -> Self {
         Self {
             base_color: Color::WHITE,
         }
+    }
+
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
     }
 }
 
