@@ -4,7 +4,10 @@
 
 use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use pixels::{Pixels, SurfaceTexture, wgpu::Color};
+use pixels::{
+    Pixels, PixelsBuilder, SurfaceTexture,
+    wgpu::{Color, CompositeAlphaMode},
+};
 use std::sync::Arc;
 
 // Simple struct to hold the state of the renderer
@@ -23,6 +26,7 @@ pub enum RenderState {
 #[non_exhaustive]
 pub struct PixelsRendererOptions {
     pub base_color: Color,
+    pub composite_alpha_mode: CompositeAlphaMode,
 }
 
 impl Default for PixelsRendererOptions {
@@ -34,6 +38,7 @@ impl Default for PixelsRendererOptions {
                 b: 1.0,
                 a: 1.0,
             },
+            composite_alpha_mode: CompositeAlphaMode::Auto,
         }
     }
 }
@@ -114,9 +119,12 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         on_ready: F,
     ) {
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
-        let mut pixels = Pixels::new(width, height, surface).unwrap();
-        pixels.enable_vsync(true);
-        pixels.clear_color(self.config.base_color);
+        let pixels = PixelsBuilder::new(width, height, surface)
+            .enable_vsync(true)
+            .alpha_mode(self.config.composite_alpha_mode)
+            .clear_color(self.config.base_color)
+            .build()
+            .unwrap();
         self.render_state = RenderState::Active(ActiveRenderState { pixels });
         self.window_handle = Some(window_handle);
 
@@ -156,7 +164,6 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         // Paint
         self.renderer.render(draw_fn, state.pixels.frame_mut());
         timer.record_time("render");
-
         state.pixels.render().unwrap();
         timer.record_time("present");
         timer.print_times("pixels: ");
