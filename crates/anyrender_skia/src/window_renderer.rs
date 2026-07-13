@@ -210,7 +210,7 @@ pub mod raster {
     pub use pixels_window_renderer::PixelsWindowRenderer;
 
     #[cfg(feature = "softbuffer_window_renderer")]
-    pub use softbuffer_window_renderer::SoftbufferWindowRenderer;
+    pub use softbuffer_window_renderer::{SoftbufferRendererOptions, SoftbufferWindowRenderer};
 
     #[cfg(feature = "pixels_window_renderer")]
     pub type SkiaRasterWindowRenderer =
@@ -224,4 +224,9 @@ pub mod raster {
     ))]
     pub type SkiaRasterWindowRenderer =
         SoftbufferWindowRenderer<crate::image_renderer::SkiaImageRenderer>;
+    #[cfg(all(
+        feature = "softbuffer_window_renderer",
+        not(feature = "pixels_window_renderer")
+    ))]
+    pub type SkiaRasterRendererOptions = SoftbufferRendererOptions;
 }

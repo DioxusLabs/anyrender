@@ -7,6 +7,44 @@ use debug_timer::debug_timer;
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
 
+/// Configuration options for the Softbuffer renderer.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SoftbufferRendererOptions {
+    /// Background color used to clear the frame.
+    pub base_color: peniko::Color,
+}
+
+impl Default for SoftbufferRendererOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SoftbufferRendererOptions {
+    pub const fn new() -> Self {
+        Self {
+            base_color: peniko::Color::WHITE,
+        }
+    }
+
+    pub const fn base_color(self, base_color: peniko::Color) -> Self {
+        Self { base_color, ..self }
+    }
+}
+
+impl TryFrom<anyrender::RendererConfig> for SoftbufferRendererOptions {
+    type Error = anyrender::ConfigError;
+
+    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            options.base_color = color;
+        }
+        Ok(options)
+    }
+}
+
 // Simple struct to hold the state of the renderer
 pub struct ActiveRenderState {
     _context: Context<Arc<dyn WindowHandle>>,
@@ -26,6 +64,7 @@ pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
     window_handle: Option<Arc<dyn WindowHandle>>,
     renderer: Renderer,
     buffer: Vec<u8>,
+    config: SoftbufferRendererOptions,
 }
 
 impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
@@ -40,6 +79,36 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             window_handle: None,
             renderer,
             buffer: Vec::new(),
+            config: SoftbufferRendererOptions::default(),
+        }
+    }
+
+    pub fn with_options(
+        config: impl TryInto<SoftbufferRendererOptions, Error = impl std::error::Error>,
+    ) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            buffer: Vec::new(),
+            config: config
+                .try_into()
+                .expect("Invalid Softbuffer renderer configuration"),
+        }
+    }
+
+    pub fn with_options_and_renderer<R: ImageRenderer>(
+        renderer: R,
+        config: impl TryInto<SoftbufferRendererOptions, Error = impl std::error::Error>,
+    ) -> SoftbufferWindowRenderer<R> {
+        SoftbufferWindowRenderer {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer,
+            buffer: Vec::new(),
+            config: config
+                .try_into()
+                .expect("Invalid Softbuffer renderer configuration"),
         }
     }
 }
@@ -128,13 +197,48 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         assert_eq!(chunks.len(), out.len());
         assert_eq!(remainder.len(), 0);
 
+        let base_color = self.config.base_color.to_rgba8();
+        let base_r = base_color.r as u32;
+        let base_g = base_color.g as u32;
+        let base_b = base_color.b as u32;
+        let base_a = base_color.a as u32;
+
         for (&src, dest) in chunks.iter().zip(out.iter_mut()) {
             let [r, g, b, a] = src;
-            if a == 0 {
-                *dest = u32::MAX;
+            let r = r as u32;
+            let g = g as u32;
+            let b = b as u32;
+            let a = a as u32;
+
+            let out_r: u32;
+            let out_g: u32;
+            let out_b: u32;
+
+            if a < 255 {
+                let out_a = a + (base_a * (255 - a)) / 255;
+
+                if out_a > 0 {
+                    // Pre-multiply common factor to keep it clean and performant
+                    let denom = out_a * 255;
+                    let blend_factor = base_a * (255 - a);
+
+                    out_r = (r * a * 255 + base_r * blend_factor) / denom;
+                    out_g = (g * a * 255 + base_g * blend_factor) / denom;
+                    out_b = (b * a * 255 + base_b * blend_factor) / denom;
+                } else {
+                    // Both source and base are completely transparent (out_a == 0)
+                    out_r = 0;
+                    out_g = 0;
+                    out_b = 0;
+                }
             } else {
-                *dest = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+                // Source is fully opaque, no blending required
+                out_r = r;
+                out_g = g;
+                out_b = b;
             }
+
+            *dest = (out_r << 16) | (out_g << 8) | out_b;
         }
         timer.record_time("swizel");
 
