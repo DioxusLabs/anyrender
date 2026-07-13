@@ -11,7 +11,9 @@ use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
     Scene as VelloScene,
 };
-use wgpu::{Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages};
+use wgpu::{
+    CompositeAlphaMode, Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages,
+};
 use wgpu_context::{
     DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
 };
@@ -59,6 +61,7 @@ pub struct VelloRendererOptions {
     pub limits: Option<Limits>,
     pub base_color: Color,
     pub antialiasing_method: AaConfig,
+    pub composite_alpha_mode: CompositeAlphaMode,
 }
 
 impl Default for VelloRendererOptions {
@@ -68,6 +71,7 @@ impl Default for VelloRendererOptions {
             limits: None,
             base_color: Color::WHITE,
             antialiasing_method: AaConfig::Msaa16,
+            composite_alpha_mode: CompositeAlphaMode::Auto,
         }
     }
 }
@@ -225,7 +229,7 @@ impl WindowRenderer for VelloWindowRenderer {
                     height,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode: self.config.composite_alpha_mode,
                     view_formats: vec![],
                 },
                 Some(TextureConfiguration {
