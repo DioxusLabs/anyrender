@@ -1,8 +1,9 @@
 use anyrender::{
-    RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+    PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
+use peniko::Color;
 use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -55,14 +56,27 @@ enum RenderState {
     Active(ActiveRenderState),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct VelloHybridRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub render_settings: RenderSettings,
+    pub base_color: Color,
     /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: CompositeAlphaMode,
+}
+
+impl Default for VelloHybridRendererOptions {
+    fn default() -> Self {
+        Self {
+            features: None,
+            limits: None,
+            render_settings: RenderSettings::default(),
+            base_color: Color::WHITE,
+            composite_alpha_mode: CompositeAlphaMode::Auto,
+        }
+    }
 }
 
 impl VelloHybridRendererOptions {
@@ -92,6 +106,10 @@ impl VelloHybridRendererOptions {
         }
     }
 
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
+    }
+
     pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
         Self {
             composite_alpha_mode,
@@ -104,10 +122,10 @@ impl TryFrom<anyrender::RendererConfig> for VelloHybridRendererOptions {
     type Error = anyrender::ConfigError;
 
     fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
-        if config.base_color.is_some() {
-            return Err(anyrender::ConfigError::UnsupportedField("base_color"));
-        }
-        let mut options = Self::default();
+        let mut options = Self {
+            base_color: config.base_color.unwrap_or(Color::WHITE),
+            ..Default::default()
+        };
         if let Some(mode) = config.composite_alpha_mode {
             options.composite_alpha_mode = match mode {
                 anyrender::CompositeAlphaMode::Auto => wgpu::CompositeAlphaMode::Auto,
@@ -392,14 +410,29 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             cache: &mut self.cached_images,
         };
 
-        // Regenerate the vello scene
-        draw_fn(&mut VelloHybridScenePainter {
+        let mut scene_painter = VelloHybridScenePainter {
             scene: &mut self.scene,
             layer_stack: Vec::new(),
             image_manager,
             texture_bindings: &mut state.texture_bindings,
             device_handle: &render_surface.device_handle,
-        });
+        };
+        if self.config.base_color != Color::TRANSPARENT {
+            scene_painter.fill(
+                peniko::Fill::NonZero,
+                kurbo::Affine::IDENTITY,
+                self.config.base_color,
+                None,
+                &kurbo::Rect::new(
+                    0.,
+                    0.,
+                    render_surface.config.width as f64,
+                    render_surface.config.height as f64,
+                ),
+            );
+        }
+        // Regenerate the vello scene
+        draw_fn(&mut scene_painter);
         timer.record_time("cmd");
 
         let Ok(texture_view) = render_surface.target_texture_view() else {
