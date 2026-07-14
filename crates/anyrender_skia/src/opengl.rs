@@ -53,21 +53,43 @@ impl OpenGLBackend {
             composite_alpha_mode,
             anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto
         );
-        let gl_config_template = ConfigTemplateBuilder::new()
-            .with_transparency(transparency)
-            .build();
+        let mut template = ConfigTemplateBuilder::new().with_transparency(transparency);
+        if transparency {
+            template = template.with_alpha_size(8);
+        } else {
+            template = template.with_alpha_size(0);
+        }
+        let gl_config_template = template.build();
+
         let gl_config = unsafe {
             gl_display
                 .find_configs(gl_config_template)
                 .unwrap()
                 .reduce(|accum, config| {
-                    let transparency_check = config.supports_transparency().unwrap_or(false)
-                        & !accum.supports_transparency().unwrap_or(false);
+                    let config_transparency = config.supports_transparency().unwrap_or(false);
+                    let accum_transparency = accum.supports_transparency().unwrap_or(false);
 
-                    if transparency_check || config.num_samples() < accum.num_samples() {
+                    if config_transparency == transparency && accum_transparency != transparency {
                         config
-                    } else {
+                    } else if accum_transparency == transparency
+                        && config_transparency != transparency
+                    {
                         accum
+                    } else {
+                        let config_alpha = config.alpha_size();
+                        let accum_alpha = accum.alpha_size();
+                        if config_alpha != accum_alpha {
+                            let prefer_config = if transparency {
+                                config_alpha > accum_alpha
+                            } else {
+                                config_alpha < accum_alpha
+                            };
+                            if prefer_config { config } else { accum }
+                        } else if config.num_samples() < accum.num_samples() {
+                            config
+                        } else {
+                            accum
+                        }
                     }
                 })
                 .unwrap()
