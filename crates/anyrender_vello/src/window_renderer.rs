@@ -15,7 +15,8 @@ use wgpu::{
     CompositeAlphaMode, Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages,
 };
 use wgpu_context::{
-    DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
+    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    TextureConfiguration, WGPUContext,
 };
 
 use crate::{DEFAULT_THREADS, VelloScenePainter};
@@ -304,6 +305,14 @@ impl WindowRenderer for VelloWindowRenderer {
                 },
                 Some(TextureConfiguration {
                     usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                    // Vello's compute pipeline outputs to an Rgba8Unorm storage texture.
+                    format: TextureFormat::Rgba8Unorm,
+                    // Vello Classic's `fine` shader writes straight (non-premultiplied)
+                    // alpha. A `PreMultiplied` surface expects premultiplied colour, so
+                    // premultiply on the way out; other modes want straight alpha
+                    // (PostMultiplied) or ignore it (Opaque), so no conversion is needed.
+                    alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
+                        .then_some(AlphaConversion::Premultiply),
                 }),
                 device_handle,
             )

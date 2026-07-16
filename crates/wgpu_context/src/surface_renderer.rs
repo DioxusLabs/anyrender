@@ -1,4 +1,6 @@
-use crate::{DeviceHandle, WgpuContextError, util::create_texture};
+use crate::{
+    AlphaConversion, AlphaConvertBlitter, DeviceHandle, WgpuContextError, util::create_texture,
+};
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, CurrentSurfaceTexture, Device, PresentMode,
     Queue, Surface, SurfaceConfiguration, SurfaceTexture, TextureFormat, TextureUsages,
@@ -12,6 +14,42 @@ pub struct GetCurrentSurfaceTextureErr;
 #[derive(Clone)]
 pub struct TextureConfiguration {
     pub usage: TextureUsages,
+    /// Format of the intermediate texture. This must match the format that the
+    /// renderer targets when rendering into the intermediate texture.
+    pub format: TextureFormat,
+    /// Alpha conversion to apply while blitting the intermediate texture to the
+    /// surface. `None` performs a straight copy.
+    ///
+    /// This is renderer- and surface-specific. It must be set based on the
+    /// alpha representation the renderer emits (premultiplied vs straight) and
+    /// what the surface's [`CompositeAlphaMode`] expects. For example, a
+    /// premultiplied-alpha renderer targeting a `PostMultiplied` surface uses
+    /// [`AlphaConversion::Unpremultiply`], while a straight-alpha renderer
+    /// targeting a `PreMultiplied` surface uses [`AlphaConversion::Premultiply`].
+    pub alpha_conversion: Option<AlphaConversion>,
+}
+
+/// How the intermediate texture is blitted to the surface texture.
+enum IntermediateBlitter {
+    /// Straight copy (source and destination alpha are treated identically).
+    Copy(TextureBlitter),
+    /// Convert between premultiplied and straight alpha while copying.
+    Convert(AlphaConvertBlitter),
+}
+
+impl IntermediateBlitter {
+    fn copy(
+        &self,
+        device: &Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &TextureView,
+        target: &TextureView,
+    ) {
+        match self {
+            IntermediateBlitter::Copy(blitter) => blitter.copy(device, encoder, source, target),
+            IntermediateBlitter::Convert(blitter) => blitter.copy(device, encoder, source, target),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -77,7 +115,7 @@ struct IntermediateTextureStuff {
     // from the TextureView so we don't need to store both.
     pub texture_view: TextureView,
     // Blitter for blitting from the intermediate texture to the surface.
-    pub blitter: TextureBlitter,
+    pub blitter: IntermediateBlitter,
 }
 
 /// Combination of surface and its configuration.
@@ -129,16 +167,29 @@ impl<'s> SurfaceRenderer<'s> {
         };
 
         let intermediate_texture = intermediate_texture_config.map(|texture_config| {
+            // Apply the requested alpha conversion while blitting, or a straight
+            // copy when no conversion is needed.
+            let blitter = match texture_config.alpha_conversion {
+                Some(conversion) => IntermediateBlitter::Convert(AlphaConvertBlitter::new(
+                    &device_handle.device,
+                    surface_config.format,
+                    conversion,
+                )),
+                None => IntermediateBlitter::Copy(TextureBlitter::new(
+                    &device_handle.device,
+                    surface_config.format,
+                )),
+            };
             Box::new(IntermediateTextureStuff {
                 config: texture_config.clone(),
                 texture_view: create_texture(
                     surface_renderer_config.width,
                     surface_renderer_config.height,
-                    TextureFormat::Rgba8Unorm,
+                    texture_config.format,
                     texture_config.usage,
                     &device_handle.device,
                 ),
-                blitter: TextureBlitter::new(&device_handle.device, surface_config.format),
+                blitter,
             })
         });
 
@@ -169,7 +220,7 @@ impl<'s> SurfaceRenderer<'s> {
             intermediate_texture_stuff.texture_view = create_texture(
                 width,
                 height,
-                TextureFormat::Rgba8Unorm,
+                intermediate_texture_stuff.config.format,
                 intermediate_texture_stuff.config.usage,
                 &self.device_handle.device,
             );

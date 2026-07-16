@@ -14,9 +14,12 @@ use vello_hybrid::{
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
-    TextureFormat, TextureView, TextureViewDescriptor,
+    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
-use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
+use wgpu_context::{
+    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    TextureConfiguration, WGPUContext,
+};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
 
@@ -313,6 +316,19 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 .expect("Error creating DeviceHandle"),
             };
 
+            // Vello Hybrid emits premultiplied alpha and renders directly into
+            // its target. That matches a `PreMultiplied` surface (and Opaque
+            // ignores alpha), so those render straight to the surface. Only
+            // `PostMultiplied` (straight alpha) needs conversion, which routes
+            // through an intermediate texture (using the renderer's target
+            // format) that is un-premultiplied while blitting to the surface.
+            let intermediate_texture = (composite_alpha_mode == CompositeAlphaMode::PostMultiplied)
+                .then(|| TextureConfiguration {
+                    usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                    format: DEFAULT_TEXTURE_FORMAT,
+                    alpha_conversion: Some(AlphaConversion::Unpremultiply),
+                });
+
             let render_surface = SurfaceRenderer::new(
                 surface,
                 SurfaceRendererConfiguration {
@@ -325,7 +341,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     alpha_mode: composite_alpha_mode,
                     view_formats: vec![],
                 },
-                None,
+                intermediate_texture,
                 device_handle,
             )
             .expect("Error creating SurfaceRenderer");
