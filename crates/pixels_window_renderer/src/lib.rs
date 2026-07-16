@@ -29,7 +29,7 @@ pub struct PixelsRendererOptions {
     /// Background color used to clear the frame.
     pub base_color: Color,
     /// Alpha mode used when compositing the window surface.
-    pub composite_alpha_mode: CompositeAlphaMode,
+    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
 
 impl Default for PixelsRendererOptions {
@@ -42,7 +42,7 @@ impl PixelsRendererOptions {
     pub const fn new() -> Self {
         Self {
             base_color: Color::WHITE,
-            composite_alpha_mode: CompositeAlphaMode::Auto,
+            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
         }
     }
 
@@ -50,7 +50,10 @@ impl PixelsRendererOptions {
         Self { base_color, ..self }
     }
 
-    pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
+    pub const fn composite_alpha_mode(
+        self,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
+    ) -> Self {
         Self {
             composite_alpha_mode,
             ..self
@@ -72,20 +75,7 @@ impl TryFrom<anyrender::RendererConfig> for PixelsRendererOptions {
                 a: rgba8.a as f64 / 255.0,
             };
         }
-        if let Some(mode) = config.composite_alpha_mode {
-            options.composite_alpha_mode = match mode {
-                anyrender::CompositeAlphaMode::Auto => pixels::wgpu::CompositeAlphaMode::Auto,
-                anyrender::CompositeAlphaMode::Opaque => pixels::wgpu::CompositeAlphaMode::Opaque,
-                anyrender::CompositeAlphaMode::PreMultiplied => {
-                    pixels::wgpu::CompositeAlphaMode::PreMultiplied
-                }
-                anyrender::CompositeAlphaMode::PostMultiplied => {
-                    pixels::wgpu::CompositeAlphaMode::PostMultiplied
-                }
-                anyrender::CompositeAlphaMode::Inherit => pixels::wgpu::CompositeAlphaMode::Inherit,
-            };
-        }
-        Ok(options)
+        Ok(options.composite_alpha_mode(config.composite_alpha_mode.unwrap_or_default()))
     }
 }
 
@@ -170,10 +160,26 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         height: u32,
         on_ready: F,
     ) {
+        let composite_alpha_mode = match self.config.composite_alpha_mode {
+            anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
+            anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
+            anyrender::CompositeAlphaMode::Transparent => {
+                #[cfg(target_vendor = "apple")]
+                {
+                    // wgpu is lying in apple's case it uses PreMultiplied in reality
+                    // (do not modify shaders for PostMultiplied)
+                    CompositeAlphaMode::PostMultiplied
+                }
+                #[cfg(not(target_vendor = "apple"))]
+                {
+                    CompositeAlphaMode::PreMultiplied
+                }
+            }
+        };
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
         let pixels = PixelsBuilder::new(width, height, surface)
             .enable_vsync(true)
-            .alpha_mode(self.config.composite_alpha_mode)
+            .alpha_mode(composite_alpha_mode)
             .clear_color(self.config.base_color)
             .build()
             .unwrap();

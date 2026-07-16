@@ -537,20 +537,10 @@ fn create_swapchain(
         {
             CompositeAlphaFlagsKHR::OPAQUE
         }
-        anyrender::CompositeAlphaMode::PreMultiplied
+        anyrender::CompositeAlphaMode::Transparent
             if supported.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) =>
         {
             CompositeAlphaFlagsKHR::PRE_MULTIPLIED
-        }
-        anyrender::CompositeAlphaMode::PostMultiplied
-            if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) =>
-        {
-            CompositeAlphaFlagsKHR::POST_MULTIPLIED
-        }
-        anyrender::CompositeAlphaMode::Inherit
-            if supported.contains(CompositeAlphaFlagsKHR::INHERIT) =>
-        {
-            CompositeAlphaFlagsKHR::INHERIT
         }
         _ => {
             if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) {

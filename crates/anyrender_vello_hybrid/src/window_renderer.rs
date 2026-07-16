@@ -64,7 +64,7 @@ pub struct VelloHybridRendererOptions {
     pub render_settings: RenderSettings,
     pub base_color: Color,
     /// Alpha mode used when compositing the window surface.
-    pub composite_alpha_mode: CompositeAlphaMode,
+    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
 
 impl Default for VelloHybridRendererOptions {
@@ -74,7 +74,7 @@ impl Default for VelloHybridRendererOptions {
             limits: None,
             render_settings: RenderSettings::default(),
             base_color: Color::WHITE,
-            composite_alpha_mode: CompositeAlphaMode::Auto,
+            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
         }
     }
 }
@@ -110,7 +110,10 @@ impl VelloHybridRendererOptions {
         Self { base_color, ..self }
     }
 
-    pub const fn composite_alpha_mode(self, composite_alpha_mode: CompositeAlphaMode) -> Self {
+    pub const fn composite_alpha_mode(
+        self,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
+    ) -> Self {
         Self {
             composite_alpha_mode,
             ..self
@@ -122,24 +125,11 @@ impl TryFrom<anyrender::RendererConfig> for VelloHybridRendererOptions {
     type Error = anyrender::ConfigError;
 
     fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
-        let mut options = Self {
+        Ok(Self {
             base_color: config.base_color.unwrap_or(Color::WHITE),
+            composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
             ..Default::default()
-        };
-        if let Some(mode) = config.composite_alpha_mode {
-            options.composite_alpha_mode = match mode {
-                anyrender::CompositeAlphaMode::Auto => wgpu::CompositeAlphaMode::Auto,
-                anyrender::CompositeAlphaMode::Opaque => wgpu::CompositeAlphaMode::Opaque,
-                anyrender::CompositeAlphaMode::PreMultiplied => {
-                    wgpu::CompositeAlphaMode::PreMultiplied
-                }
-                anyrender::CompositeAlphaMode::PostMultiplied => {
-                    wgpu::CompositeAlphaMode::PostMultiplied
-                }
-                anyrender::CompositeAlphaMode::Inherit => wgpu::CompositeAlphaMode::Inherit,
-            };
-        }
-        Ok(options)
+        })
     }
 }
 
@@ -295,7 +285,22 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
-        let composite_alpha_mode = self.config.composite_alpha_mode;
+        let composite_alpha_mode = match self.config.composite_alpha_mode {
+            anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
+            anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
+            anyrender::CompositeAlphaMode::Transparent => {
+                #[cfg(target_vendor = "apple")]
+                {
+                    // wgpu is lying in apple's case it uses PreMultiplied in reality
+                    // (do not modify shaders for PostMultiplied)
+                    CompositeAlphaMode::PostMultiplied
+                }
+                #[cfg(not(target_vendor = "apple"))]
+                {
+                    CompositeAlphaMode::PreMultiplied
+                }
+            }
+        };
         let existing_device_handle = self
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));

@@ -131,9 +131,7 @@ pub enum CompositeAlphaMode {
     #[default]
     Auto,
     Opaque,
-    PreMultiplied,
-    PostMultiplied,
-    Inherit,
+    Transparent,
 }
 
 /// Error returned when converting a unified configuration to a backend-specific one.
