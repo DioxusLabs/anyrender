@@ -149,6 +149,9 @@ pub trait WindowRenderer: RenderContext {
         false
     }
 
+    /// Returns the composite alpha mode currently being used by this renderer
+    fn current_alpha_mode(&self) -> Option<CurrentCompositeAlphaMode>;
+
     fn set_size(&mut self, width: u32, height: u32);
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }

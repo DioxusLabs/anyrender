@@ -1,3 +1,5 @@
+use crate::window_renderer::SkiaBackend;
+use anyrender::{CompositeAlphaMode, CurrentCompositeAlphaMode};
 use ash::{
     Device, Entry, Instance,
     vk::{
@@ -35,8 +37,6 @@ use std::{
     sync::Arc,
 };
 
-use crate::window_renderer::SkiaBackend;
-
 pub(crate) struct VulkanBackend {
     _entry: Entry, // Dont drop until backend is dropped
     instance: Instance,
@@ -61,6 +61,7 @@ pub(crate) struct VulkanBackend {
     cmd_pool: CommandPool,
     cmd_buf: CommandBuffer,
     composite_alpha_mode: anyrender::CompositeAlphaMode,
+    current_alpha_mode: CompositeAlphaFlagsKHR,
 }
 
 impl VulkanBackend {
@@ -93,18 +94,24 @@ impl VulkanBackend {
 
         let swapchain_size = (width, height);
 
-        let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
-            create_swapchain(
-                &instance,
-                &device,
-                physical_device,
-                &surface_fns,
-                surface,
-                queue_family_index,
-                swapchain_size,
-                composite_alpha_mode,
-                None,
-            );
+        let (
+            swapchain,
+            swapchain_fns,
+            swapchain_images,
+            swapchain_format,
+            swapchain_extent,
+            chosen_alpha_mode,
+        ) = create_swapchain(
+            &instance,
+            &device,
+            physical_device,
+            &surface_fns,
+            surface,
+            queue_family_index,
+            swapchain_size,
+            composite_alpha_mode,
+            None,
+        );
 
         let gr_context = create_gr_context(
             &entry,
@@ -165,6 +172,7 @@ impl VulkanBackend {
             cmd_pool,
             cmd_buf,
             composite_alpha_mode,
+            current_alpha_mode: chosen_alpha_mode,
         }
     }
 
@@ -175,27 +183,44 @@ impl VulkanBackend {
 
         let old_swapchain = self.swapchain;
 
-        let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
-            create_swapchain(
-                &self.instance,
-                &self.device,
-                self.physical_device,
-                &self.surface_fns,
-                self.surface,
-                self.queue_family_index,
-                self.swapchain_size,
-                self.composite_alpha_mode,
-                Some(old_swapchain),
-            );
+        let (
+            swapchain,
+            swapchain_fns,
+            swapchain_images,
+            swapchain_format,
+            swapchain_extent,
+            current_alpha_mode,
+        ) = create_swapchain(
+            &self.instance,
+            &self.device,
+            self.physical_device,
+            &self.surface_fns,
+            self.surface,
+            self.queue_family_index,
+            self.swapchain_size,
+            self.composite_alpha_mode,
+            Some(old_swapchain),
+        );
         self.swapchain = swapchain;
         self.swapchain_fns = swapchain_fns;
         self.swapchain_images = swapchain_images;
         self.swapchain_format = swapchain_format;
         self.swapchain_extent = swapchain_extent;
         self.swapchain_suboptimal = false;
+        self.current_alpha_mode = current_alpha_mode;
 
         unsafe {
             self.swapchain_fns.destroy_swapchain(old_swapchain, None);
+        }
+    }
+
+    pub(crate) fn current_alpha_mode(&self) -> CurrentCompositeAlphaMode {
+        match self.current_alpha_mode {
+            CompositeAlphaFlagsKHR::OPAQUE => CurrentCompositeAlphaMode::Opaque,
+            CompositeAlphaFlagsKHR::PRE_MULTIPLIED => CurrentCompositeAlphaMode::PreMultiplied,
+            CompositeAlphaFlagsKHR::POST_MULTIPLIED => CurrentCompositeAlphaMode::PostMultiplied,
+            CompositeAlphaFlagsKHR::INHERIT => CurrentCompositeAlphaMode::Opaque,
+            _ => CurrentCompositeAlphaMode::Opaque,
         }
     }
 }
@@ -481,6 +506,7 @@ fn create_swapchain(
     Vec<Image>,
     Format,
     Extent2D,
+    CompositeAlphaFlagsKHR,
 ) {
     let surface_caps = unsafe {
         surface_fns
@@ -542,6 +568,11 @@ fn create_swapchain(
         {
             CompositeAlphaFlagsKHR::PRE_MULTIPLIED
         }
+        anyrender::CompositeAlphaMode::Transparent
+            if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) =>
+        {
+            CompositeAlphaFlagsKHR::POST_MULTIPLIED
+        }
         _ => {
             if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) {
                 CompositeAlphaFlagsKHR::OPAQUE
@@ -582,7 +613,14 @@ fn create_swapchain(
     let swapchain = unsafe { swapchain_fns.create_swapchain(&create_info, None).unwrap() };
     let images = unsafe { swapchain_fns.get_swapchain_images(swapchain).unwrap() };
 
-    (swapchain, swapchain_fns, images, format.format, extent)
+    (
+        swapchain,
+        swapchain_fns,
+        images,
+        format.format,
+        extent,
+        composite_alpha,
+    )
 }
 
 fn create_gr_context(

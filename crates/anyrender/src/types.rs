@@ -134,6 +134,28 @@ pub enum CompositeAlphaMode {
     Transparent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(u8)]
+pub enum CurrentCompositeAlphaMode {
+    PreMultiplied = 0,
+    PostMultiplied = 1,
+    Opaque = 2,
+}
+
+impl TryFrom<u8> for CurrentCompositeAlphaMode {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::PreMultiplied),
+            1 => Ok(Self::PostMultiplied),
+            2 => Ok(Self::Opaque),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Error returned when converting a unified configuration to a backend-specific one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {

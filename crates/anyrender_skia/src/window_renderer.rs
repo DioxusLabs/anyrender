@@ -1,11 +1,12 @@
 use anyrender::{RenderContext, WindowRenderer};
 use debug_timer::debug_timer;
 use skia_safe::{Color, Surface, graphics};
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::{SkiaScenePainter, scene::SkiaSceneCache};
 
-pub(crate) trait SkiaBackend {
+pub(crate) trait SkiaBackend: Any {
     fn set_size(&mut self, width: u32, height: u32);
 
     fn prepare(&mut self) -> Option<Surface>;
@@ -160,6 +161,43 @@ impl WindowRenderer for SkiaWindowRenderer {
 
     fn is_active(&self) -> bool {
         matches!(self.render_state, RenderState::Active(..))
+    }
+
+    fn current_alpha_mode(&self) -> Option<anyrender::CurrentCompositeAlphaMode> {
+        let RenderState::Active(state) = &self.render_state else {
+            return None;
+        };
+        let any_backend = &*state.backend as &dyn Any;
+
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        let is_gl = any_backend.is::<crate::opengl::OpenGLBackend>();
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        let is_gl = false;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        let is_metal = any_backend.is::<crate::metal::MetalBackend>();
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        let is_metal = false;
+
+        if is_gl || is_metal {
+            return match self.options.composite_alpha_mode {
+                anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto => {
+                    Some(anyrender::CurrentCompositeAlphaMode::Opaque)
+                }
+                anyrender::CompositeAlphaMode::Transparent => {
+                    Some(anyrender::CurrentCompositeAlphaMode::PreMultiplied)
+                }
+            };
+        };
+        #[cfg(feature = "vulkan")]
+        {
+            any_backend
+                .downcast_ref::<crate::vulkan::VulkanBackend>()
+                .map(|b| b.current_alpha_mode())
+        }
+        #[cfg(not(feature = "vulkan"))]
+        {
+            None
+        }
     }
 
     fn set_size(&mut self, width: u32, height: u32) {

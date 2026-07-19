@@ -2,7 +2,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    CurrentCompositeAlphaMode, ImageRenderer, RenderContext, WindowHandle, WindowRenderer,
+};
 use debug_timer::debug_timer;
 use pixels::{
     Pixels, PixelsBuilder, SurfaceTexture,
@@ -210,6 +212,16 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
                 .unwrap();
             self.renderer.resize(physical_width, physical_height);
         };
+    }
+
+    fn current_alpha_mode(&self) -> Option<CurrentCompositeAlphaMode> {
+        // Pixels doesn't allow us to probe for alpha mode without ugly workarounds so we're guessing
+        Some(match self.config.composite_alpha_mode {
+            anyrender::CompositeAlphaMode::Transparent => CurrentCompositeAlphaMode::PreMultiplied,
+            anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto => {
+                CurrentCompositeAlphaMode::Opaque
+            }
+        })
     }
 
     fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {

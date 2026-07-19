@@ -1,5 +1,6 @@
 use anyrender::{
-    PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+    CurrentCompositeAlphaMode, PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId,
+    WindowHandle, WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
@@ -285,7 +286,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
-        let composite_alpha_mode = match self.config.composite_alpha_mode {
+        let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
             anyrender::CompositeAlphaMode::Transparent => {
@@ -317,6 +318,37 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 .await
                 .expect("Error creating DeviceHandle"),
             };
+
+            let adapter = &device_handle.adapter;
+            let caps = surface.get_capabilities(adapter);
+            let mut alpha_modes = caps.alpha_modes;
+            let found = alpha_modes.iter().find(|m| **m == composite_alpha_mode);
+
+            if found.is_none() {
+                alpha_modes.sort_unstable_by(
+                    |first: &CompositeAlphaMode, second: &CompositeAlphaMode| {
+                        let first_num = match *first {
+                            CompositeAlphaMode::PreMultiplied => 0,
+                            CompositeAlphaMode::PostMultiplied => 1,
+                            CompositeAlphaMode::Opaque
+                            | CompositeAlphaMode::Inherit
+                            | CompositeAlphaMode::Auto => 2,
+                        };
+                        let second_num = match *second {
+                            CompositeAlphaMode::PreMultiplied => 0,
+                            CompositeAlphaMode::PostMultiplied => 1,
+                            CompositeAlphaMode::Opaque
+                            | CompositeAlphaMode::Inherit
+                            | CompositeAlphaMode::Auto => 2,
+                        };
+                        first_num.cmp(&second_num)
+                    },
+                );
+                composite_alpha_mode = alpha_modes
+                    .first()
+                    .copied()
+                    .expect("Surface didn't report any alpha modes");
+            }
 
             let render_surface = SurfaceRenderer::new(
                 surface,
@@ -387,6 +419,37 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             if let RenderState::Active(active) = &mut self.render_state {
                 active.render_surface.resize(width, height);
             };
+        }
+    }
+
+    fn current_alpha_mode(&self) -> Option<anyrender::CurrentCompositeAlphaMode> {
+        let RenderState::Active(state) = &self.render_state else {
+            return None;
+        };
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            match state.render_surface.surface.get_configuration()?.alpha_mode {
+                CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
+                CompositeAlphaMode::PostMultiplied => {
+                    Some(CurrentCompositeAlphaMode::PostMultiplied)
+                }
+                CompositeAlphaMode::Auto
+                | CompositeAlphaMode::Opaque
+                | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
+            }
+        }
+        // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
+        #[cfg(target_vendor = "apple")]
+        {
+            match state.render_surface.surface.get_configuration()?.alpha_mode {
+                CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
+                CompositeAlphaMode::PostMultiplied => {
+                    Some(CurrentCompositeAlphaMode::PreMultiplied)
+                }
+                CompositeAlphaMode::Auto
+                | CompositeAlphaMode::Opaque
+                | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
+            }
         }
     }
 
