@@ -359,12 +359,18 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             // `PostMultiplied` (straight alpha) needs conversion, which routes
             // through an intermediate texture (using the renderer's target
             // format) that is un-premultiplied while blitting to the surface.
+            #[cfg(not(target_vendor = "apple"))]
             let intermediate_texture = (composite_alpha_mode == CompositeAlphaMode::PostMultiplied)
                 .then(|| TextureConfiguration {
                     usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
                     format: DEFAULT_TEXTURE_FORMAT,
                     alpha_conversion: Some(AlphaConversion::Unpremultiply),
                 });
+
+            // Apple is almost guaranteed to be premultiplied
+            // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
+            #[cfg(target_vendor = "apple")]
+            let intermediate_texture = None;
 
             let render_surface = SurfaceRenderer::new(
                 surface,

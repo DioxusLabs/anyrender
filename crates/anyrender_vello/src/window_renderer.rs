@@ -328,6 +328,23 @@ impl WindowRenderer for VelloWindowRenderer {
                     .expect("Surface didn't report any alpha modes");
             }
 
+            #[cfg(not(target_vendor = "apple"))]
+            let texture_config =
+                (composite_alpha_mode == CompositeAlphaMode::PreMultiplied).then(|| {
+                    TextureConfiguration {
+                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                        format: TextureFormat::Rgba8Unorm,
+                        alpha_conversion: Some(AlphaConversion::Premultiply),
+                    }
+                });
+            // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
+            #[cfg(target_vendor = "apple")]
+            let texture_config = Some(TextureConfiguration {
+                usage: TextureUsages::STORAGE_BINDING,
+                format: TextureFormat::Rgba8Unorm,
+                alpha_conversion: Some(AlphaConversion::Premultiply),
+            });
+
             let render_surface = SurfaceRenderer::new(
                 surface,
                 SurfaceRendererConfiguration {
@@ -340,17 +357,7 @@ impl WindowRenderer for VelloWindowRenderer {
                     alpha_mode: composite_alpha_mode,
                     view_formats: vec![],
                 },
-                Some(TextureConfiguration {
-                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                    // Vello's compute pipeline outputs to an Rgba8Unorm storage texture.
-                    format: TextureFormat::Rgba8Unorm,
-                    // Vello Classic's `fine` shader writes straight (non-premultiplied)
-                    // alpha. A `PreMultiplied` surface expects premultiplied colour, so
-                    // premultiply on the way out; other modes want straight alpha
-                    // (PostMultiplied) or ignore it (Opaque), so no conversion is needed.
-                    alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
-                        .then_some(AlphaConversion::Premultiply),
-                }),
+                texture_config,
                 device_handle,
             )
             .expect("Error creating SurfaceRenderer");
