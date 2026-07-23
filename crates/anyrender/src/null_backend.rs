@@ -1,9 +1,6 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{
-    CurrentCompositeAlphaMode, Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle,
-    WindowRenderer,
-};
+use crate::{Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -49,9 +46,9 @@ impl WindowRenderer for NullWindowRenderer {
 
     fn set_size(&mut self, _width: u32, _height: u32) {}
 
-    fn current_alpha_mode(&self) -> Option<CurrentCompositeAlphaMode> {
-        Some(CurrentCompositeAlphaMode::Opaque)
-    }
+    // fn current_alpha_mode(&self) -> Option<CurrentCompositeAlphaMode> {
+    //     Some(CurrentCompositeAlphaMode::Opaque)
+    // }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F) {}
 }

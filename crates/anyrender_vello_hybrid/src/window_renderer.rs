@@ -1,6 +1,5 @@
 use anyrender::{
-    CurrentCompositeAlphaMode, PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId,
-    WindowHandle, WindowRenderer,
+    PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
@@ -441,37 +440,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             if let RenderState::Active(active) = &mut self.render_state {
                 active.render_surface.resize(width, height);
             };
-        }
-    }
-
-    fn current_alpha_mode(&self) -> Option<anyrender::CurrentCompositeAlphaMode> {
-        let RenderState::Active(state) = &self.render_state else {
-            return None;
-        };
-        #[cfg(not(target_vendor = "apple"))]
-        {
-            match state.render_surface.surface.get_configuration()?.alpha_mode {
-                CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
-                CompositeAlphaMode::PostMultiplied => {
-                    Some(CurrentCompositeAlphaMode::PostMultiplied)
-                }
-                CompositeAlphaMode::Auto
-                | CompositeAlphaMode::Opaque
-                | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
-            }
-        }
-        // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
-        #[cfg(target_vendor = "apple")]
-        {
-            match state.render_surface.surface.get_configuration()?.alpha_mode {
-                CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
-                CompositeAlphaMode::PostMultiplied => {
-                    Some(CurrentCompositeAlphaMode::PreMultiplied)
-                }
-                CompositeAlphaMode::Auto
-                | CompositeAlphaMode::Opaque
-                | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
-            }
         }
     }
 

@@ -2,9 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{
-    CurrentCompositeAlphaMode, ImageRenderer, RenderContext, WindowHandle, WindowRenderer,
-};
+use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
@@ -175,10 +173,6 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
                 .unwrap();
             self.renderer.resize(physical_width, physical_height);
         };
-    }
-
-    fn current_alpha_mode(&self) -> Option<CurrentCompositeAlphaMode> {
-        Some(CurrentCompositeAlphaMode::Opaque)
     }
 
     fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
