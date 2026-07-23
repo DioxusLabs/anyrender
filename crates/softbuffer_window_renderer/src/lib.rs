@@ -98,20 +98,19 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
         }
     }
 
-    pub fn with_options(
-        config: impl TryInto<SoftbufferRendererOptions, Error = impl std::error::Error>,
-    ) -> Self {
-        Self {
+    pub fn try_with_options<E: std::error::Error>(
+        config: impl TryInto<SoftbufferRendererOptions, Error = E>,
+    ) -> Result<Self, E> {
+        Ok(Self {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer: Renderer::new(0, 0),
             buffer: Vec::new(),
             config: config
-                .try_into()
-                .expect("Invalid Softbuffer renderer configuration"),
+                .try_into()?,
             width: 0,
             height: 0,
-        }
+        })
     }
 
     pub fn with_options_and_renderer<R: ImageRenderer>(
