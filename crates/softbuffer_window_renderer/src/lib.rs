@@ -2,8 +2,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
+use kurbo::{Affine, Rect};
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
 
@@ -65,6 +66,8 @@ pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
     renderer: Renderer,
     buffer: Vec<u8>,
     config: SoftbufferRendererOptions,
+    width: u32,
+    height: u32,
 }
 
 impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
@@ -80,6 +83,8 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             renderer,
             buffer: Vec::new(),
             config: SoftbufferRendererOptions::default(),
+            width: 0,
+            height: 0,
         }
     }
 
@@ -94,6 +99,8 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             config: config
                 .try_into()
                 .expect("Invalid Softbuffer renderer configuration"),
+            width: 0,
+            height: 0,
         }
     }
 
@@ -109,6 +116,8 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             config: config
                 .try_into()
                 .expect("Invalid Softbuffer renderer configuration"),
+            width: 0,
+            height: 0,
         }
     }
 }
@@ -163,6 +172,8 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
     }
 
     fn set_size(&mut self, physical_width: u32, physical_height: u32) {
+        self.width = physical_width;
+        self.height = physical_height;
         if let RenderState::Active(state) = &mut self.render_state {
             state
                 .surface
@@ -188,7 +199,23 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         timer.record_time("buffer_mut");
 
         // Paint
-        self.renderer.render_to_vec(draw_fn, &mut self.buffer);
+        let base_color = self.config.base_color;
+        let width = self.width as f64;
+        let height = self.height as f64;
+
+        let wrapped_draw_fn = |painter: &mut Renderer::ScenePainter<'_>| {
+            painter.fill(
+                peniko::Fill::NonZero,
+                Affine::IDENTITY,
+                base_color,
+                None,
+                &Rect::new(0.0, 0.0, width, height),
+            );
+            draw_fn(painter);
+        };
+
+        self.renderer
+            .render_to_vec(wrapped_draw_fn, &mut self.buffer);
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();
@@ -197,48 +224,13 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         assert_eq!(chunks.len(), out.len());
         assert_eq!(remainder.len(), 0);
 
-        let base_color = self.config.base_color.to_rgba8();
-        let base_r = base_color.r as u32;
-        let base_g = base_color.g as u32;
-        let base_b = base_color.b as u32;
-        let base_a = base_color.a as u32;
-
         for (&src, dest) in chunks.iter().zip(out.iter_mut()) {
-            let [r, g, b, a] = src;
+            let [r, g, b, _a] = src;
             let r = r as u32;
             let g = g as u32;
             let b = b as u32;
-            let a = a as u32;
 
-            let out_r: u32;
-            let out_g: u32;
-            let out_b: u32;
-
-            if a < 255 {
-                let out_a = a + (base_a * (255 - a)) / 255;
-
-                if out_a > 0 {
-                    // Pre-multiply common factor to keep it clean and performant
-                    let denom = out_a * 255;
-                    let blend_factor = base_a * (255 - a);
-
-                    out_r = (r * a * 255 + base_r * blend_factor) / denom;
-                    out_g = (g * a * 255 + base_g * blend_factor) / denom;
-                    out_b = (b * a * 255 + base_b * blend_factor) / denom;
-                } else {
-                    // Both source and base are completely transparent (out_a == 0)
-                    out_r = 0;
-                    out_g = 0;
-                    out_b = 0;
-                }
-            } else {
-                // Source is fully opaque, no blending required
-                out_r = r;
-                out_g = g;
-                out_b = b;
-            }
-
-            *dest = (out_r << 16) | (out_g << 8) | out_b;
+            *dest = (r << 16) | (g << 8) | b;
         }
         timer.record_time("swizel");
 
