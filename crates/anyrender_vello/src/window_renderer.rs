@@ -329,18 +329,16 @@ impl WindowRenderer for VelloWindowRenderer {
             }
 
             #[cfg(not(target_vendor = "apple"))]
-            let texture_config =
-                (composite_alpha_mode == CompositeAlphaMode::PreMultiplied).then(|| {
-                    TextureConfiguration {
-                        usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                        format: TextureFormat::Rgba8Unorm,
-                        alpha_conversion: Some(AlphaConversion::Premultiply),
-                    }
-                });
+            let texture_config = Some(TextureConfiguration {
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                format: TextureFormat::Rgba8Unorm,
+                alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
+                    .then_some(AlphaConversion::Premultiply),
+            });
             // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
             #[cfg(target_vendor = "apple")]
             let texture_config = Some(TextureConfiguration {
-                usage: TextureUsages::STORAGE_BINDING,
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
                 format: TextureFormat::Rgba8Unorm,
                 alpha_conversion: Some(AlphaConversion::Premultiply),
             });
