@@ -103,15 +103,13 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
     }
 
     pub fn with_options(
-        config: impl TryInto<PixelsRendererOptions, Error = impl std::error::Error>,
+        config: impl Into<PixelsRendererOptions>,
     ) -> Self {
         Self {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer: Renderer::new(0, 0),
-            config: config
-                .try_into()
-                .expect("Invalid Pixels renderer configuration"),
+            config: config.into(),
         }
     }
 
