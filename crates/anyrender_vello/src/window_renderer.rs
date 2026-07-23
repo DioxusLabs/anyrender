@@ -412,37 +412,6 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
-    // fn current_alpha_mode(&self) -> Option<anyrender::CurrentCompositeAlphaMode> {
-    //     let RenderState::Active(state) = &self.render_state else {
-    //         return None;
-    //     };
-    //     #[cfg(not(target_vendor = "apple"))]
-    //     {
-    //         match state.render_surface.surface.get_configuration()?.alpha_mode {
-    //             CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
-    //             CompositeAlphaMode::PostMultiplied => {
-    //                 Some(CurrentCompositeAlphaMode::PostMultiplied)
-    //             }
-    //             CompositeAlphaMode::Auto
-    //             | CompositeAlphaMode::Opaque
-    //             | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
-    //         }
-    //     }
-    //     // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
-    //     #[cfg(target_vendor = "apple")]
-    //     {
-    //         match state.render_surface.surface.get_configuration()?.alpha_mode {
-    //             CompositeAlphaMode::PreMultiplied => Some(CurrentCompositeAlphaMode::PreMultiplied),
-    //             CompositeAlphaMode::PostMultiplied => {
-    //                 Some(CurrentCompositeAlphaMode::PreMultiplied)
-    //             }
-    //             CompositeAlphaMode::Auto
-    //             | CompositeAlphaMode::Opaque
-    //             | CompositeAlphaMode::Inherit => Some(CurrentCompositeAlphaMode::Opaque),
-    //         }
-    //     }
-    // }
-
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
