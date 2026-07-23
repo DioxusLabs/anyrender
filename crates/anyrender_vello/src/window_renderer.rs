@@ -119,15 +119,14 @@ impl VelloRendererOptions {
     }
 }
 
-impl TryFrom<anyrender::RendererConfig> for VelloRendererOptions {
-    type Error = anyrender::ConfigError;
+impl From<anyrender::RendererConfig> for VelloRendererOptions {
 
-    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
+    fn from(config: anyrender::RendererConfig) -> Self {
+        Self {
             base_color: config.base_color.unwrap_or(Color::WHITE),
             composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
             ..Default::default()
-        })
+        }
     }
 }
 
@@ -152,11 +151,9 @@ impl VelloWindowRenderer {
     }
 
     pub fn with_options(
-        config: impl TryInto<VelloRendererOptions, Error = impl std::error::Error>,
+        config: impl Into<VelloRendererOptions>,
     ) -> Self {
-        let config = config
-            .try_into()
-            .expect("Invalid Vello renderer configuration");
+        let config = config.into();
         Self {
             render_state: RenderState::Suspended,
             wgpu_context: build_wgpu_context(&config),

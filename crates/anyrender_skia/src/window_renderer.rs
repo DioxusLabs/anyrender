@@ -63,10 +63,9 @@ impl SkiaRendererOptions {
     }
 }
 
-impl TryFrom<anyrender::RendererConfig> for SkiaRendererOptions {
-    type Error = anyrender::ConfigError;
+impl From<anyrender::RendererConfig> for SkiaRendererOptions {
 
-    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+    fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
         if let Some(color) = config.base_color {
             let rgba8 = color.to_rgba8();
@@ -75,7 +74,7 @@ impl TryFrom<anyrender::RendererConfig> for SkiaRendererOptions {
         if let Some(mode) = config.composite_alpha_mode {
             options.composite_alpha_mode = mode;
         }
-        Ok(options)
+            options
     }
 }
 
@@ -98,13 +97,11 @@ impl SkiaWindowRenderer {
         }
     }
     pub fn with_options(
-        options: impl TryInto<SkiaRendererOptions, Error = impl std::error::Error>,
+        options: impl Into<SkiaRendererOptions>,
     ) -> Self {
         Self {
             render_state: RenderState::Suspended,
-            options: options
-                .try_into()
-                .expect("Invalid Skia renderer configuration"),
+            options: options.into()
         }
     }
 }

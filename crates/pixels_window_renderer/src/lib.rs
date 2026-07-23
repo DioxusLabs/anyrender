@@ -61,10 +61,9 @@ impl PixelsRendererOptions {
     }
 }
 
-impl TryFrom<anyrender::RendererConfig> for PixelsRendererOptions {
-    type Error = anyrender::ConfigError;
+impl From<anyrender::RendererConfig> for PixelsRendererOptions {
 
-    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+    fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
         if let Some(color) = config.base_color {
             let rgba8 = color.to_rgba8();
@@ -75,7 +74,7 @@ impl TryFrom<anyrender::RendererConfig> for PixelsRendererOptions {
                 a: rgba8.a as f64 / 255.0,
             };
         }
-        Ok(options.composite_alpha_mode(config.composite_alpha_mode.unwrap_or_default()))
+        options.composite_alpha_mode(config.composite_alpha_mode.unwrap_or_default())
     }
 }
 
