@@ -120,7 +120,6 @@ impl VelloRendererOptions {
 }
 
 impl From<anyrender::RendererConfig> for VelloRendererOptions {
-
     fn from(config: anyrender::RendererConfig) -> Self {
         Self {
             base_color: config.base_color.unwrap_or(Color::WHITE),
@@ -150,9 +149,7 @@ impl VelloWindowRenderer {
         Self::with_options(VelloRendererOptions::default())
     }
 
-    pub fn with_options(
-        config: impl Into<VelloRendererOptions>,
-    ) -> Self {
+    pub fn with_options(config: impl Into<VelloRendererOptions>) -> Self {
         let config = config.into();
         Self {
             render_state: RenderState::Suspended,

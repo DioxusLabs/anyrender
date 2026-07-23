@@ -62,7 +62,6 @@ impl PixelsRendererOptions {
 }
 
 impl From<anyrender::RendererConfig> for PixelsRendererOptions {
-
     fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
         if let Some(color) = config.base_color {
@@ -102,9 +101,7 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
         }
     }
 
-    pub fn with_options(
-        config: impl Into<PixelsRendererOptions>,
-    ) -> Self {
+    pub fn with_options(config: impl Into<PixelsRendererOptions>) -> Self {
         Self {
             render_state: RenderState::Suspended,
             window_handle: None,

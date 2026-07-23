@@ -151,9 +151,7 @@ impl VelloHybridWindowRenderer {
         Self::with_options(VelloHybridRendererOptions::default())
     }
 
-    pub fn with_options(
-        config: impl Into<VelloHybridRendererOptions>,
-    ) -> Self {
+    pub fn with_options(config: impl Into<VelloHybridRendererOptions>) -> Self {
         let config = config.into();
         let render_settings = config.render_settings;
         let wgpu_context = build_wgpu_context(&config);

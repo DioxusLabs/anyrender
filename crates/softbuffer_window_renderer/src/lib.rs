@@ -106,8 +106,7 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             window_handle: None,
             renderer: Renderer::new(0, 0),
             buffer: Vec::new(),
-            config: config
-                .try_into()?,
+            config: config.try_into()?,
             width: 0,
             height: 0,
         })

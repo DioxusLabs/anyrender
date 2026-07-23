@@ -64,7 +64,6 @@ impl SkiaRendererOptions {
 }
 
 impl From<anyrender::RendererConfig> for SkiaRendererOptions {
-
     fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
         if let Some(color) = config.base_color {
@@ -74,7 +73,7 @@ impl From<anyrender::RendererConfig> for SkiaRendererOptions {
         if let Some(mode) = config.composite_alpha_mode {
             options.composite_alpha_mode = mode;
         }
-            options
+        options
     }
 }
 
@@ -96,12 +95,10 @@ impl SkiaWindowRenderer {
             options: SkiaRendererOptions::default(),
         }
     }
-    pub fn with_options(
-        options: impl Into<SkiaRendererOptions>,
-    ) -> Self {
+    pub fn with_options(options: impl Into<SkiaRendererOptions>) -> Self {
         Self {
             render_state: RenderState::Suspended,
-            options: options.into()
+            options: options.into(),
         }
     }
 }
