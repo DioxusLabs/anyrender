@@ -42,6 +42,16 @@ impl TryFrom<anyrender::RendererConfig> for SoftbufferRendererOptions {
         if let Some(color) = config.base_color {
             options.base_color = color;
         }
+        if let Some(composite_alpha_mode) = config.composite_alpha_mode {
+            match composite_alpha_mode {
+                anyrender::CompositeAlphaMode::Auto | anyrender::CompositeAlphaMode::Opaque => {}
+                _ => {
+                    return Err(anyrender::ConfigError::UnsupportedField(
+                        "composite_alpha_mode",
+                    ));
+                }
+            }
+        }
         Ok(options)
     }
 }
