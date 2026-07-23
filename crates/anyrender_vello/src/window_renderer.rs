@@ -333,7 +333,9 @@ impl WindowRenderer for VelloWindowRenderer {
             let texture_config = Some(TextureConfiguration {
                 usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
                 format: TextureFormat::Rgba8Unorm,
-                alpha_conversion: Some(AlphaConversion::Premultiply),
+                alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PostMultiplied
+                    || composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
+                    .then_some(AlphaConversion::Premultiply),
             });
 
             let render_surface = SurfaceRenderer::new(
