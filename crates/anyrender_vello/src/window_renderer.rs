@@ -325,7 +325,8 @@ impl WindowRenderer for VelloWindowRenderer {
             let texture_config = Some(TextureConfiguration {
                 usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
                 format: TextureFormat::Rgba8Unorm,
-                alpha_conversion: (composite_alpha_mode != CompositeAlphaMode::PostMultiplied)
+                alpha_conversion: (composite_alpha_mode != CompositeAlphaMode::PostMultiplied
+                    || composite_alpha_mode != CompositeAlphaMode::Opaque)
                     .then_some(AlphaConversion::Premultiply),
             });
             // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
