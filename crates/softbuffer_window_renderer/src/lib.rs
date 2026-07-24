@@ -34,25 +34,15 @@ impl SoftbufferRendererOptions {
     }
 }
 
-impl TryFrom<anyrender::RendererConfig> for SoftbufferRendererOptions {
-    type Error = anyrender::ConfigError;
-
-    fn try_from(config: anyrender::RendererConfig) -> Result<Self, Self::Error> {
+impl From<anyrender::RendererConfig> for SoftbufferRendererOptions {
+    fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
         if let Some(color) = config.base_color {
             options.base_color = color;
         }
-        if let Some(composite_alpha_mode) = config.composite_alpha_mode {
-            match composite_alpha_mode {
-                anyrender::CompositeAlphaMode::Auto | anyrender::CompositeAlphaMode::Opaque => {}
-                _ => {
-                    return Err(anyrender::ConfigError::UnsupportedField(
-                        "composite_alpha_mode",
-                    ));
-                }
-            }
-        }
-        Ok(options)
+        // `composite_alpha_mode` is intentionally ignored: softbuffer does not
+        // support transparency, so any requested alpha mode degrades to opaque.
+        options
     }
 }
 
@@ -93,6 +83,18 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             renderer,
             buffer: Vec::new(),
             config: SoftbufferRendererOptions::default(),
+            width: 0,
+            height: 0,
+        }
+    }
+
+    pub fn with_options(config: impl Into<SoftbufferRendererOptions>) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            buffer: Vec::new(),
+            config: config.into(),
             width: 0,
             height: 0,
         }

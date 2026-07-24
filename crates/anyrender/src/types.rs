@@ -134,23 +134,6 @@ pub enum CompositeAlphaMode {
     Transparent,
 }
 
-/// Error returned when converting a unified configuration to a backend-specific one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigError {
-    /// The target renderer does not support this configuration option.
-    UnsupportedField(&'static str),
-}
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnsupportedField(field) => write!(f, "unsupported configuration field: {field}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
-
 /// Unified renderer configuration options.
 #[derive(Debug, Clone, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
