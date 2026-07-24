@@ -148,7 +148,6 @@ pub trait WindowRenderer: RenderContext {
     fn is_pending(&self) -> bool {
         false
     }
-
     fn set_size(&mut self, width: u32, height: u32);
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }

@@ -11,9 +11,12 @@ use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
     Scene as VelloScene,
 };
-use wgpu::{Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages};
+use wgpu::{
+    CompositeAlphaMode, Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages,
+};
 use wgpu_context::{
-    DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration, WGPUContext,
+    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    TextureConfiguration, WGPUContext,
 };
 
 use crate::{DEFAULT_THREADS, VelloScenePainter};
@@ -53,20 +56,75 @@ enum RenderState {
 }
 
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct VelloRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub base_color: Color,
     pub antialiasing_method: AaConfig,
+    /// Alpha mode used when compositing the window surface.
+    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
 
 impl Default for VelloRendererOptions {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl VelloRendererOptions {
+    pub const fn new() -> Self {
         Self {
             features: None,
             limits: None,
             base_color: Color::WHITE,
             antialiasing_method: AaConfig::Msaa16,
+            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
+        }
+    }
+
+    pub const fn features(self, features: Features) -> Self {
+        Self {
+            features: Some(features),
+            ..self
+        }
+    }
+
+    pub const fn limits(self, limits: Limits) -> Self {
+        Self {
+            limits: Some(limits),
+            ..self
+        }
+    }
+
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
+    }
+
+    pub const fn antialiasing_method(self, antialiasing_method: AaConfig) -> Self {
+        Self {
+            antialiasing_method,
+            ..self
+        }
+    }
+
+    pub const fn composite_alpha_mode(
+        self,
+        composite_alpha_mode: anyrender::types::CompositeAlphaMode,
+    ) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
+        }
+    }
+}
+
+impl From<anyrender::RendererConfig> for VelloRendererOptions {
+    fn from(config: anyrender::RendererConfig) -> Self {
+        Self {
+            base_color: config.base_color.unwrap_or(Color::WHITE),
+            composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
+            ..Default::default()
         }
     }
 }
@@ -91,7 +149,8 @@ impl VelloWindowRenderer {
         Self::with_options(VelloRendererOptions::default())
     }
 
-    pub fn with_options(config: VelloRendererOptions) -> Self {
+    pub fn with_options(config: impl Into<VelloRendererOptions>) -> Self {
+        let config = config.into();
         Self {
             render_state: RenderState::Suspended,
             wgpu_context: build_wgpu_context(&config),
@@ -198,6 +257,22 @@ impl WindowRenderer for VelloWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
+        let mut composite_alpha_mode = match self.config.composite_alpha_mode {
+            anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
+            anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
+            anyrender::CompositeAlphaMode::Transparent => {
+                #[cfg(target_vendor = "apple")]
+                {
+                    // wgpu is lying in apple's case it uses PreMultiplied in reality
+                    // (do not modify shaders for PostMultiplied)
+                    CompositeAlphaMode::PostMultiplied
+                }
+                #[cfg(not(target_vendor = "apple"))]
+                {
+                    CompositeAlphaMode::PreMultiplied
+                }
+            }
+        };
         let existing_device_handle = self
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
@@ -215,6 +290,53 @@ impl WindowRenderer for VelloWindowRenderer {
                 .expect("Error creating DeviceHandle"),
             };
 
+            let adapter = &device_handle.adapter;
+            let caps = surface.get_capabilities(adapter);
+            let mut alpha_modes = caps.alpha_modes;
+
+            if !alpha_modes.contains(&composite_alpha_mode) {
+                alpha_modes.sort_unstable_by(
+                    |first: &CompositeAlphaMode, second: &CompositeAlphaMode| {
+                        let first_num = match *first {
+                            CompositeAlphaMode::PreMultiplied => 0,
+                            CompositeAlphaMode::PostMultiplied => 1,
+                            CompositeAlphaMode::Opaque
+                            | CompositeAlphaMode::Inherit
+                            | CompositeAlphaMode::Auto => 2,
+                        };
+                        let second_num = match *second {
+                            CompositeAlphaMode::PreMultiplied => 0,
+                            CompositeAlphaMode::PostMultiplied => 1,
+                            CompositeAlphaMode::Opaque
+                            | CompositeAlphaMode::Inherit
+                            | CompositeAlphaMode::Auto => 2,
+                        };
+                        first_num.cmp(&second_num)
+                    },
+                );
+                composite_alpha_mode = alpha_modes
+                    .first()
+                    .copied()
+                    .expect("Surface didn't report any alpha modes");
+            }
+
+            #[cfg(not(target_vendor = "apple"))]
+            let texture_config = Some(TextureConfiguration {
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                format: TextureFormat::Rgba8Unorm,
+                alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
+                    .then_some(AlphaConversion::Premultiply),
+            });
+            // TODO: Remove below once gfx-rs/wgpu#9896 gets fixed
+            #[cfg(target_vendor = "apple")]
+            let texture_config = Some(TextureConfiguration {
+                usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+                format: TextureFormat::Rgba8Unorm,
+                alpha_conversion: (composite_alpha_mode == CompositeAlphaMode::PostMultiplied
+                    || composite_alpha_mode == CompositeAlphaMode::PreMultiplied)
+                    .then_some(AlphaConversion::Premultiply),
+            });
+
             let render_surface = SurfaceRenderer::new(
                 surface,
                 SurfaceRendererConfiguration {
@@ -224,12 +346,10 @@ impl WindowRenderer for VelloWindowRenderer {
                     height,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
-                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    alpha_mode: composite_alpha_mode,
                     view_formats: vec![],
                 },
-                Some(TextureConfiguration {
-                    usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
-                }),
+                texture_config,
                 device_handle,
             )
             .expect("Error creating SurfaceRenderer");

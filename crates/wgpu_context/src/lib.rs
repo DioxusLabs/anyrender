@@ -7,11 +7,13 @@ use wgpu::{
     Adapter, Device, Features, Instance, Limits, MemoryHints, Queue, Surface, SurfaceTarget,
 };
 
+mod alpha_blitter;
 mod buffer_renderer;
 mod error;
 mod surface_renderer;
 mod util;
 
+pub use alpha_blitter::{AlphaConversion, AlphaConvertBlitter};
 pub use buffer_renderer::{BufferRenderer, BufferRendererConfig};
 pub use error::WgpuContextError;
 pub use surface_renderer::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration};

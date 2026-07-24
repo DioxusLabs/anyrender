@@ -123,3 +123,50 @@ impl<'a> From<BrushRef<'a>> for PaintRef<'a> {
         }
     }
 }
+
+/// Alpha mode used when compositing the window surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CompositeAlphaMode {
+    #[default]
+    Auto,
+    Opaque,
+    Transparent,
+}
+
+/// Unified renderer configuration options.
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub struct RendererConfig {
+    /// Background color used to clear the frame.
+    pub base_color: Option<Color>,
+    /// Alpha mode used when compositing the window surface.
+    pub composite_alpha_mode: Option<CompositeAlphaMode>,
+}
+
+impl RendererConfig {
+    /// Create a new configuration with default (None) values.
+    pub const fn new() -> Self {
+        Self {
+            base_color: None,
+            composite_alpha_mode: None,
+        }
+    }
+
+    /// Set the background color.
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self {
+            base_color: Some(base_color),
+            ..self
+        }
+    }
+
+    /// Set the composite alpha mode.
+    pub const fn composite_alpha_mode(self, mode: CompositeAlphaMode) -> Self {
+        Self {
+            composite_alpha_mode: Some(mode),
+            ..self
+        }
+    }
+}

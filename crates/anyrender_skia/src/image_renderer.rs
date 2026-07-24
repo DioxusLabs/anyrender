@@ -62,7 +62,8 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        surface.canvas().clear(Color::WHITE);
+        // Clear surface with transparent background to allow transparency in rendered images
+        surface.canvas().clear(Color::TRANSPARENT);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
@@ -87,7 +88,8 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        surface.canvas().clear(Color::WHITE);
+        // Clear surface with transparent background to allow transparency in rendered images
+        surface.canvas().clear(Color::TRANSPARENT);
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),

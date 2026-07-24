@@ -15,3 +15,5 @@ log_frame_times = ["debug_timer/enable"]
 anyrender = { workspace = true }
 debug_timer = { workspace = true }
 softbuffer = { workspace = true }
+peniko = { workspace = true }
+kurbo = { workspace = true }

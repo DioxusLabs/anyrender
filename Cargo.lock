@@ -3204,6 +3204,8 @@ version = "0.6.0"
 dependencies = [
  "anyrender",
  "debug_timer",
+ "kurbo",
+ "peniko",
  "softbuffer",
 ]
 

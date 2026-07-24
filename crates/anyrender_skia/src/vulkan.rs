@@ -1,3 +1,4 @@
+use crate::window_renderer::SkiaBackend;
 use ash::{
     Device, Entry, Instance,
     vk::{
@@ -24,18 +25,26 @@ use ash::{
 use ash_window::enumerate_required_extensions;
 use raw_window_handle::DisplayHandle;
 use skia_safe::{
-    Surface,
+    BlendMode, Paint, RuntimeEffect, Surface,
     gpu::{
         ContextOptions, DirectContext, backend_render_targets, direct_contexts, surfaces,
         vk::{Alloc, BackendContext, GetProcOf, Version},
     },
 };
+
+const UNPREMULTIPLY_SKSL: &str = r#"
+    uniform shader input_texture;
+
+    half4 main(float2 coords) {
+        half4 color = input_texture.eval(coords);
+        color.rgb = color.rgb / max(color.a, 0.0001);
+        return color;
+    }
+"#;
 use std::{
     ffi::{CStr, CString},
     sync::Arc,
 };
-
-use crate::window_renderer::SkiaBackend;
 
 pub(crate) struct VulkanBackend {
     _entry: Entry, // Dont drop until backend is dropped
@@ -60,6 +69,10 @@ pub(crate) struct VulkanBackend {
     in_flight_fence: Fence,
     cmd_pool: CommandPool,
     cmd_buf: CommandBuffer,
+    composite_alpha_mode: anyrender::CompositeAlphaMode,
+    current_alpha_mode: CompositeAlphaFlagsKHR,
+    unpremul_effect: skia_safe::RuntimeEffect,
+    intermediate_surface: Option<skia_safe::Surface>,
 }
 
 impl VulkanBackend {
@@ -67,6 +80,7 @@ impl VulkanBackend {
         window: Arc<dyn anyrender::WindowHandle>,
         width: u32,
         height: u32,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
     ) -> VulkanBackend {
         let entry = unsafe { Entry::load().unwrap() };
 
@@ -91,17 +105,24 @@ impl VulkanBackend {
 
         let swapchain_size = (width, height);
 
-        let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
-            create_swapchain(
-                &instance,
-                &device,
-                physical_device,
-                &surface_fns,
-                surface,
-                queue_family_index,
-                swapchain_size,
-                None,
-            );
+        let (
+            swapchain,
+            swapchain_fns,
+            swapchain_images,
+            swapchain_format,
+            swapchain_extent,
+            chosen_alpha_mode,
+        ) = create_swapchain(
+            &instance,
+            &device,
+            physical_device,
+            &surface_fns,
+            surface,
+            queue_family_index,
+            swapchain_size,
+            composite_alpha_mode,
+            None,
+        );
 
         let gr_context = create_gr_context(
             &entry,
@@ -138,6 +159,9 @@ impl VulkanBackend {
                 .unwrap()[0]
         };
 
+        let unpremul_effect = RuntimeEffect::make_for_shader(UNPREMULTIPLY_SKSL, None)
+            .expect("Failed to compile SkSL unpremultiply shader");
+
         Self {
             _entry: entry,
             instance,
@@ -161,6 +185,10 @@ impl VulkanBackend {
             in_flight_fence,
             cmd_pool,
             cmd_buf,
+            composite_alpha_mode,
+            current_alpha_mode: chosen_alpha_mode,
+            unpremul_effect,
+            intermediate_surface: None,
         }
     }
 
@@ -171,27 +199,183 @@ impl VulkanBackend {
 
         let old_swapchain = self.swapchain;
 
-        let (swapchain, swapchain_fns, swapchain_images, swapchain_format, swapchain_extent) =
-            create_swapchain(
-                &self.instance,
-                &self.device,
-                self.physical_device,
-                &self.surface_fns,
-                self.surface,
-                self.queue_family_index,
-                self.swapchain_size,
-                Some(old_swapchain),
-            );
+        let (
+            swapchain,
+            swapchain_fns,
+            swapchain_images,
+            swapchain_format,
+            swapchain_extent,
+            current_alpha_mode,
+        ) = create_swapchain(
+            &self.instance,
+            &self.device,
+            self.physical_device,
+            &self.surface_fns,
+            self.surface,
+            self.queue_family_index,
+            self.swapchain_size,
+            self.composite_alpha_mode,
+            Some(old_swapchain),
+        );
         self.swapchain = swapchain;
         self.swapchain_fns = swapchain_fns;
         self.swapchain_images = swapchain_images;
         self.swapchain_format = swapchain_format;
         self.swapchain_extent = swapchain_extent;
         self.swapchain_suboptimal = false;
+        self.current_alpha_mode = current_alpha_mode;
+        self.intermediate_surface = None;
 
         unsafe {
             self.swapchain_fns.destroy_swapchain(old_swapchain, None);
         }
+    }
+
+    /// Prepares a Skia-allocated intermediate surface.
+    ///
+    /// Unlike the swapchain image, this offscreen surface is fully managed and allocated
+    /// by Skia on the GPU (the context is managed entirely by Skia). We only specify the
+    /// high-level image info, and Skia takes care of creating the underlying Vulkan image
+    /// and allocating its GPU memory.
+    fn prepare_intermediate_surface(&mut self) -> Surface {
+        let width = self.swapchain_extent.width;
+        let height = self.swapchain_extent.height;
+
+        let needs_recreate = self
+            .intermediate_surface
+            .as_ref()
+            .map(|s| s.width() != width as i32 || s.height() != height as i32)
+            .unwrap_or(true);
+
+        if needs_recreate {
+            let image_info = skia_safe::ImageInfo::new(
+                (width as i32, height as i32),
+                skia_safe::ColorType::BGRA8888,
+                skia_safe::AlphaType::Premul,
+                None,
+            );
+            self.intermediate_surface = surfaces::render_target(
+                &mut self.gr_context,
+                skia_safe::gpu::Budgeted::No,
+                &image_info,
+                None,
+                skia_safe::gpu::SurfaceOrigin::TopLeft,
+                None,
+                None,
+                None,
+            );
+        }
+
+        self.intermediate_surface.clone().unwrap()
+    }
+
+    /// Prepares a Skia surface that wraps the raw Vulkan swapchain image.
+    ///
+    /// Since the swapchain image is allocated and owned by Vulkan/the OS window system,
+    /// we must describe its layout and format details so Skia can wrap and draw to it.
+    ///
+    /// NOTE: We wrap the swapchain image on-the-fly every frame instead of caching the
+    /// wrapped surfaces. Caching is unsafe because the queue presentation transitions the
+    /// Vulkan image layout to PRESENT_SRC_KHR outside of Skia's control, which would cause
+    /// Skia's internal layout tracking to go out of sync.
+    unsafe fn prepare_swapchain_surface(&mut self, image_index: u32) -> Surface {
+        let image = self.swapchain_images[image_index as usize];
+
+        unsafe {
+            let alloc = Alloc::default();
+            let sk_image_info = skia_safe::gpu::vk::ImageInfo::new(
+                image.as_raw() as _,
+                alloc,
+                skia_safe::gpu::vk::ImageTiling::OPTIMAL,
+                skia_safe::gpu::vk::ImageLayout::UNDEFINED,
+                skia_safe::gpu::vk::Format::B8G8R8A8_UNORM,
+                1,
+                None,
+                None,
+                None,
+                skia_safe::gpu::vk::SharingMode::EXCLUSIVE,
+            );
+            let render_target = backend_render_targets::make_vk(
+                (
+                    self.swapchain_extent.width as i32,
+                    self.swapchain_extent.height as i32,
+                ),
+                &sk_image_info,
+            );
+
+            surfaces::wrap_backend_render_target(
+                &mut self.gr_context,
+                &render_target,
+                skia_safe::gpu::SurfaceOrigin::TopLeft,
+                skia_safe::ColorType::BGRA8888,
+                None,
+                None,
+            )
+            .unwrap()
+        }
+    }
+
+    /// Performs the post-processing blit when compositing in POST_MULTIPLIED alpha mode.
+    ///
+    /// The intermediate surface is snapshotted and drawn onto a wrapped surface representing
+    /// the Vulkan swapchain image, executing the unpremultiply shader in the process.
+    fn flush_post_multiplied(&mut self, surface: &mut Surface) {
+        let image = self.swapchain_images[self.swapchain_image_index as usize];
+
+        // NOTE: Wrapping is a zero-copy CPU metadata operation (extremely cheap). Wrapping on-the-fly
+        // every frame is required to ensure Skia's internal layout tracking remains in sync with the
+        // manual queue presentation layout transitions.
+        let mut swapchain_surface = unsafe {
+            let alloc = Alloc::default();
+            let sk_image_info = skia_safe::gpu::vk::ImageInfo::new(
+                image.as_raw() as _,
+                alloc,
+                skia_safe::gpu::vk::ImageTiling::OPTIMAL,
+                skia_safe::gpu::vk::ImageLayout::UNDEFINED,
+                skia_safe::gpu::vk::Format::B8G8R8A8_UNORM,
+                1,
+                None,
+                None,
+                None,
+                skia_safe::gpu::vk::SharingMode::EXCLUSIVE,
+            );
+            let render_target = backend_render_targets::make_vk(
+                (
+                    self.swapchain_extent.width as i32,
+                    self.swapchain_extent.height as i32,
+                ),
+                &sk_image_info,
+            );
+
+            surfaces::wrap_backend_render_target(
+                &mut self.gr_context,
+                &render_target,
+                skia_safe::gpu::SurfaceOrigin::TopLeft,
+                skia_safe::ColorType::BGRA8888,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+
+        let image_snapshot = surface.image_snapshot();
+        let image_shader = image_snapshot
+            .to_shader(None, skia_safe::SamplingOptions::default(), None)
+            .unwrap();
+
+        let children = [skia_safe::runtime_effect::ChildPtr::from(image_shader)];
+        let unpremul_shader = self
+            .unpremul_effect
+            .make_shader(skia_safe::Data::new_empty(), &children, None)
+            .unwrap();
+
+        let mut paint = Paint::default();
+        paint.set_shader(unpremul_shader);
+        paint.set_blend_mode(BlendMode::Src);
+
+        swapchain_surface.canvas().draw_paint(&paint);
+
+        self.gr_context.flush_and_submit();
     }
 }
 
@@ -199,6 +383,8 @@ impl Drop for VulkanBackend {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
+
+            self.intermediate_surface = None;
 
             self.device
                 .free_command_buffers(self.cmd_pool, std::slice::from_ref(&self.cmd_buf));
@@ -248,45 +434,22 @@ impl SkiaBackend for VulkanBackend {
             self.swapchain_image_index = image_index;
             self.swapchain_suboptimal = suboptimal;
 
-            let image = self.swapchain_images[image_index as usize];
-
-            let alloc = Alloc::default();
-            let sk_image_info = skia_safe::gpu::vk::ImageInfo::new(
-                image.as_raw() as _,
-                alloc,
-                skia_safe::gpu::vk::ImageTiling::OPTIMAL,
-                skia_safe::gpu::vk::ImageLayout::UNDEFINED,
-                skia_safe::gpu::vk::Format::B8G8R8A8_UNORM,
-                1,
-                None,
-                None,
-                None,
-                skia_safe::gpu::vk::SharingMode::EXCLUSIVE,
-            );
-            let render_target = backend_render_targets::make_vk(
-                (
-                    self.swapchain_extent.width as i32,
-                    self.swapchain_extent.height as i32,
-                ),
-                &sk_image_info,
-            );
-
-            surfaces::wrap_backend_render_target(
-                &mut self.gr_context,
-                &render_target,
-                skia_safe::gpu::SurfaceOrigin::TopLeft,
-                skia_safe::ColorType::BGRA8888,
-                None,
-                None,
-            )
-            .unwrap()
+            if self.current_alpha_mode == CompositeAlphaFlagsKHR::POST_MULTIPLIED {
+                self.prepare_intermediate_surface()
+            } else {
+                self.prepare_swapchain_surface(image_index)
+            }
         };
 
         Some(surface)
     }
 
-    fn flush(&mut self, surface: Surface) {
-        self.gr_context.flush_and_submit();
+    fn flush(&mut self, mut surface: Surface) {
+        if self.current_alpha_mode == CompositeAlphaFlagsKHR::POST_MULTIPLIED {
+            self.flush_post_multiplied(&mut surface);
+        } else {
+            self.gr_context.flush_and_submit();
+        }
 
         let image = self.swapchain_images[self.swapchain_image_index as usize];
 
@@ -468,6 +631,7 @@ fn create_swapchain(
     surface: SurfaceKHR,
     queue_family_index: u32,
     size: (u32, u32),
+    composite_alpha_mode: anyrender::CompositeAlphaMode,
     old_swapchain: Option<SwapchainKHR>,
 ) -> (
     SwapchainKHR,
@@ -475,6 +639,7 @@ fn create_swapchain(
     Vec<Image>,
     Format,
     Extent2D,
+    CompositeAlphaFlagsKHR,
 ) {
     let surface_caps = unsafe {
         surface_fns
@@ -524,6 +689,38 @@ fn create_swapchain(
 
     let image_count = surface_caps.min_image_count.max(2);
 
+    let supported = surface_caps.supported_composite_alpha;
+    let composite_alpha = match composite_alpha_mode {
+        anyrender::CompositeAlphaMode::Opaque
+            if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) =>
+        {
+            CompositeAlphaFlagsKHR::OPAQUE
+        }
+        anyrender::CompositeAlphaMode::Transparent
+            if supported.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) =>
+        {
+            CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+        }
+        anyrender::CompositeAlphaMode::Transparent
+            if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) =>
+        {
+            CompositeAlphaFlagsKHR::POST_MULTIPLIED
+        }
+        _ => {
+            if supported.contains(CompositeAlphaFlagsKHR::OPAQUE) {
+                CompositeAlphaFlagsKHR::OPAQUE
+            } else if supported.contains(CompositeAlphaFlagsKHR::INHERIT) {
+                CompositeAlphaFlagsKHR::INHERIT
+            } else if supported.contains(CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+                CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+            } else if supported.contains(CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
+                CompositeAlphaFlagsKHR::POST_MULTIPLIED
+            } else {
+                supported
+            }
+        }
+    };
+
     let create_info = SwapchainCreateInfoKHR::default()
         .surface(surface)
         .min_image_count(image_count)
@@ -540,7 +737,7 @@ fn create_swapchain(
         .image_sharing_mode(SharingMode::EXCLUSIVE)
         .queue_family_indices(std::slice::from_ref(&queue_family_index))
         .pre_transform(surface_caps.current_transform)
-        .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
+        .composite_alpha(composite_alpha)
         .present_mode(present_mode)
         .clipped(true)
         .old_swapchain(old_swapchain.unwrap_or(SwapchainKHR::null()));
@@ -549,7 +746,14 @@ fn create_swapchain(
     let swapchain = unsafe { swapchain_fns.create_swapchain(&create_info, None).unwrap() };
     let images = unsafe { swapchain_fns.get_swapchain_images(swapchain).unwrap() };
 
-    (swapchain, swapchain_fns, images, format.format, extent)
+    (
+        swapchain,
+        swapchain_fns,
+        images,
+        format.format,
+        extent,
+        composite_alpha,
+    )
 }
 
 fn create_gr_context(

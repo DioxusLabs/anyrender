@@ -4,7 +4,10 @@
 
 use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use pixels::{Pixels, SurfaceTexture, wgpu::Color};
+use pixels::{
+    Pixels, PixelsBuilder, SurfaceTexture,
+    wgpu::{Color, CompositeAlphaMode},
+};
 use std::sync::Arc;
 
 // Simple struct to hold the state of the renderer
@@ -19,12 +22,68 @@ pub enum RenderState {
     Suspended,
 }
 
+/// Configuration options for the Pixels renderer.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct PixelsRendererOptions {
+    /// Background color used to clear the frame.
+    pub base_color: Color,
+    /// Alpha mode used when compositing the window surface.
+    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
+}
+
+impl Default for PixelsRendererOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PixelsRendererOptions {
+    pub const fn new() -> Self {
+        Self {
+            base_color: Color::WHITE,
+            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
+        }
+    }
+
+    pub const fn base_color(self, base_color: Color) -> Self {
+        Self { base_color, ..self }
+    }
+
+    pub const fn composite_alpha_mode(
+        self,
+        composite_alpha_mode: anyrender::CompositeAlphaMode,
+    ) -> Self {
+        Self {
+            composite_alpha_mode,
+            ..self
+        }
+    }
+}
+
+impl From<anyrender::RendererConfig> for PixelsRendererOptions {
+    fn from(config: anyrender::RendererConfig) -> Self {
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            let rgba8 = color.to_rgba8();
+            options.base_color = pixels::wgpu::Color {
+                r: rgba8.r as f64 / 255.0,
+                g: rgba8.g as f64 / 255.0,
+                b: rgba8.b as f64 / 255.0,
+                a: rgba8.a as f64 / 255.0,
+            };
+        }
+        options.composite_alpha_mode(config.composite_alpha_mode.unwrap_or_default())
+    }
+}
+
 pub struct PixelsWindowRenderer<Renderer: ImageRenderer> {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
     renderer: Renderer,
+    config: PixelsRendererOptions,
 }
 
 impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
@@ -38,6 +97,30 @@ impl<Renderer: ImageRenderer> PixelsWindowRenderer<Renderer> {
             render_state: RenderState::Suspended,
             window_handle: None,
             renderer,
+            config: PixelsRendererOptions::default(),
+        }
+    }
+
+    pub fn with_options(config: impl Into<PixelsRendererOptions>) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            config: config.into(),
+        }
+    }
+
+    pub fn with_options_and_renderer<R: ImageRenderer>(
+        renderer: R,
+        config: impl TryInto<PixelsRendererOptions, Error = impl std::error::Error>,
+    ) -> PixelsWindowRenderer<R> {
+        PixelsWindowRenderer {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer,
+            config: config
+                .try_into()
+                .expect("Invalid Pixels renderer configuration"),
         }
     }
 }
@@ -71,15 +154,29 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         height: u32,
         on_ready: F,
     ) {
+        let composite_alpha_mode = match self.config.composite_alpha_mode {
+            anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
+            anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
+            anyrender::CompositeAlphaMode::Transparent => {
+                #[cfg(target_vendor = "apple")]
+                {
+                    // wgpu is lying in apple's case it uses PreMultiplied in reality
+                    // (do not modify shaders for PostMultiplied)
+                    CompositeAlphaMode::PostMultiplied
+                }
+                #[cfg(not(target_vendor = "apple"))]
+                {
+                    CompositeAlphaMode::PreMultiplied
+                }
+            }
+        };
         let surface = SurfaceTexture::new(width, height, window_handle.clone());
-        let mut pixels = Pixels::new(width, height, surface).unwrap();
-        pixels.enable_vsync(true);
-        pixels.clear_color(Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        });
+        let pixels = PixelsBuilder::new(width, height, surface)
+            .enable_vsync(true)
+            .alpha_mode(composite_alpha_mode)
+            .clear_color(self.config.base_color)
+            .build()
+            .unwrap();
         self.render_state = RenderState::Active(ActiveRenderState { pixels });
         self.window_handle = Some(window_handle);
 
@@ -119,7 +216,6 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         // Paint
         self.renderer.render(draw_fn, state.pixels.frame_mut());
         timer.record_time("render");
-
         state.pixels.render().unwrap();
         timer.record_time("present");
         timer.print_times("pixels: ");

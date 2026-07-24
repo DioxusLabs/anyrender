@@ -2,10 +2,49 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
+use kurbo::{Affine, Rect};
 use softbuffer::{Context, Surface};
 use std::{num::NonZero, sync::Arc};
+
+/// Configuration options for the Softbuffer renderer.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SoftbufferRendererOptions {
+    /// Background color used to clear the frame.
+    pub base_color: peniko::Color,
+}
+
+impl Default for SoftbufferRendererOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SoftbufferRendererOptions {
+    pub const fn new() -> Self {
+        Self {
+            base_color: peniko::Color::WHITE,
+        }
+    }
+
+    pub const fn base_color(self, base_color: peniko::Color) -> Self {
+        Self { base_color, ..self }
+    }
+}
+
+impl From<anyrender::RendererConfig> for SoftbufferRendererOptions {
+    fn from(config: anyrender::RendererConfig) -> Self {
+        let mut options = Self::default();
+        if let Some(color) = config.base_color {
+            options.base_color = color;
+        }
+        // `composite_alpha_mode` is intentionally ignored: softbuffer does not
+        // support transparency, so any requested alpha mode degrades to opaque.
+        options
+    }
+}
 
 // Simple struct to hold the state of the renderer
 pub struct ActiveRenderState {
@@ -26,6 +65,9 @@ pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
     window_handle: Option<Arc<dyn WindowHandle>>,
     renderer: Renderer,
     buffer: Vec<u8>,
+    config: SoftbufferRendererOptions,
+    width: u32,
+    height: u32,
 }
 
 impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
@@ -40,6 +82,52 @@ impl<Renderer: ImageRenderer> SoftbufferWindowRenderer<Renderer> {
             window_handle: None,
             renderer,
             buffer: Vec::new(),
+            config: SoftbufferRendererOptions::default(),
+            width: 0,
+            height: 0,
+        }
+    }
+
+    pub fn with_options(config: impl Into<SoftbufferRendererOptions>) -> Self {
+        Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            buffer: Vec::new(),
+            config: config.into(),
+            width: 0,
+            height: 0,
+        }
+    }
+
+    pub fn try_with_options<E: std::error::Error>(
+        config: impl TryInto<SoftbufferRendererOptions, Error = E>,
+    ) -> Result<Self, E> {
+        Ok(Self {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer: Renderer::new(0, 0),
+            buffer: Vec::new(),
+            config: config.try_into()?,
+            width: 0,
+            height: 0,
+        })
+    }
+
+    pub fn with_options_and_renderer<R: ImageRenderer>(
+        renderer: R,
+        config: impl TryInto<SoftbufferRendererOptions, Error = impl std::error::Error>,
+    ) -> SoftbufferWindowRenderer<R> {
+        SoftbufferWindowRenderer {
+            render_state: RenderState::Suspended,
+            window_handle: None,
+            renderer,
+            buffer: Vec::new(),
+            config: config
+                .try_into()
+                .expect("Invalid Softbuffer renderer configuration"),
+            width: 0,
+            height: 0,
         }
     }
 }
@@ -94,6 +182,8 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
     }
 
     fn set_size(&mut self, physical_width: u32, physical_height: u32) {
+        self.width = physical_width;
+        self.height = physical_height;
         if let RenderState::Active(state) = &mut self.render_state {
             state
                 .surface
@@ -119,7 +209,23 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         timer.record_time("buffer_mut");
 
         // Paint
-        self.renderer.render_to_vec(draw_fn, &mut self.buffer);
+        let base_color = self.config.base_color;
+        let width = self.width as f64;
+        let height = self.height as f64;
+
+        let wrapped_draw_fn = |painter: &mut Renderer::ScenePainter<'_>| {
+            painter.fill(
+                peniko::Fill::NonZero,
+                Affine::IDENTITY,
+                base_color,
+                None,
+                &Rect::new(0.0, 0.0, width, height),
+            );
+            draw_fn(painter);
+        };
+
+        self.renderer
+            .render_to_vec(wrapped_draw_fn, &mut self.buffer);
         timer.record_time("render");
 
         let out = surface_buffer.as_mut();
@@ -129,12 +235,12 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
         assert_eq!(remainder.len(), 0);
 
         for (&src, dest) in chunks.iter().zip(out.iter_mut()) {
-            let [r, g, b, a] = src;
-            if a == 0 {
-                *dest = u32::MAX;
-            } else {
-                *dest = (r as u32) << 16 | (g as u32) << 8 | b as u32;
-            }
+            let [r, g, b, _a] = src;
+            let r = r as u32;
+            let g = g as u32;
+            let b = b as u32;
+
+            *dest = (r << 16) | (g << 8) | b;
         }
         timer.record_time("swizel");
 
