@@ -5,6 +5,16 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-23
+
+### Added
+
+- Configurable composite alpha mode and base color via `VelloHybridRendererOptions`, with builder-pattern methods (#71).
+
+### Changed
+
+- Marked `VelloHybridRendererOptions` as `#[non_exhaustive]` (#71).
+
 ## [0.8.0] - 2026-06-23
 
 ### Changed

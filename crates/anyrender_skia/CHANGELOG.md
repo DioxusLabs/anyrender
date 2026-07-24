@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-23
+
+### Added
+
+- Configurable composite alpha modes, transparency and base color via `SkiaRendererOptions` (#71).
+- Implemented additional filter effects: Composite, Blend, Morphology, ConvolveMatrix, Turbulence, DisplacementMap, DiffuseLighting and SpecularLighting ([`c8f476b`](https://github.com/dioxuslabs/anyrender/commit/c8f476b)).
+
 ## [0.9.0] - 2026-06-04
 
 ### Added
