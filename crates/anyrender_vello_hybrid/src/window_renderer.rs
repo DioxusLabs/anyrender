@@ -14,12 +14,9 @@ use vello_hybrid::{
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
-    TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
+    TextureFormat, TextureView, TextureViewDescriptor,
 };
-use wgpu_context::{
-    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
-    TextureConfiguration, WGPUContext,
-};
+use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
 
@@ -353,10 +350,14 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             // format) that is un-premultiplied while blitting to the surface.
             #[cfg(not(target_vendor = "apple"))]
             let intermediate_texture = (composite_alpha_mode == CompositeAlphaMode::PostMultiplied)
-                .then(|| TextureConfiguration {
-                    usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                    format: DEFAULT_TEXTURE_FORMAT,
-                    alpha_conversion: Some(AlphaConversion::Unpremultiply),
+                .then(|| {
+                    use wgpu::TextureUsages;
+                    use wgpu_context::{AlphaConversion, TextureConfiguration};
+                    TextureConfiguration {
+                        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                        format: DEFAULT_TEXTURE_FORMAT,
+                        alpha_conversion: Some(AlphaConversion::Unpremultiply),
+                    }
                 });
 
             // Apple is almost guaranteed to be premultiplied
