@@ -293,9 +293,8 @@ impl WindowRenderer for VelloWindowRenderer {
             let adapter = &device_handle.adapter;
             let caps = surface.get_capabilities(adapter);
             let mut alpha_modes = caps.alpha_modes;
-            let found = alpha_modes.contains(&composite_alpha_mode);
 
-            if found {
+            if !alpha_modes.contains(&composite_alpha_mode) {
                 alpha_modes.sort_unstable_by(
                     |first: &CompositeAlphaMode, second: &CompositeAlphaMode| {
                         let first_num = match *first {
