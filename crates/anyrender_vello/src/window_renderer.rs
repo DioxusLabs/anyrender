@@ -12,7 +12,8 @@ use vello::{
     Scene as VelloScene,
 };
 use wgpu::{
-    CompositeAlphaMode, Features, Limits, PresentMode, Texture, TextureFormat, TextureUsages,
+    CompositeAlphaMode, Features, Limits, PipelineCache, PresentMode, Texture, TextureFormat,
+    TextureUsages,
 };
 use wgpu_context::{
     AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
@@ -64,6 +65,10 @@ pub struct VelloRendererOptions {
     pub antialiasing_method: AaConfig,
     /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: anyrender::CompositeAlphaMode,
+    /// Cache that wgpu may reuse compiled pipelines from, avoiding shader
+    /// compilation on start-up. Creating it, persisting its data and deciding
+    /// when it is stale are all the caller's responsibility.
+    pub pipeline_cache: Option<PipelineCache>,
 }
 
 impl Default for VelloRendererOptions {
@@ -80,40 +85,48 @@ impl VelloRendererOptions {
             base_color: Color::WHITE,
             antialiasing_method: AaConfig::Msaa16,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
+            pipeline_cache: None,
         }
     }
 
-    pub const fn features(self, features: Features) -> Self {
+    pub fn features(self, features: Features) -> Self {
         Self {
             features: Some(features),
             ..self
         }
     }
 
-    pub const fn limits(self, limits: Limits) -> Self {
+    pub fn limits(self, limits: Limits) -> Self {
         Self {
             limits: Some(limits),
             ..self
         }
     }
 
-    pub const fn base_color(self, base_color: Color) -> Self {
+    pub fn base_color(self, base_color: Color) -> Self {
         Self { base_color, ..self }
     }
 
-    pub const fn antialiasing_method(self, antialiasing_method: AaConfig) -> Self {
+    pub fn antialiasing_method(self, antialiasing_method: AaConfig) -> Self {
         Self {
             antialiasing_method,
             ..self
         }
     }
 
-    pub const fn composite_alpha_mode(
+    pub fn composite_alpha_mode(
         self,
         composite_alpha_mode: anyrender::types::CompositeAlphaMode,
     ) -> Self {
         Self {
             composite_alpha_mode,
+            ..self
+        }
+    }
+
+    pub fn pipeline_cache(self, pipeline_cache: PipelineCache) -> Self {
+        Self {
+            pipeline_cache: Some(pipeline_cache),
             ..self
         }
     }
@@ -273,6 +286,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 }
             }
         };
+        let pipeline_cache = self.config.pipeline_cache.clone();
         let existing_device_handle = self
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
@@ -360,7 +374,7 @@ impl WindowRenderer for VelloWindowRenderer {
                     antialiasing_support: AaSupport::all(),
                     use_cpu: false,
                     num_init_threads: DEFAULT_THREADS,
-                    pipeline_cache: None,
+                    pipeline_cache,
                 },
             )
             .unwrap();
