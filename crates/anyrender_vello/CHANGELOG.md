@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Configurable composite alpha mode and base color via `VelloRendererOptions`, with builder-pattern methods (#71).
+- `pipeline_cache` on `VelloRendererOptions`, and `VelloImageRenderer::with_pipeline_cache`, so a `wgpu::PipelineCache` can reach Vello (#73).
 
 ### Changed
 
 - Marked `VelloRendererOptions` as `#[non_exhaustive]` (#71).
+- `VelloRendererOptions`' builder methods are no longer `const`, because the options now hold a type with a destructor (#73).
 
 ## [0.12.0] - 2026-06-23
 
