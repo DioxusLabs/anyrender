@@ -14,14 +14,15 @@ pub struct VelloImageRenderer {
     texture_handles: FxHashMap<ResourceId, ImageData>,
 }
 
-impl RenderContext for VelloImageRenderer {}
-impl ImageRenderer for VelloImageRenderer {
-    type ScenePainter<'a>
-        = VelloScenePainter<'a, 'a>
-    where
-        Self: 'a;
-
-    fn new(width: u32, height: u32) -> Self {
+impl VelloImageRenderer {
+    /// Like [`ImageRenderer::new`], but reusing compiled pipelines from a cache
+    /// wgpu built earlier. Creating the cache, persisting its data and deciding
+    /// when it is stale are all the caller's responsibility.
+    pub fn with_pipeline_cache(
+        width: u32,
+        height: u32,
+        pipeline_cache: Option<wgpu::PipelineCache>,
+    ) -> Self {
         // Create WGPUContext
         let mut context = WGPUContext::new();
 
@@ -41,7 +42,7 @@ impl ImageRenderer for VelloImageRenderer {
                 use_cpu: false,
                 num_init_threads: DEFAULT_THREADS,
                 antialiasing_support: vello::AaSupport::area_only(),
-                pipeline_cache: None,
+                pipeline_cache,
             },
         )
         .expect("Got non-Send/Sync error from creating renderer");
@@ -52,6 +53,18 @@ impl ImageRenderer for VelloImageRenderer {
             scene: VelloScene::new(),
             texture_handles: FxHashMap::default(),
         }
+    }
+}
+
+impl RenderContext for VelloImageRenderer {}
+impl ImageRenderer for VelloImageRenderer {
+    type ScenePainter<'a>
+        = VelloScenePainter<'a, 'a>
+    where
+        Self: 'a;
+
+    fn new(width: u32, height: u32) -> Self {
+        Self::with_pipeline_cache(width, height, None)
     }
 
     fn resize(&mut self, width: u32, height: u32) {
