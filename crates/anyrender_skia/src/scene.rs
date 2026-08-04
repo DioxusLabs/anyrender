@@ -31,7 +31,9 @@ pub struct SkiaSceneCache {
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
-    image_shader: GenerationalCache<u64, Shader>,
+    // The `Blob` is held alongside the `Shader` because the shader references the
+    // image pixels without owning them (see `shader_from_image_brush`).
+    image_shader: GenerationalCache<u64, (Shader, peniko::Blob<u8>)>,
     font: GenerationalCache<FontCacheKey, Font>,
     font_mgr: FontMgr,
     glyph_id_buf: Vec<GlyphId>,
@@ -142,7 +144,8 @@ impl SkiaScenePainter<'_> {
                     .set_shader(sk_peniko::shader_from_gradient(gradient, brush_transform));
             }
             anyrender::Paint::Image(image_brush) => {
-                if let Some(shader) = self.cache.image_shader.hit(&image_brush.image.data.id()) {
+                if let Some((shader, _)) = self.cache.image_shader.hit(&image_brush.image.data.id())
+                {
                     self.cache.paint.set_shader(shader.clone());
                     return;
                 }
@@ -150,9 +153,10 @@ impl SkiaScenePainter<'_> {
                 let image_shader = sk_peniko::shader_from_image_brush(image_brush, brush_transform);
 
                 if let Some(shader) = &image_shader {
-                    self.cache
-                        .image_shader
-                        .insert(image_brush.image.data.id(), shader.clone());
+                    self.cache.image_shader.insert(
+                        image_brush.image.data.id(),
+                        (shader.clone(), image_brush.image.data.clone()),
+                    );
                 }
 
                 self.cache.paint.set_shader(image_shader);
