@@ -563,7 +563,7 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         if std_dev > 0.0 {
             self.cache.paint.set_mask_filter(
-                MaskFilter::blur(BlurStyle::Normal, std_dev as f32, false).unwrap(),
+                MaskFilter::blur(BlurStyle::Normal, std_dev as f32, true).unwrap(),
             );
         }
 
