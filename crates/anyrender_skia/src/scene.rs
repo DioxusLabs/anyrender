@@ -1258,12 +1258,16 @@ mod sk_kurbo {
 
     pub(super) fn rrect_from(rrect: RoundedRect) -> SkRRect {
         let rect = rect_from(rrect.rect());
-        SkRRect::new_nine_patch(
+        let radii = rrect.radii();
+        // Corner order: upper-left, upper-right, lower-right, lower-left
+        SkRRect::new_rect_radii(
             rect,
-            rrect.radii().bottom_left as f32,
-            rrect.radii().top_left as f32,
-            rrect.radii().top_right as f32,
-            rrect.radii().bottom_right as f32,
+            &[
+                SkPoint::new(radii.top_left as f32, radii.top_left as f32),
+                SkPoint::new(radii.top_right as f32, radii.top_right as f32),
+                SkPoint::new(radii.bottom_right as f32, radii.bottom_right as f32),
+                SkPoint::new(radii.bottom_left as f32, radii.bottom_left as f32),
+            ],
         )
     }
 
