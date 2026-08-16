@@ -184,9 +184,9 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
                 })
                 .collect();
 
-            let start_center = Point::new(gr.cx() as f64, gr.cy() as f64);
-            let end_center = Point::new(gr.fx() as f64, gr.fy() as f64);
-            let start_radius = 0_f32;
+            let start_center = Point::new(gr.fx() as f64, gr.fy() as f64);
+            let end_center = Point::new(gr.cx() as f64, gr.cy() as f64);
+            let start_radius = gr.fr().get();
             let end_radius = gr.r().get();
             let arr = [
                 gr.transform().sx,
