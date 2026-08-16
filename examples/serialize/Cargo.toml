@@ -12,4 +12,4 @@ image = { workspace = true, features = ["png"] }
 anyrender = { workspace = true, features = ["serde"] }
 anyrender_serialize = { workspace = true }
 anyrender_vello_cpu = { workspace = true }
-parley = { version = "0.10", default-features = false, features = ["std"] }
+parley = { version = "0.11", default-features = false, features = ["std"] }

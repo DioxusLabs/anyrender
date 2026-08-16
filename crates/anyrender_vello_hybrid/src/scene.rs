@@ -335,6 +335,6 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_transform(transform);
         self.scene.set_paint(PaintType::Solid(color));
         self.scene
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
     }
 }

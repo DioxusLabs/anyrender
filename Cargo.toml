@@ -42,8 +42,8 @@ serde = "1.0.228"
 serde_json = "1.0"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
-skera = "=0.2.0"                                                            # pin because of breaking changes in past patch releases
-read-fonts = "0.39"
+skera = "=0.4.0"                                                            # pin because of breaking changes in past patch releases
+read-fonts = "0.41"
 ttf2woff2 = "0.11"
 wuff = "0.2"
 
@@ -53,15 +53,15 @@ linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13.1"
 color = "0.3"
-glifo = { version = "0.1" }
-vello = { version = "0.9", features = ["wgpu"] }
-vello_cpu = { version = "0.0.9", default-features = false, features = [
+glifo = { version = "0.2" }
+vello = { version = "0.10", features = ["wgpu"] }
+vello_cpu = { version = "0.1", default-features = false, features = [
   "std",
   "text",
   "u8_pipeline",
 ] }
-vello_hybrid = { version = "0.0.9" }
-vello_common = { version = "0.0.9" }
+vello_hybrid = { version = "0.1" }
+vello_common = { version = "0.1" }
 
 # Rendering
 wgpu = "29"
