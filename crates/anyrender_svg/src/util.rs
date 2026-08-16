@@ -115,8 +115,21 @@ pub(crate) fn to_bez_path(path: &usvg::Path) -> BezPath {
 }
 
 #[cfg(feature = "image")]
-pub(crate) fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) -> ImageBrush {
+pub(crate) fn into_image(
+    image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+    rendering_mode: usvg::ImageRendering,
+) -> ImageBrush {
     use peniko::ImageData;
+
+    let quality = match rendering_mode {
+        usvg::ImageRendering::HighQuality => peniko::ImageQuality::High,
+        usvg::ImageRendering::OptimizeQuality | usvg::ImageRendering::Smooth => {
+            peniko::ImageQuality::Medium
+        }
+        usvg::ImageRendering::OptimizeSpeed
+        | usvg::ImageRendering::CrispEdges
+        | usvg::ImageRendering::Pixelated => peniko::ImageQuality::Low,
+    };
 
     let (width, height) = (image.width(), image.height());
     let image_data: Vec<u8> = image.into_vec();
@@ -127,6 +140,7 @@ pub(crate) fn into_image(image: image::ImageBuffer<image::Rgba<u8>, Vec<u8>>) ->
         width,
         height,
     })
+    .with_quality(quality)
 }
 
 pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Paint, Affine)> {
