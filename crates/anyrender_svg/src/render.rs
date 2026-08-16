@@ -1,10 +1,11 @@
 // Copyright 2024 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::util;
+use crate::{filter, util};
 use anyrender::PaintScene;
 use kurbo::{Affine, BezPath};
-use peniko::{BlendMode, Fill};
+use peniko::{BlendMode, Fill, Mix};
+use std::sync::Arc;
 use usvg::{Node, Path};
 
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
@@ -78,7 +79,43 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     _ => false,
                 };
 
+                // Apply filter effects by pushing a layer with an `anyrender::Filter`
+                // attached, clipped to the SVG filter region. The filter is applied to
+                // the group's content before the clip/opacity/blend of the outer layer,
+                // matching the SVG rendering model.
+                //
+                // Groups whose filters cannot be expressed as an `anyrender::Filter`
+                // are reported to the error handler and rendered unfiltered.
+                let mut did_push_filter_layer = false;
+                if !g.filters().is_empty() {
+                    let converted = filter::to_anyrender_filter(g.filters());
+                    match (converted, g.filters_bounding_box()) {
+                        (Some(converted), Some(region)) => {
+                            let region = kurbo::Rect::new(
+                                region.left() as f64,
+                                region.top() as f64,
+                                region.right() as f64,
+                                region.bottom() as f64,
+                            );
+                            scene.push_layer(
+                                Mix::Normal,
+                                1.0,
+                                global_transform * transform,
+                                &region,
+                                Some(Arc::new(converted)),
+                                None,
+                            );
+                            did_push_filter_layer = true;
+                        }
+                        _ => error_handler(scene, node),
+                    }
+                }
+
                 render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+
+                if did_push_filter_layer {
+                    scene.pop_layer();
+                }
 
                 if did_push_layer {
                     scene.pop_layer();
