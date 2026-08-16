@@ -7,11 +7,33 @@ use kurbo::{Affine, BezPath};
 use peniko::{BlendMode, Fill};
 use usvg::{Node, Path};
 
+/// Context threaded through the render tree traversal.
+///
+/// When the `text` feature is enabled this holds the font cache used to
+/// render text nodes from their layouted glyphs.
+#[cfg(feature = "text")]
+pub(crate) type TextCtx<'a> = crate::text::TextRenderer<'a>;
+#[cfg(not(feature = "text"))]
+pub(crate) type TextCtx<'a> = std::marker::PhantomData<&'a ()>;
+
+pub(crate) fn text_ctx_for_tree(tree: &usvg::Tree) -> TextCtx<'_> {
+    #[cfg(feature = "text")]
+    {
+        crate::text::TextRenderer::new(tree.fontdb().as_ref())
+    }
+    #[cfg(not(feature = "text"))]
+    {
+        let _ = tree;
+        std::marker::PhantomData
+    }
+}
+
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene: &mut S,
     group: &usvg::Group,
     transform: Affine,
     global_transform: Affine,
+    text_ctx: &mut TextCtx<'_>,
     error_handler: &mut F,
 ) {
     for node in group.children() {
@@ -72,7 +94,14 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     _ => false,
                 };
 
-                render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+                render_group(
+                    scene,
+                    g,
+                    Affine::IDENTITY,
+                    global_transform,
+                    text_ctx,
+                    error_handler,
+                );
 
                 if did_push_layer {
                     scene.pop_layer();
@@ -124,25 +153,41 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         }
                     }
                     usvg::ImageKind::SVG(svg) => {
+                        // The nested tree has its own font database, so use a
+                        // fresh text context for it.
+                        let mut nested_text_ctx = text_ctx_for_tree(svg);
                         render_group(
                             scene,
                             svg.root(),
                             transform,
                             global_transform,
+                            &mut nested_text_ctx,
                             error_handler,
                         );
                     }
                 }
             }
             usvg::Node::Text(text) => {
-                // The children of the flattened text group already carry the
-                // text node's absolute transform, so recurse with the identity
+                #[cfg(feature = "text")]
+                text_ctx.render_text(
+                    scene,
+                    node,
+                    text,
+                    global_transform * transform,
+                    error_handler,
+                );
+
+                // Without the `text` feature, fall back to rendering the
+                // flattened text group. Its children already carry the text
+                // node's absolute transform, so recurse with the identity
                 // transform (like the group case) to avoid applying it twice.
+                #[cfg(not(feature = "text"))]
                 render_group(
                     scene,
                     text.flattened(),
                     Affine::IDENTITY,
                     global_transform,
+                    text_ctx,
                     error_handler,
                 );
             }
@@ -150,7 +195,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     }
 }
 
-fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+pub(crate) fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene: &mut S,
     error_handler: &mut F,
     path: &Path,
@@ -176,7 +221,7 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     }
 }
 
-fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+pub(crate) fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene: &mut S,
     error_handler: &mut F,
     path: &Path,
