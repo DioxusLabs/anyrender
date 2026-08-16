@@ -122,10 +122,10 @@ pub(crate) fn into_image(
     use peniko::ImageData;
 
     let quality = match rendering_mode {
-        usvg::ImageRendering::OptimizeQuality | usvg::ImageRendering::HighQuality => {
-            peniko::ImageQuality::High
+        usvg::ImageRendering::HighQuality => peniko::ImageQuality::High,
+        usvg::ImageRendering::OptimizeQuality | usvg::ImageRendering::Smooth => {
+            peniko::ImageQuality::Medium
         }
-        usvg::ImageRendering::Smooth => peniko::ImageQuality::Medium,
         usvg::ImageRendering::OptimizeSpeed
         | usvg::ImageRendering::CrispEdges
         | usvg::ImageRendering::Pixelated => peniko::ImageQuality::Low,
