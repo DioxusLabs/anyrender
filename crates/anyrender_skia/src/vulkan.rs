@@ -783,16 +783,17 @@ fn create_gr_context(
         }
     };
 
-    let mut backend_context = unsafe {
-        BackendContext::new(
+    let backend_context = unsafe {
+        BackendContext::new_builder(
             instance.handle().as_raw() as _,
             physical_device.as_raw() as _,
             device.handle().as_raw() as _,
             (queue.as_raw() as _, queue_family_index as usize),
             &get_proc,
+            Some(Version::new(1, 1, 0)),
         )
+        .build()
     };
-    backend_context.set_max_api_version(Version::new(1, 1, 0));
 
     let context_options = ContextOptions::default();
 
