@@ -71,6 +71,7 @@ pixels = "0.17"
 
 # SVG
 usvg = { version = "0.48.1", default-features = false }
+skrifa = "0.44"
 image = { version = "0.25", default-features = false }
 
 # Other dependencies

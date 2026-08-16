@@ -225,6 +225,7 @@ dependencies = [
  "image",
  "kurbo",
  "peniko",
+ "skrifa 0.44.0",
  "usvg",
 ]
 
