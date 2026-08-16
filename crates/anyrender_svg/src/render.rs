@@ -135,10 +135,13 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 }
             }
             usvg::Node::Text(text) => {
+                // The children of the flattened text group already carry the
+                // text node's absolute transform, so recurse with the identity
+                // transform (like the group case) to avoid applying it twice.
                 render_group(
                     scene,
                     text.flattened(),
-                    transform,
+                    Affine::IDENTITY,
                     global_transform,
                     error_handler,
                 );
