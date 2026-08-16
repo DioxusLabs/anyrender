@@ -166,7 +166,9 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
             ]
             .map(f64::from);
             let transform = Affine::new(arr);
-            let gradient = peniko::Gradient::new_linear(start, end).with_stops(stops.as_slice());
+            let gradient = peniko::Gradient::new_linear(start, end)
+                .with_stops(stops.as_slice())
+                .with_extend(to_extend(gr.spread_method()));
             Some((Paint::Gradient(gradient), transform))
         }
         usvg::Paint::RadialGradient(gr) => {
@@ -204,10 +206,19 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
                 end_center,
                 end_radius,
             )
-            .with_stops(stops.as_slice());
+            .with_stops(stops.as_slice())
+            .with_extend(to_extend(gr.spread_method()));
             Some((Paint::Gradient(gradient), transform))
         }
         usvg::Paint::Pattern(_) => None,
+    }
+}
+
+fn to_extend(spread_method: usvg::SpreadMethod) -> peniko::Extend {
+    match spread_method {
+        usvg::SpreadMethod::Pad => peniko::Extend::Pad,
+        usvg::SpreadMethod::Reflect => peniko::Extend::Reflect,
+        usvg::SpreadMethod::Repeat => peniko::Extend::Repeat,
     }
 }
 
