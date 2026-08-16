@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-16
+
+### Changed
+
+- Upgraded `skia-safe` to 0.99 (#82).
+
+### Fixed
+
+- Rounded rect corner radii mapping (#76).
+- Box shadow blurs now respect the current transformation matrix (#75).
+- The image `Blob` is now held alongside the cached image shader, preventing use-after-free of image data (#77).
+
 ## [0.10.0] - 2026-07-23
 
 ### Added
