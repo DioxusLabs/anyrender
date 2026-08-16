@@ -132,7 +132,7 @@ impl Filter {
     }
 
     /// Set the output filter for the graph.
-    fn set_output(&mut self, output: FilterId) {
+    pub fn set_output(&mut self, output: FilterId) {
         self.output = output;
     }
 
