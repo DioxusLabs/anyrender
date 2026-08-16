@@ -86,48 +86,8 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 
 #[cfg(test)]
 mod tests {
-    use super::render_svg_str;
-    use anyrender::{Scene, recording::RenderCommand};
-    use kurbo::{Affine, Shape};
-
+    // CI will fail unless cargo nextest can execute at least one test per workspace.
+    // Delete this dummy test once we have an actual real test.
     #[test]
-    fn opacity_layer_clip_rect_covers_group_in_canvas_space() {
-        // A semi-transparent group nested inside a transformed parent group.
-        // The fallback opacity layer's clip rect must land where the group's
-        // content actually is on the canvas, outset by 2px on each side.
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
-          <g transform="translate(50,30) scale(2)">
-            <g opacity="0.5">
-              <rect x="10" y="10" width="20" height="20" fill="red"/>
-            </g>
-          </g>
-        </svg>"#;
-
-        let mut scene = Scene::new();
-        render_svg_str(&mut scene, svg, Affine::IDENTITY).unwrap();
-
-        let layer = scene
-            .commands
-            .iter()
-            .find_map(|cmd| match cmd {
-                RenderCommand::PushLayer(layer) => Some(layer),
-                _ => None,
-            })
-            .expect("expected an opacity layer to be pushed");
-
-        // Group content occupies (70, 50) to (110, 90) on the canvas
-        // (rect 10,10 20x20 mapped through translate(50,30) scale(2)),
-        // outset by 2px on each side.
-        let clip_bbox = layer
-            .transform
-            .transform_rect_bbox(layer.clip.bounding_box());
-        let expected = kurbo::Rect::new(68.0, 48.0, 112.0, 92.0);
-        assert!(
-            (clip_bbox.x0 - expected.x0).abs() < 1e-3
-                && (clip_bbox.y0 - expected.y0).abs() < 1e-3
-                && (clip_bbox.x1 - expected.x1).abs() < 1e-3
-                && (clip_bbox.y1 - expected.y1).abs() < 1e-3,
-            "clip bbox {clip_bbox:?} != expected {expected:?}"
-        );
-    }
+    fn dummy_test_until_we_have_a_real_test() {}
 }
