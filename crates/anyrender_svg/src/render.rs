@@ -112,7 +112,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                                 error_handler(scene, node);
                                 continue;
                             };
-                            let image = util::into_image(decoded_image);
+                            let image = util::into_image(decoded_image, img.rendering_mode());
                             let image_ts = global_transform * util::to_affine(&img.abs_transform());
                             scene.draw_image(image.as_ref(), image_ts);
                         }
