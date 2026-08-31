@@ -270,7 +270,7 @@ impl PaintScene for VelloCpuScenePainter {
 
 #[cfg(test)]
 mod clip_rule_tests {
-    use anyrender::{PaintScene, recording::Scene, render_to_buffer};
+    use anyrender::{Backdrop, PaintScene, recording::Scene, render_to_buffer};
     use kurbo::{Affine, BezPath, Rect};
     use peniko::{Fill, Mix, color::palette::css::RED};
 
@@ -287,7 +287,7 @@ mod clip_rule_tests {
                 draw_clipped(scene, fill, compositing_layer, &path);
             }
         };
-        render_to_buffer::<VelloCpuImageRenderer, _>(draw, 100, 100)
+        render_to_buffer::<VelloCpuImageRenderer, _>(Backdrop::default(), draw, 100, 100)
     }
 
     fn draw_clipped(
@@ -341,6 +341,7 @@ mod clip_rule_tests {
     fn overlapping_fills_in_path_clip_are_antialiased_once() {
         let render = |fills: usize| {
             render_to_buffer::<VelloCpuImageRenderer, _>(
+                Backdrop::default(),
                 |scene| {
                     scene.push_clip_layer(
                         Fill::NonZero,
@@ -372,6 +373,7 @@ mod clip_rule_tests {
     #[test]
     fn rect_clips_and_fills() {
         let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+            Backdrop::default(),
             |scene| {
                 scene.push_layer(
                     Fill::NonZero,

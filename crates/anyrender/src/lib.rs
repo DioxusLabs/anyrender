@@ -111,6 +111,17 @@ pub trait RenderContext {
     }
 }
 
+pub enum Backdrop {
+    Preserve,
+    Clear(Color),
+}
+
+impl Default for Backdrop {
+    fn default() -> Self {
+        Self::Clear(Color::TRANSPARENT)
+    }
+}
+
 /// Abstraction for rendering a scene to a window
 pub trait WindowRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
@@ -149,7 +160,7 @@ pub trait WindowRenderer: RenderContext {
         false
     }
     fn set_size(&mut self, width: u32, height: u32);
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, backdrop: Backdrop, draw_fn: F);
 }
 
 /// Abstraction for rendering a scene to an image buffer
@@ -162,21 +173,28 @@ pub trait ImageRenderer: RenderContext {
     fn reset(&mut self);
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        backdrop: Backdrop,
         draw_fn: F,
         vec: &mut Vec<u8>,
     );
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]);
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        backdrop: Backdrop,
+        draw_fn: F,
+        buffer: &mut [u8],
+    );
 }
 
 /// Draw a scene to a buffer using an `ImageRenderer`
 pub fn render_to_buffer<R: ImageRenderer, F: FnOnce(&mut R::ScenePainter<'_>)>(
+    backdrop: Backdrop,
     draw_fn: F,
     width: u32,
     height: u32,
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity((width * height * 4) as usize);
     let mut renderer = R::new(width, height);
-    renderer.render_to_vec(draw_fn, &mut buf);
+    renderer.render_to_vec(backdrop, draw_fn, &mut buf);
 
     buf
 }
