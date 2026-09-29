@@ -32,6 +32,10 @@ gl = "0.14.0"
 ash = "^0.38.0"
 ash-window = "0.13.0"
 
+# Keep `textlayout` on Windows: rust-skia only publishes a prebuilt Ganesh + GL + Vulkan binary with it.
+[target.'cfg(windows)'.dependencies]
+skia-safe = { version = "0.153.3", features = ["textlayout"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }
 
