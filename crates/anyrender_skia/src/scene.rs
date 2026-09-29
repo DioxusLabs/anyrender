@@ -76,6 +76,9 @@ impl Default for SkiaSceneCache {
 pub struct SkiaScenePainter<'a> {
     pub(crate) inner: &'a Canvas,
     pub(crate) cache: &'a mut SkiaSceneCache,
+    /// Graphite can't draw raster images, so they are uploaded to textures using this recorder.
+    #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+    pub(crate) recorder: Option<&'a mut skia_safe::gpu::graphite::Recorder>,
 }
 
 impl SkiaScenePainter<'_> {
@@ -83,6 +86,8 @@ impl SkiaScenePainter<'_> {
         SkiaScenePainter {
             inner: canvas,
             cache,
+            #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+            recorder: None,
         }
     }
 
@@ -150,7 +155,17 @@ impl SkiaScenePainter<'_> {
                     return;
                 }
 
-                let image_shader = sk_peniko::shader_from_image_brush(image_brush, brush_transform);
+                let image = sk_peniko::image_from_image_data(image_brush.image);
+                #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+                let image = match self.recorder.as_deref_mut() {
+                    Some(recorder) => {
+                        skia_safe::gpu::graphite::images::texture_from_image(recorder, &image)
+                            .unwrap_or(image)
+                    }
+                    None => image,
+                };
+                let image_shader =
+                    sk_peniko::shader_from_image(image, &image_brush.sampler, brush_transform);
 
                 if let Some(shader) = &image_shader {
                     self.cache.image_shader.insert(
@@ -921,8 +936,8 @@ fn distant_light_direction(light: &DistantLightSource) -> Point3 {
 mod sk_peniko {
     use peniko::color::{AlphaColor, ColorSpaceTag, HueDirection, Srgb};
     use peniko::{
-        BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageBrush, ImageData,
-        ImageFormat, Mix,
+        BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageData, ImageFormat,
+        ImageSampler, Mix,
     };
     use peniko::{Fill, color::DynamicColor};
     use skia_safe::AlphaType as SkAlphaType;
@@ -930,6 +945,7 @@ mod sk_peniko {
     use skia_safe::Color4f as SkColor4f;
     use skia_safe::ColorType as SkColorType;
     use skia_safe::Data as SkData;
+    use skia_safe::Image as SkImage;
     use skia_safe::ImageInfo as SkImageInfo;
     use skia_safe::PathFillType as SkPathFillType;
     use skia_safe::SamplingOptions as SkSamplingOptions;
@@ -942,12 +958,10 @@ mod sk_peniko {
         linear_gradient, radial_gradient, sweep_gradient, two_point_conical_gradient,
     };
 
-    pub(super) fn shader_from_image_brush(
-        image_brush: ImageBrush<&ImageData>,
-        brush_transform: Option<kurbo::Affine>,
-    ) -> Option<SkShader> {
-        let image_data = image_brush.image;
-
+    /// Creates a raster image that borrows the pixels of `image_data`.
+    ///
+    /// The caller must keep `image_data.data` alive for as long as the image is used.
+    pub(super) fn image_from_image_data(image_data: &ImageData) -> SkImage {
         let image_info = SkImageInfo::new(
             (image_data.width as i32, image_data.height as i32),
             match image_data.format {
@@ -964,11 +978,16 @@ mod sk_peniko {
         let pixels = unsafe {
             SkData::new_bytes(image_data.data.data()) // We have to ensure the src image data lives long enough
         };
-        let image =
-            skia_safe::images::raster_from_data(&image_info, pixels, image_info.min_row_bytes())
-                .unwrap();
+        skia_safe::images::raster_from_data(&image_info, pixels, image_info.min_row_bytes())
+            .unwrap()
+    }
 
-        let sampling = match image_brush.sampler.quality {
+    pub(super) fn shader_from_image(
+        image: SkImage,
+        sampler: &ImageSampler,
+        brush_transform: Option<kurbo::Affine>,
+    ) -> Option<SkShader> {
+        let sampling = match sampler.quality {
             peniko::ImageQuality::Low => {
                 SkSamplingOptions::new(skia_safe::FilterMode::Nearest, skia_safe::MipmapMode::None)
             }
@@ -984,8 +1003,8 @@ mod sk_peniko {
         skia_safe::shaders::image(
             image,
             (
-                tile_mode_from_extend(image_brush.sampler.x_extend),
-                tile_mode_from_extend(image_brush.sampler.y_extend),
+                tile_mode_from_extend(sampler.x_extend),
+                tile_mode_from_extend(sampler.y_extend),
             ),
             &sampling,
             &brush_transform.map(super::sk_kurbo::matrix_from_affine),

@@ -12,7 +12,13 @@ edition.workspace = true
 pixels_window_renderer = ["dep:pixels_window_renderer"]
 softbuffer_window_renderer = ["dep:softbuffer_window_renderer"]
 log_frame_times = ["debug_timer/enable", "pixels_window_renderer?/log_frame_times", "softbuffer_window_renderer?/log_frame_times"]
-vulkan = ["skia-safe/vulkan"]
+vulkan = ["ganesh", "skia-safe?/vulkan"]
+# GPU engines used by the window renderer on macOS/iOS (Linux/Windows always use Ganesh via OpenGL).
+# rust-skia only publishes prebuilt binaries with one of these enabled: use
+# `default-features = false, features = ["graphite"]` to use Graphite without building Skia from source.
+ganesh = ["skia-safe?/ganesh"]
+graphite = ["dep:skia-safe"]
+default = ["ganesh"]
 
 [dependencies]
 anyrender = { workspace = true }
@@ -22,11 +28,12 @@ peniko = { workspace = true }
 raw-window-handle = { workspace = true }
 softbuffer_window_renderer = { workspace = true, optional = true }
 pixels_window_renderer = { workspace = true, optional = true }
-skia-safe = { version = "0.153.3", features = ["gl", "pdf"]}
+skia-safe = { version = "0.153.3", features = ["pdf"] }
 oaty = "0.2"
 hashbrown = "0.17.0"
 
 [target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
+skia-safe = { version = "0.153.3", features = ["gl"] }
 glutin = { version = "0.32.3", features = ["default", "wgl", "egl"] }
 gl = "0.14.0"
 ash = "^0.38.0"
@@ -37,9 +44,13 @@ ash-window = "0.13.0"
 skia-safe = { version = "0.153.3", features = ["textlayout"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Optional so that the `graphite` feature only enables Skia's Graphite engine on Apple targets.
+skia-safe = { version = "0.153.3", features = ["graphite"], optional = true }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+# Optional so that the `graphite` feature only enables Skia's Graphite engine on Apple targets.
+skia-safe = { version = "0.153.3", features = ["graphite"], optional = true }
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "UIView", "UIResponder"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
