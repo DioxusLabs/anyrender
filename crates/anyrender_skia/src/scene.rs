@@ -91,6 +91,22 @@ impl SkiaScenePainter<'_> {
         }
     }
 
+    /// Create a painter for a canvas backed by a Graphite surface that records into `recorder`.
+    ///
+    /// Raster images are uploaded to textures using `recorder`, as Graphite can't draw them directly.
+    #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+    pub fn new_graphite<'a>(
+        canvas: &'a Canvas,
+        cache: &'a mut SkiaSceneCache,
+        recorder: &'a mut skia_safe::gpu::graphite::Recorder,
+    ) -> SkiaScenePainter<'a> {
+        SkiaScenePainter {
+            inner: canvas,
+            cache,
+            recorder: Some(recorder),
+        }
+    }
+
     fn reset_paint(&mut self) {
         self.cache.paint.reset();
         self.cache.paint.set_anti_alias(true);
