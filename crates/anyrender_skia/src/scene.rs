@@ -399,7 +399,7 @@ impl SkiaScenePainter<'_> {
         let Some(typeface) = self
             .cache
             .font_mgr
-            .new_from_data(font.data.data(), font.index as usize)
+            .new_from_bytes(font.data.data(), font.index)
         else {
             let tf = Typeface::make_deserialize(font.data.data(), None);
             eprintln!(
