@@ -19,6 +19,37 @@ fn test_empty_scene_roundtrip() {
     assert_scene_roundtrip(&Scene::new());
 }
 
+#[test]
+fn legacy_clips_default_to_nonzero() {
+    let mut scene = Scene::new();
+    let clip = Rect::new(0.0, 0.0, 100.0, 100.0);
+    scene.push_layer(
+        Fill::NonZero,
+        Mix::Normal,
+        1.0,
+        Affine::IDENTITY,
+        &clip,
+        None,
+        None,
+    );
+    scene.push_clip_layer(Fill::NonZero, Affine::IDENTITY, &clip);
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    for command in &archive.commands {
+        let mut value = serde_json::to_value(command).unwrap();
+        let fields = value
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .next()
+            .unwrap()
+            .as_object_mut()
+            .unwrap();
+        assert!(fields.remove("fill").is_some());
+        let restored: SerializableRenderCommand = serde_json::from_value(value).unwrap();
+        assert_eq!(&restored, command);
+    }
+}
+
 /// Tests that all non-image and non-font command types survive a roundtrip.
 #[test]
 fn test_all_command_types_roundtrip() {
@@ -26,6 +57,7 @@ fn test_all_command_types_roundtrip() {
 
     // Layer with blend mode
     scene.push_layer(
+        Fill::EvenOdd,
         Mix::Multiply,
         0.75,
         Affine::translate((5.0, 5.0)),
@@ -71,7 +103,11 @@ fn test_all_command_types_roundtrip() {
     );
 
     // Clip layer
-    scene.push_clip_layer(Affine::scale(1.5), &Rect::new(50.0, 50.0, 150.0, 150.0));
+    scene.push_clip_layer(
+        Fill::EvenOdd,
+        Affine::scale(1.5),
+        &Rect::new(50.0, 50.0, 150.0, 150.0),
+    );
     scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
@@ -83,6 +119,7 @@ fn test_all_command_types_roundtrip() {
 
     // Layer with compose blend mode
     scene.push_layer(
+        Fill::NonZero,
         Compose::SrcOver,
         1.0,
         Affine::IDENTITY,
@@ -450,7 +487,7 @@ fn assert_glyph_run_preserved(restored: &Scene) {
     match &restored.commands[0] {
         RenderCommand::GlyphRun(glyph_run) => {
             assert_eq!(glyph_run.font_size, 16.0);
-            assert_eq!(glyph_run.hint, false);
+            assert!(!glyph_run.hint);
             assert_eq!(glyph_run.brush_alpha, 1.0);
             assert_eq!(glyph_run.transform, Affine::translate((10.0, 50.0)));
             assert_eq!(glyph_run.glyph_transform, None);

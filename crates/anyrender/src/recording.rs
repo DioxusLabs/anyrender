@@ -55,6 +55,8 @@ impl RenderCommand {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LayerCommand {
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fill: Fill,
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
@@ -70,6 +72,8 @@ pub struct LayerCommand {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ClipCommand {
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fill: Fill,
     pub transform: Affine,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
@@ -178,6 +182,7 @@ impl PaintScene for Scene {
 
     fn push_layer(
         &mut self,
+        fill: Fill,
         blend: impl Into<BlendMode>,
         alpha: f32,
         transform: Affine,
@@ -188,6 +193,7 @@ impl PaintScene for Scene {
         let blend = blend.into();
         let clip = clip.into_path(self.tolerance);
         let layer = LayerCommand {
+            fill,
             blend,
             alpha,
             transform,
@@ -198,9 +204,13 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PushLayer(layer));
     }
 
-    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         let clip = clip.into_path(self.tolerance);
-        let layer = ClipCommand { transform, clip };
+        let layer = ClipCommand {
+            fill,
+            transform,
+            clip,
+        };
         self.commands.push(RenderCommand::PushClipLayer(layer));
     }
 

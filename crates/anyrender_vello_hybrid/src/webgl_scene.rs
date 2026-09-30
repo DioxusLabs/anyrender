@@ -105,6 +105,7 @@ impl PaintScene for WebGlScenePainter<'_> {
 
     fn push_layer(
         &mut self,
+        fill: Fill,
         blend: impl Into<BlendMode>,
         alpha: f32,
         transform: Affine,
@@ -114,6 +115,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let filter = filter.and_then(crate::filters::convert_filter);
         self.scene.set_transform(transform);
+        self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
@@ -121,8 +123,9 @@ impl PaintScene for WebGlScenePainter<'_> {
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
     }
 
-    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.scene.set_transform(transform);
+        self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Clip);
         self.scene
             .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));

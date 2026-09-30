@@ -32,6 +32,10 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     Some(usvg::Node::Path(clip_path)) => {
                         let local_path = util::to_bez_path(clip_path);
                         scene.push_layer(
+                            match clip_path.fill().map(|fill| fill.rule()) {
+                                Some(usvg::FillRule::EvenOdd) => Fill::EvenOdd,
+                                _ => Fill::NonZero,
+                            },
                             BlendMode {
                                 mix,
                                 compose: peniko::Compose::SrcOver,
@@ -61,6 +65,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             .transform_rect_bbox(rect)
                             .inflate(2.0, 2.0);
                         scene.push_layer(
+                            Fill::NonZero,
                             BlendMode {
                                 mix,
                                 compose: peniko::Compose::SrcOver,

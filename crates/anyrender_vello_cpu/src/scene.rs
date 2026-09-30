@@ -72,6 +72,7 @@ impl PaintScene for VelloCpuScenePainter {
 
     fn push_layer(
         &mut self,
+        fill: Fill,
         blend: impl Into<BlendMode>,
         alpha: f32,
         transform: Affine,
@@ -91,6 +92,7 @@ impl PaintScene for VelloCpuScenePainter {
         };
 
         self.render_ctx.set_transform(transform);
+        self.render_ctx.set_fill_rule(fill);
         self.render_ctx.push_layer(
             Some(&clip.into_path(DEFAULT_TOLERANCE)),
             Some(blend.into()),
@@ -100,8 +102,9 @@ impl PaintScene for VelloCpuScenePainter {
         );
     }
 
-    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.render_ctx.set_transform(transform);
+        self.render_ctx.set_fill_rule(fill);
         self.render_ctx
             .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
     }
@@ -209,5 +212,81 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_paint(PaintType::Solid(color));
         self.render_ctx
             .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+    }
+}
+
+#[cfg(test)]
+mod clip_rule_tests {
+    use anyrender::{PaintScene, recording::Scene, render_to_buffer};
+    use kurbo::{Affine, BezPath, Rect};
+    use peniko::{Fill, Mix, color::palette::css::RED};
+
+    use crate::VelloCpuImageRenderer;
+
+    fn render_clip(fill: Fill, compositing_layer: bool, replay: bool) -> Vec<u8> {
+        let path = BezPath::from_svg("M0 0H100V100H0Z M25 25H75V75H25Z").unwrap();
+        let draw = |scene: &mut crate::VelloCpuScenePainter| {
+            if replay {
+                let mut recording = Scene::new();
+                draw_clipped(&mut recording, fill, compositing_layer, &path);
+                scene.append_scene(recording, Affine::IDENTITY);
+            } else {
+                draw_clipped(scene, fill, compositing_layer, &path);
+            }
+        };
+        render_to_buffer::<VelloCpuImageRenderer, _>(draw, 100, 100)
+    }
+
+    fn draw_clipped(
+        scene: &mut impl PaintScene,
+        fill: Fill,
+        compositing_layer: bool,
+        path: &BezPath,
+    ) {
+        if compositing_layer {
+            scene.push_layer(fill, Mix::Normal, 1.0, Affine::IDENTITY, path, None, None);
+        } else {
+            scene.push_clip_layer(fill, Affine::IDENTITY, path);
+        }
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            RED,
+            None,
+            &Rect::new(0.0, 0.0, 100.0, 100.0),
+        );
+        scene.pop_layer();
+    }
+
+    fn assert_pixels(compositing_layer: bool, replay: bool) {
+        for fill in [Fill::NonZero, Fill::EvenOdd] {
+            let buffer = render_clip(fill, compositing_layer, replay);
+            let pixel = |x: usize, y: usize| &buffer[(y * 100 + x) * 4..(y * 100 + x) * 4 + 4];
+            assert_eq!(pixel(10, 10), &[255, 0, 0, 255]);
+            assert_eq!(
+                pixel(50, 50),
+                if fill == Fill::EvenOdd {
+                    &[0, 0, 0, 0]
+                } else {
+                    &[255, 0, 0, 255]
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn clip_layers_respect_fill_rule() {
+        assert_pixels(false, false);
+    }
+
+    #[test]
+    fn compositing_layers_respect_fill_rule() {
+        assert_pixels(true, false);
+    }
+
+    #[test]
+    fn scene_replay_preserves_clip_rules() {
+        assert_pixels(false, true);
+        assert_pixels(true, true);
     }
 }
