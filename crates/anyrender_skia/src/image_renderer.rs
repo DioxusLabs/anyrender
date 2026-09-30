@@ -65,10 +65,10 @@ impl ImageRenderer for SkiaImageRenderer {
         // Clear surface with transparent background to allow transparency in rendered images
         surface.canvas().clear(Color::TRANSPARENT);
 
-        draw_fn(&mut SkiaScenePainter {
-            inner: surface.canvas(),
-            cache: &mut self.scene_cache,
-        });
+        draw_fn(&mut SkiaScenePainter::new(
+            surface.canvas(),
+            &mut self.scene_cache,
+        ));
         timer.record_time("render");
 
         self.scene_cache.next_gen();
@@ -91,10 +91,10 @@ impl ImageRenderer for SkiaImageRenderer {
         // Clear surface with transparent background to allow transparency in rendered images
         surface.canvas().clear(Color::TRANSPARENT);
 
-        draw_fn(&mut SkiaScenePainter {
-            inner: surface.canvas(),
-            cache: &mut self.scene_cache,
-        });
+        draw_fn(&mut SkiaScenePainter::new(
+            surface.canvas(),
+            &mut self.scene_cache,
+        ));
         timer.record_time("render");
 
         self.scene_cache.next_gen();

@@ -12,6 +12,12 @@ pub(crate) trait SkiaBackend: Any {
     fn prepare(&mut self) -> Option<Surface>;
 
     fn flush(&mut self, surface: Surface);
+
+    /// The Graphite recorder that the surface returned by `prepare` records into.
+    #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+    fn recorder(&mut self) -> Option<&mut skia_safe::gpu::graphite::Recorder> {
+        None
+    }
 }
 
 enum RenderState {
@@ -123,7 +129,18 @@ impl WindowRenderer for SkiaWindowRenderer {
         graphics::set_typeface_cache_count_limit(100);
         graphics::set_resource_cache_total_bytes_limit(10485760);
 
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+        let backend = crate::metal::MetalGraphiteBackend::new(
+            window,
+            width,
+            height,
+            self.options.composite_alpha_mode,
+        );
+        #[cfg(all(
+            any(target_os = "macos", target_os = "ios"),
+            feature = "ganesh",
+            not(feature = "graphite")
+        ))]
         let backend = crate::metal::MetalBackend::new(
             window,
             width,
@@ -181,6 +198,8 @@ impl WindowRenderer for SkiaWindowRenderer {
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
             cache: &mut state.scene_cache,
+            #[cfg(all(any(target_os = "macos", target_os = "ios"), feature = "graphite"))]
+            recorder: state.backend.recorder(),
         });
         timer.record_time("cmd");
 
