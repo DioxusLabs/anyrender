@@ -86,8 +86,60 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 
 #[cfg(test)]
 mod tests {
-    // CI will fail unless cargo nextest can execute at least one test per workspace.
-    // Delete this dummy test once we have an actual real test.
+    use super::*;
+    use anyrender::recording::{RenderCommand, Scene};
+    use peniko::Fill;
+
+    fn clip_rule(clip_attrs: &str, path_attrs: &str) -> Fill {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <defs><clipPath id="clip" {clip_attrs}>
+                    <path {path_attrs} d="M0 0H100V100H0Z M25 25H75V75H25Z"/>
+                </clipPath></defs>
+                <rect width="100" height="100" clip-path="url(#clip)"/>
+            </svg>"##
+        );
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, &svg, Affine::IDENTITY).unwrap();
+        scene
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::PushLayer(layer) => Some(layer.fill),
+                _ => None,
+            })
+            .expect("SVG should produce a clipping layer")
+    }
+
     #[test]
-    fn dummy_test_until_we_have_a_real_test() {}
+    fn clip_rule_attribute_is_preserved() {
+        assert_eq!(clip_rule("", ""), Fill::NonZero);
+        assert_eq!(clip_rule("", r#"clip-rule="nonzero""#), Fill::NonZero);
+        assert_eq!(clip_rule("", r#"clip-rule="evenodd""#), Fill::EvenOdd);
+    }
+
+    #[test]
+    fn clip_rule_style_overrides_attribute_and_inherits() {
+        assert_eq!(
+            clip_rule("", r#"clip-rule="nonzero" style="clip-rule: evenodd""#),
+            Fill::EvenOdd
+        );
+        assert_eq!(
+            clip_rule(r#"style="clip-rule: evenodd""#, ""),
+            Fill::EvenOdd
+        );
+        assert_eq!(
+            clip_rule(r#"clip-rule="evenodd""#, r#"style="clip-rule: nonzero""#),
+            Fill::NonZero
+        );
+    }
+
+    #[test]
+    fn fill_rule_does_not_control_clipping() {
+        assert_eq!(clip_rule("", r#"fill-rule="evenodd""#), Fill::NonZero);
+        assert_eq!(
+            clip_rule("", r#"fill-rule="nonzero" clip-rule="evenodd""#),
+            Fill::EvenOdd
+        );
+    }
 }

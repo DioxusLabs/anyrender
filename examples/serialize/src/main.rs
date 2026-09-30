@@ -104,6 +104,7 @@ fn create_demo_scene() -> Scene {
 
     // Draw some circles using layers with blend modes
     scene.push_layer(
+        Fill::NonZero,
         Mix::Multiply,
         0.8,
         Affine::IDENTITY,
@@ -143,6 +144,7 @@ fn create_demo_scene() -> Scene {
 
     // Draw a clipped region
     scene.push_clip_layer(
+        Fill::NonZero,
         Affine::IDENTITY,
         &Circle::new(Point::new(100.0, 220.0), 60.0),
     );

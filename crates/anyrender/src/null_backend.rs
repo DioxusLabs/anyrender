@@ -98,6 +98,7 @@ impl PaintScene for NullScenePainter {
 
     fn push_layer(
         &mut self,
+        _fill: peniko::Fill,
         _blend: impl Into<peniko::BlendMode>,
         _alpha: f32,
         _transform: kurbo::Affine,
@@ -107,7 +108,13 @@ impl PaintScene for NullScenePainter {
     ) {
     }
 
-    fn push_clip_layer(&mut self, _transform: kurbo::Affine, _clip: &impl kurbo::Shape) {}
+    fn push_clip_layer(
+        &mut self,
+        _fill: peniko::Fill,
+        _transform: kurbo::Affine,
+        _clip: &impl kurbo::Shape,
+    ) {
+    }
 
     fn pop_layer(&mut self) {}
 

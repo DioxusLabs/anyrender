@@ -187,10 +187,13 @@ pub trait PaintScene: RenderContext {
     fn reset(&mut self);
 
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
+    /// The fill rule determines which parts of the clip shape are inside the clipping region.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
+    #[allow(clippy::too_many_arguments)]
     fn push_layer(
         &mut self,
+        fill: Fill,
         blend: impl Into<BlendMode>,
         alpha: f32,
         transform: Affine,
@@ -200,9 +203,10 @@ pub trait PaintScene: RenderContext {
     );
 
     /// Pushes a new clip layer clipped by the specified shape.
+    /// The fill rule determines which parts of the clip shape are inside the clipping region.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
-    fn push_clip_layer(&mut self, transform: Affine, clip: &impl Shape);
+    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape);
 
     /// Pops the current layer.
     fn pop_layer(&mut self);
@@ -261,6 +265,7 @@ pub trait PaintScene: RenderContext {
         for cmd in scene.commands {
             match cmd {
                 RenderCommand::PushLayer(cmd) => self.push_layer(
+                    cmd.fill,
                     cmd.blend,
                     cmd.alpha,
                     scene_transform * cmd.transform,
@@ -269,7 +274,7 @@ pub trait PaintScene: RenderContext {
                     cmd.backdrop_filter,
                 ),
                 RenderCommand::PushClipLayer(cmd) => {
-                    self.push_clip_layer(scene_transform * cmd.transform, &cmd.clip)
+                    self.push_clip_layer(cmd.fill, scene_transform * cmd.transform, &cmd.clip)
                 }
                 RenderCommand::PopLayer => self.pop_layer(),
                 RenderCommand::Stroke(cmd) => self.stroke(
