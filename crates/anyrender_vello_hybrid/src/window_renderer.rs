@@ -504,6 +504,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let Ok(texture_view) = render_surface.target_texture_view() else {
             // Skip frame in case of error getting surface texture
             render_surface.clear_surface_texture();
+            self.scene.reset();
             return;
         };
 
@@ -535,6 +536,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         drop(texture_view);
 
         if render_surface.maybe_blit_and_present().is_err() {
+            self.scene.reset();
             return;
         }
         timer.record_time("present");
