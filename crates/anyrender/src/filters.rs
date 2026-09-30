@@ -464,22 +464,22 @@ impl FilterEffect {
 
     /// Construct a CSS opacity() filter effect
     pub fn opacity(amount: f32) -> Self {
-        Self::ComponentTransfer(ComponentTransferFilter::opacity(amount))
+        Self::ColorMatrix(ColorMatrix::opacity(amount))
     }
 
     /// Construct a CSS invert() filter effect
     pub fn invert(amount: f32) -> Self {
-        Self::ComponentTransfer(ComponentTransferFilter::invert(amount))
+        Self::ColorMatrix(ColorMatrix::invert(amount))
     }
 
     /// Construct a CSS brightness() filter effect
     pub fn brightness(amount: f32) -> Self {
-        Self::ComponentTransfer(ComponentTransferFilter::brightness(amount))
+        Self::ColorMatrix(ColorMatrix::brightness(amount))
     }
 
     /// Construct a CSS contrast() filter effect
     pub fn contrast(amount: f32) -> Self {
-        Self::ComponentTransfer(ComponentTransferFilter::contrast(amount))
+        Self::ColorMatrix(ColorMatrix::contrast(amount))
     }
 
     /// Construct a CSS hue-rotate() filter effect
@@ -948,6 +948,52 @@ pub mod color_transformation {
     pub struct ColorMatrix(pub [f32; 20]);
 
     impl ColorMatrix {
+        /// Color matrix filter for the CSS opacity() filter
+        /// <https://drafts.fxtf.org/filter-effects/#opacityEquivalent>
+        pub fn opacity(amount: f32) -> Self {
+            Self([
+                1.0, 0.0, 0.0, 0.0, 0.0, // Red
+                0.0, 1.0, 0.0, 0.0, 0.0, // Green
+                0.0, 0.0, 1.0, 0.0, 0.0, // Blue
+                0.0, 0.0, 0.0, amount, 0.0, // Alpha
+            ])
+        }
+
+        /// Color matrix filter for the CSS invert() filter
+        /// <https://drafts.fxtf.org/filter-effects/#invertEquivalent>
+        pub fn invert(amount: f32) -> Self {
+            let slope = 1.0 - 2.0 * amount;
+            Self([
+                slope, 0.0, 0.0, 0.0, amount, // Red
+                0.0, slope, 0.0, 0.0, amount, // Green
+                0.0, 0.0, slope, 0.0, amount, // Blue
+                0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+            ])
+        }
+
+        /// Color matrix filter for the CSS brightness() filter
+        /// <https://drafts.fxtf.org/filter-effects/#brightnessEquivalent>
+        pub fn brightness(amount: f32) -> Self {
+            Self([
+                amount, 0.0, 0.0, 0.0, 0.0, // Red
+                0.0, amount, 0.0, 0.0, 0.0, // Green
+                0.0, 0.0, amount, 0.0, 0.0, // Blue
+                0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+            ])
+        }
+
+        /// Color matrix filter for the CSS contrast() filter
+        /// <https://drafts.fxtf.org/filter-effects/#contrastEquivalent>
+        pub fn contrast(amount: f32) -> Self {
+            let intercept = 0.5 - 0.5 * amount;
+            Self([
+                amount, 0.0, 0.0, 0.0, intercept, // Red
+                0.0, amount, 0.0, 0.0, intercept, // Green
+                0.0, 0.0, amount, 0.0, intercept, // Blue
+                0.0, 0.0, 0.0, 1.0, 0.0, // Alpha
+            ])
+        }
+
         /// Color matrix filter for the CSS hue-rotate() filter
         pub fn hue_rotate(angle_radians: f32) -> Self {
             let sin = angle_radians.sin();
@@ -1072,6 +1118,110 @@ pub mod color_transformation {
             0.0, 0.0, 0.0, 1.0, 0.0, // Blue = Alpha
             0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
         ]);
+    }
+}
+
+#[cfg(test)]
+mod css_color_matrix_tests {
+    use super::FilterEffect;
+    use super::color_transformation::ColorMatrix;
+
+    const EPSILON: f32 = 1e-6;
+
+    const COLORS: [[f32; 4]; 5] = [
+        [0.0, 0.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+        [0.2, 0.5, 0.8, 1.0],
+        [0.9, 0.1, 0.4, 0.5],
+        [0.3, 0.7, 0.0, 0.0],
+    ];
+
+    fn apply(matrix: &ColorMatrix, color: [f32; 4]) -> [f32; 4] {
+        let m = &matrix.0;
+        let [r, g, b, a] = color;
+        std::array::from_fn(|row| {
+            let m = &m[row * 5..row * 5 + 5];
+            m[0] * r + m[1] * g + m[2] * b + m[3] * a + m[4]
+        })
+    }
+
+    fn check(matrix: ColorMatrix, expected: impl Fn([f32; 4]) -> [f32; 4]) {
+        for color in COLORS {
+            let actual = apply(&matrix, color);
+            let expected = expected(color);
+            for (a, e) in actual.iter().zip(expected) {
+                assert!(
+                    (a - e).abs() < EPSILON,
+                    "input {color:?}: got {actual:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn brightness_matches_spec() {
+        for amount in [0.0, 0.3, 1.0, 1.5, 2.0] {
+            check(ColorMatrix::brightness(amount), |[r, g, b, a]| {
+                [amount * r, amount * g, amount * b, a]
+            });
+        }
+    }
+
+    #[test]
+    fn contrast_matches_spec() {
+        for amount in [0.0, 0.3, 1.0, 1.5, 2.0] {
+            let f = |c: f32| amount * c + 0.5 - 0.5 * amount;
+            check(ColorMatrix::contrast(amount), |[r, g, b, a]| {
+                [f(r), f(g), f(b), a]
+            });
+        }
+    }
+
+    #[test]
+    fn invert_matches_spec() {
+        for amount in [0.0, 0.3, 0.5, 1.0] {
+            let f = |c: f32| amount + (1.0 - 2.0 * amount) * c;
+            check(ColorMatrix::invert(amount), |[r, g, b, a]| {
+                [f(r), f(g), f(b), a]
+            });
+        }
+    }
+
+    #[test]
+    fn opacity_matches_spec() {
+        for amount in [0.0, 0.3, 1.0] {
+            check(ColorMatrix::opacity(amount), |[r, g, b, a]| {
+                [r, g, b, amount * a]
+            });
+        }
+    }
+
+    #[test]
+    fn identity_values_produce_identity_matrix() {
+        assert_eq!(ColorMatrix::brightness(1.0), ColorMatrix::IDENTITY);
+        assert_eq!(ColorMatrix::contrast(1.0), ColorMatrix::IDENTITY);
+        assert_eq!(ColorMatrix::invert(0.0), ColorMatrix::IDENTITY);
+        assert_eq!(ColorMatrix::opacity(1.0), ColorMatrix::IDENTITY);
+    }
+
+    #[test]
+    fn css_filter_effects_lower_to_color_matrix() {
+        assert_eq!(
+            FilterEffect::brightness(1.5),
+            FilterEffect::ColorMatrix(ColorMatrix::brightness(1.5))
+        );
+        assert_eq!(
+            FilterEffect::contrast(1.5),
+            FilterEffect::ColorMatrix(ColorMatrix::contrast(1.5))
+        );
+        assert_eq!(
+            FilterEffect::invert(0.3),
+            FilterEffect::ColorMatrix(ColorMatrix::invert(0.3))
+        );
+        assert_eq!(
+            FilterEffect::opacity(0.3),
+            FilterEffect::ColorMatrix(ColorMatrix::opacity(0.3))
+        );
     }
 }
 
