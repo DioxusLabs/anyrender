@@ -93,9 +93,13 @@ impl ImageRenderer for VelloImageRenderer {
         draw_fn(&mut VelloScenePainter {
             inner: &mut self.scene,
             renderer: Some(&mut self.vello_renderer),
-            device_handle: None,
+            device_handle: Some(&self.buffer_renderer.device_handle),
             texture_handles: Some(&mut self.texture_handles),
         });
+
+        for handle in self.texture_handles.values() {
+            self.vello_renderer.mark_override_image_dirty(handle);
+        }
 
         let size = self.buffer_renderer.size();
         self.vello_renderer
