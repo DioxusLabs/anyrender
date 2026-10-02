@@ -171,7 +171,8 @@ impl PaintScene for VelloCpuScenePainter {
         match style {
             StyleRef::Fill(fill) => {
                 self.render_ctx.set_fill_rule(fill);
-                self.render_ctx
+                let _ = self
+                    .render_ctx
                     .glyph_run(&mut self.resources, font)
                     .font_size(font_size)
                     .hint(hint)
@@ -186,7 +187,8 @@ impl PaintScene for VelloCpuScenePainter {
             }
             StyleRef::Stroke(stroke) => {
                 self.render_ctx.set_stroke(stroke.clone());
-                self.render_ctx
+                let _ = self
+                    .render_ctx
                     .glyph_run(&mut self.resources, font)
                     .font_size(font_size)
                     .hint(hint)

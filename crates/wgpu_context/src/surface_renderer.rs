@@ -164,6 +164,7 @@ impl<'s> SurfaceRenderer<'s> {
             desired_maximum_frame_latency: surface_renderer_config.desired_maximum_frame_latency,
             alpha_mode: surface_renderer_config.alpha_mode,
             view_formats: surface_renderer_config.view_formats,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         let intermediate_texture = intermediate_texture_config.map(|texture_config| {
@@ -314,7 +315,7 @@ impl<'s> SurfaceRenderer<'s> {
             self.blit_from_intermediate_texture_to_surface(&surface_texture, its);
         }
 
-        surface_texture.present();
+        self.device_handle.queue.present(surface_texture);
 
         Ok(())
     }

@@ -8,9 +8,9 @@ use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
 use vello_common::{TextureId, paint::ImageId};
-use vello_hybrid::{
-    RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer, Resources,
-    Scene as VelloHybridScene, TextureBindings,
+use vello_gpu::{
+    ClearSettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
+    Resources, Scene as VelloHybridScene, TargetInit, TextureBindings,
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
@@ -37,6 +37,7 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     resources: Resources,
+    depth_texture_view: TextureView,
     texture_bindings: FxHashMap<ResourceId, TextureView>,
     render_surface: SurfaceRenderer<'static>,
 }
@@ -170,7 +171,7 @@ impl VelloHybridWindowRenderer {
             config,
             wgpu_context,
             window_handle: None,
-            scene: VelloHybridScene::new_with(0, 0, render_settings),
+            scene: VelloHybridScene::new_with(0, 0, render_settings.level),
             cached_images: FxHashMap::default(),
         }
     }
@@ -283,7 +284,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         // Reset the scene to the new dimensions before init kicks off, so callers that
         // query scene size (e.g. `set_size`) see consistent state.
         let render_settings = self.config.render_settings;
-        self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings);
+        self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings.level);
 
         let surface = self
             .wgpu_context
@@ -396,13 +397,20 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             )
             .expect("Error creating SurfaceRenderer");
 
-            let resources = Resources::new();
-            let renderer = VelloHybridRenderer::new(
+            let (renderer, resources) = VelloHybridRenderer::new_with(
                 render_surface.device(),
                 &RenderTargetConfig {
                     format: DEFAULT_TEXTURE_FORMAT,
-                    width,
-                    height,
+                    width: width as u16,
+                    height: height as u16,
+                },
+                render_settings,
+            );
+            let depth_texture_view = VelloHybridRenderer::create_depth_texture_view(
+                render_surface.device(),
+                &RenderSize {
+                    width: width as u16,
+                    height: height as u16,
                 },
             );
 
@@ -410,6 +418,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 active: ActiveRenderState {
                     renderer,
                     resources,
+                    depth_texture_view,
                     render_surface,
                     texture_bindings: FxHashMap::default(),
                 },
@@ -443,10 +452,17 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             self.scene = VelloHybridScene::new_with(
                 width as u16,
                 height as u16,
-                self.config.render_settings,
+                self.config.render_settings.level,
             );
             if let RenderState::Active(active) = &mut self.render_state {
                 active.render_surface.resize(width, height);
+                active.depth_texture_view = VelloHybridRenderer::create_depth_texture_view(
+                    active.render_surface.device(),
+                    &RenderSize {
+                        width: width as u16,
+                        height: height as u16,
+                    },
+                );
             };
         }
     }
@@ -523,11 +539,13 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 render_surface.queue(),
                 &mut encoder,
                 &RenderSize {
-                    width: render_surface.config.width,
-                    height: render_surface.config.height,
+                    width: render_surface.config.width as u16,
+                    height: render_surface.config.height as u16,
                 },
                 &texture_view,
+                Some(&state.depth_texture_view),
                 &texture_bindings,
+                TargetInit::Clear(ClearSettings::default()),
             )
             .expect("failed to render to texture");
         render_surface.queue().submit([encoder.finish()]);

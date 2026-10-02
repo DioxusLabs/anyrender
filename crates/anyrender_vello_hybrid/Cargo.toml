@@ -1,6 +1,6 @@
 [package]
 name = "anyrender_vello_hybrid"
-description = "vello_hybrid backend for anyrender"
+description = "vello_gpu (formerly vello_hybrid) backend for anyrender"
 version = "0.10.0"
 documentation = "https://docs.rs/anyrender_vello_hybrid"
 homepage.workspace = true
@@ -10,14 +10,14 @@ edition.workspace = true
 
 [features]
 log_frame_times = ["debug_timer/enable"]
-webgl = ["vello_hybrid/webgl"]
+webgl = ["vello_gpu/webgl"]
 
 [dependencies]
 anyrender = { workspace = true }
 debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
-vello_hybrid = { workspace = true }
+vello_gpu = { workspace = true }
 vello_common = { workspace = true }
 glifo = { workspace = true }
 wgpu = { workspace = true }

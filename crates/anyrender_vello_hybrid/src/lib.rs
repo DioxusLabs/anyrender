@@ -1,4 +1,4 @@
-//! A [`vello_hybrid`] backend for the [`anyrender`] 2D drawing abstraction
+//! A [`vello_gpu`] backend for the [`anyrender`] 2D drawing abstraction
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod filters;

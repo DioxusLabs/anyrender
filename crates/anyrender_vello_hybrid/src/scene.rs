@@ -10,7 +10,7 @@ use vello_common::{
     geometry::RectU16,
     paint::{ImageId, ImageSource, PaintType},
 };
-use vello_hybrid::{Renderer, Resources, SampleRect};
+use vello_gpu::{Renderer, Resources};
 use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
 use wgpu_context::DeviceHandle;
 
@@ -106,7 +106,7 @@ pub(crate) enum LayerKind {
 }
 
 pub struct VelloHybridScenePainter<'s> {
-    pub(crate) scene: &'s mut vello_hybrid::Scene,
+    pub(crate) scene: &'s mut vello_gpu::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
     pub(crate) image_manager: ImageManager<'s>,
     pub(crate) texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
@@ -115,7 +115,7 @@ pub struct VelloHybridScenePainter<'s> {
 
 impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(
-        scene: &'s mut vello_hybrid::Scene,
+        scene: &'s mut vello_gpu::Scene,
         image_manager: ImageManager<'s>,
         texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
         device_handle: &'s DeviceHandle,
@@ -205,9 +205,9 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             match kind {
                 LayerKind::Layer => {
                     self.scene.pop_layer();
-                    self.scene.pop_clip_path();
+                    self.scene.pop_clip();
                 }
-                LayerKind::Clip => self.scene.pop_clip_path(),
+                LayerKind::Clip => self.scene.pop_clip(),
             }
         }
     }
@@ -251,19 +251,24 @@ impl PaintScene for VelloHybridScenePainter<'_> {
 
                     let rect = shape.bounding_box();
 
-                    self.scene.draw_texture_rects(
-                        texture_id,
-                        brush.sampler.quality,
-                        [SampleRect {
-                            source_region: RectU16 {
+                    self.scene.set_paint(PaintType::Image(ImageBrush {
+                        image: ImageSource::external_texture(
+                            texture_id,
+                            RectU16 {
                                 x0: 0,
                                 y0: 0,
                                 x1: src_width as u16,
                                 y1: src_height as u16,
                             },
-                            transform: Affine::translate(rect.origin().to_vec2()),
-                        }],
+                            true,
+                        ),
+                        sampler: brush.sampler,
+                    }));
+                    self.scene.set_paint_transform(
+                        brush_transform
+                            .unwrap_or_else(|| Affine::translate(rect.origin().to_vec2())),
                     );
+                    self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
                 }
             }
             _ => {
@@ -298,7 +303,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         match style {
             StyleRef::Fill(fill) => {
                 self.scene.set_fill_rule(fill);
-                self.scene
+                let _ = self
+                    .scene
                     .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)
@@ -313,7 +319,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             }
             StyleRef::Stroke(stroke) => {
                 self.scene.set_stroke(stroke.clone());
-                self.scene
+                let _ = self
+                    .scene
                     .glyph_run(self.image_manager.resources, font)
                     .font_size(font_size)
                     .hint(hint)

@@ -161,7 +161,9 @@ impl BufferRenderer {
             let _ = recv_result.unwrap();
         }
 
-        let data = buf_slice.get_mapped_range();
+        let data = buf_slice
+            .get_mapped_range()
+            .expect("buffer should be mapped");
 
         // Pad result
         for row in 0..(self.config.height as usize) {
