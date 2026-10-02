@@ -1,17 +1,13 @@
 //! Conversion of [`peniko::ImageData`] to vello_cpu [`Pixmap`]s.
 
 use std::sync::Arc;
-use vello_common::color::PremulRgba8;
-use vello_common::fearless_simd::{Level, Simd, SimdBase, SimdInt, SimdMask, dispatch, mask8x16};
-use vello_common::util::Div255Ext;
+use vello_common::pixmap::PixelMetadata;
 use vello_cpu::Pixmap;
 
 /// Convert a [`peniko::ImageData`] to a premultiplied RGBA8 [`Pixmap`].
 ///
-/// Equivalent to `ImageSource::from_peniko_image_data`, but with a SIMD
-/// premultiply vendored from <https://github.com/linebender/vello/pull/1834>.
-/// TODO: use `from_peniko_image_data` directly once a vello_cpu release
-/// includes that PR.
+/// Equivalent to `ImageSource::from_peniko_image_data`, but computes an exact
+/// transparency hint for already-premultiplied images.
 ///
 /// # Panics
 ///
@@ -26,8 +22,6 @@ pub(crate) fn convert_image(image: &peniko::ImageData) -> Arc<Pixmap> {
     let height = image.height.try_into().unwrap();
 
     let data = image.data.data();
-    // Bulk-copy the source bytes (RGBA8 is byte-identical to `PremulRgba8`)
-    // rather than converting pixel-by-pixel, then mutate in place.
     let pixel_bytes = data.len() & !3;
     let mut bytes = Vec::with_capacity(pixel_bytes);
     bytes.extend_from_slice(&data[..pixel_bytes]);
@@ -42,80 +36,21 @@ pub(crate) fn convert_image(image: &peniko::ImageData) -> Arc<Pixmap> {
         format => unimplemented!("Unsupported image format: {format:?}"),
     }
 
-    let premultiplied = image.alpha_type == peniko::ImageAlphaType::AlphaPremultiplied;
-    let may_have_transparency = if premultiplied {
-        bytes.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
-    } else {
-        premultiply_rgba8(&mut bytes)
+    // `Pixmap::from_parts` premultiplies (and computes an exact transparency
+    // hint for) non-premultiplied data, but trusts the hint for premultiplied data.
+    let may_have_transparency = match image.alpha_type {
+        peniko::ImageAlphaType::AlphaPremultiplied => {
+            bytes.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
+        }
+        _ => true,
     };
 
-    let pixels: Vec<PremulRgba8> = bytemuck::try_cast_vec(bytes).unwrap_or_else(|(_, bytes)| {
-        // Fall back to copying if the allocation is incompatible with an
-        // in-place cast (e.g. over-allocated capacity).
-        bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|&p| PremulRgba8::from_u8_array(p))
-            .collect()
-    });
-
-    Arc::new(Pixmap::from_parts_with_opacity(
-        pixels,
+    Arc::new(Pixmap::from_parts(
+        bytes,
         width,
         height,
-        may_have_transparency,
+        PixelMetadata::new(image.alpha_type, may_have_transparency),
     ))
-}
-
-/// Premultiplies each RGBA8 pixel in `data`.
-///
-/// Returns `true` if at least one pixel is not fully opaque.
-///
-/// Vendored from <https://github.com/linebender/vello/pull/1834>.
-fn premultiply_rgba8(data: &mut [u8]) -> bool {
-    let level = Level::try_detect().unwrap_or(Level::baseline());
-
-    dispatch!(level, simd => premultiply_rgba8_impl(simd, data))
-}
-
-#[inline(always)]
-fn premultiply_rgba8_impl<S: Simd>(simd: S, data: &mut [u8]) -> bool {
-    let (body, tail) = data.as_chunks_mut::<64>();
-    let mut transparency = mask8x16::splat(simd, 0);
-
-    for chunk in body {
-        let rgba = simd.load_interleaved_128_u8x64(chunk);
-        let (rg, ba) = simd.split_u8x64(rgba);
-        let (r, g) = simd.split_u8x32(rg);
-        let (b, a) = simd.split_u8x32(ba);
-
-        transparency |= !a.simd_eq(255);
-        let premultiply = {
-            #[inline(always)]
-            |component| {
-                let product = simd.widen_u8x16(component) * simd.widen_u8x16(a);
-                simd.narrow_u16x16(product.div_255())
-            }
-        };
-        let premultiplied = simd.combine_u8x32(
-            simd.combine_u8x16(premultiply(r), premultiply(g)),
-            simd.combine_u8x16(premultiply(b), a),
-        );
-        simd.store_interleaved_128_u8x64(premultiplied, chunk);
-    }
-
-    let mut may_have_transparency = transparency.any_true();
-    for pixel in tail.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(pixel[3]);
-        may_have_transparency |= alpha != 255;
-        let premultiply = |component| ((u16::from(component) * alpha + 255) >> 8) as u8;
-        pixel[0] = premultiply(pixel[0]);
-        pixel[1] = premultiply(pixel[1]);
-        pixel[2] = premultiply(pixel[2]);
-    }
-
-    may_have_transparency
 }
 
 #[cfg(test)]
