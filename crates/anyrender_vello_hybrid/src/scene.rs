@@ -19,6 +19,7 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
     paint: PaintRef<'a>,
     image_manager: &mut ImageManager<'_>,
+    texture_bindings: &FxHashMap<ResourceId, TextureView>,
 ) -> PaintType {
     match paint {
         Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
@@ -36,8 +37,27 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
             })
         }
 
+        Paint::Resource(brush) => match texture_bindings.get(&brush.image) {
+            Some(texture_view) => {
+                let texture = texture_view.texture();
+                PaintType::Image(ImageBrush {
+                    image: ImageSource::external_texture(
+                        TextureId(brush.image.into_ffi()),
+                        RectU16 {
+                            x0: 0,
+                            y0: 0,
+                            x1: texture.width().min(u16::MAX as u32) as u16,
+                            y1: texture.height().min(u16::MAX as u32) as u16,
+                        },
+                        true,
+                    ),
+                    sampler: brush.sampler,
+                })
+            }
+            None => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
+        },
+
         // TODO: custom paint
-        Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
         Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
     }
 }
@@ -127,6 +147,10 @@ impl VelloHybridScenePainter<'_> {
             texture_bindings,
             device_handle,
         }
+    }
+
+    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
+        anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager, self.texture_bindings)
     }
 }
 
@@ -222,7 +246,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
+        let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -239,46 +263,11 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     ) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint = paint.into();
-
-        match paint {
-            Paint::Resource(brush) => {
-                if let Some(texture_view) = self.texture_bindings.get(&brush.image) {
-                    let texture_id = TextureId(brush.image.into_ffi());
-
-                    let src_width = texture_view.texture().width();
-                    let src_height = texture_view.texture().height();
-
-                    let rect = shape.bounding_box();
-
-                    self.scene.set_paint(PaintType::Image(ImageBrush {
-                        image: ImageSource::external_texture(
-                            texture_id,
-                            RectU16 {
-                                x0: 0,
-                                y0: 0,
-                                x1: src_width as u16,
-                                y1: src_height as u16,
-                            },
-                            true,
-                        ),
-                        sampler: brush.sampler,
-                    }));
-                    self.scene.set_paint_transform(
-                        brush_transform
-                            .unwrap_or_else(|| Affine::translate(rect.origin().to_vec2())),
-                    );
-                    self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
-                }
-            }
-            _ => {
-                let paint = anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager);
-                self.scene.set_paint(paint);
-                self.scene
-                    .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-                self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
-            }
-        }
+        let paint = self.convert_paint(paint.into());
+        self.scene.set_paint(paint);
+        self.scene
+            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
+        self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -295,8 +284,9 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
     ) {
-        let paint = anyrender_paint_to_vello_hybrid_paint(paint.into(), &mut self.image_manager);
+        let paint = self.convert_paint(paint.into());
         self.scene.set_paint(paint);
+        self.scene.reset_paint_transform();
         self.scene.set_transform(transform);
 
         let style: StyleRef<'a> = style.into();
