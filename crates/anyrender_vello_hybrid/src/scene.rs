@@ -210,8 +210,12 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);
-        self.scene
-            .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+        if let Some(rect) = clip.as_rect() {
+            self.scene.push_clip_rect(&rect);
+        } else {
+            self.scene
+                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+        }
         self.scene
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
     }
@@ -220,8 +224,12 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Clip);
-        self.scene
-            .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+        if let Some(rect) = clip.as_rect() {
+            self.scene.push_clip_rect(&rect);
+        } else {
+            self.scene
+                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn pop_layer(&mut self) {
@@ -267,7 +275,11 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        if let Some(rect) = shape.as_rect() {
+            self.scene.fill_rect(&rect);
+        } else {
+            self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn draw_glyphs<'a, 's: 'a>(
