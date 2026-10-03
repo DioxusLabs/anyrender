@@ -114,10 +114,17 @@ impl PaintScene for VelloCpuScenePainter {
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
-        self.layer_stack.push(LayerKind::Clip);
         if let Some(rect) = clip.as_rect() {
+            self.layer_stack.push(LayerKind::Clip);
             self.render_ctx.push_clip_rect(&rect);
+        } else if self.render_ctx.is_multi_threaded() {
+            // The multi-threaded dispatcher flushes its pending work and rasterizes the clip on
+            // the main thread for every `push_clip_path`, which is slower than an isolated layer.
+            self.layer_stack.push(LayerKind::Layer);
+            self.render_ctx
+                .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
         } else {
+            self.layer_stack.push(LayerKind::Clip);
             self.render_ctx
                 .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
         }
