@@ -212,6 +212,7 @@ impl PaintScene for VelloCpuScenePainter {
     ) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_paint(PaintType::Solid(color));
+        self.render_ctx.reset_paint_transform();
         self.render_ctx
             .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
     }
