@@ -389,24 +389,13 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             }
             return;
         }
-        if geometry.is_inset() {
-            geometry.draw_inset_with_layers(self, transform, color);
-            return;
-        }
-        // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
-        let clip = geometry.needs_clip();
-        if clip {
-            self.scene.push_clip_path(&geometry.area);
-        }
         // TODO: draw shadows with matching individual radii instead of averaging them
-        self.scene.fill_blurred_rounded_rect(
+        self.scene.fill_blurred_rounded_rect_in(
+            &geometry.area,
             &geometry.shadow.rect,
             geometry.shadow.average_radius() as f32,
             geometry.std_dev as f32,
-            false,
+            geometry.is_inset(),
         );
-        if clip {
-            self.scene.pop_clip();
-        }
     }
 }
