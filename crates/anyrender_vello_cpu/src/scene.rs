@@ -10,10 +10,16 @@ use crate::image_cache::{ImageCache, ImageCacheConfig};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
+enum LayerKind {
+    Layer,
+    ClipRect,
+}
+
 pub struct VelloCpuScenePainter {
     pub(crate) render_ctx: vello_cpu::RenderContext,
     pub(crate) resources: vello_cpu::Resources,
     pub(crate) image_cache: ImageCache,
+    layer_stack: Vec<LayerKind>,
 }
 
 impl VelloCpuScenePainter {
@@ -26,6 +32,7 @@ impl VelloCpuScenePainter {
             render_ctx: vello_cpu::RenderContext::new(width, height),
             resources: vello_cpu::Resources::new(),
             image_cache: ImageCache::new(config),
+            layer_stack: Vec::new(),
         }
     }
 
@@ -68,6 +75,7 @@ impl RenderContext for VelloCpuScenePainter {}
 impl PaintScene for VelloCpuScenePainter {
     fn reset(&mut self) {
         self.render_ctx.reset();
+        self.layer_stack.clear();
     }
 
     fn push_layer(
@@ -93,6 +101,7 @@ impl PaintScene for VelloCpuScenePainter {
 
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
+        self.layer_stack.push(LayerKind::Layer);
         self.render_ctx.push_layer(
             Some(&clip.into_path(DEFAULT_TOLERANCE)),
             Some(blend.into()),
@@ -105,12 +114,22 @@ impl PaintScene for VelloCpuScenePainter {
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
-        self.render_ctx
-            .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+        if let Some(rect) = clip.as_rect() {
+            self.layer_stack.push(LayerKind::ClipRect);
+            self.render_ctx.push_clip_rect(&rect);
+        } else {
+            self.layer_stack.push(LayerKind::Layer);
+            self.render_ctx
+                .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn pop_layer(&mut self) {
-        self.render_ctx.pop_layer();
+        match self.layer_stack.pop() {
+            Some(LayerKind::Layer) => self.render_ctx.pop_layer(),
+            Some(LayerKind::ClipRect) => self.render_ctx.pop_clip(),
+            None => {}
+        }
     }
 
     fn stroke<'a>(
@@ -145,8 +164,12 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_paint(paint);
         self.render_ctx
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.render_ctx
-            .fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        if let Some(rect) = shape.as_rect() {
+            self.render_ctx.fill_rect(&rect);
+        } else {
+            self.render_ctx
+                .fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -285,6 +308,53 @@ mod clip_rule_tests {
     #[test]
     fn compositing_layers_respect_fill_rule() {
         assert_pixels(true, false);
+    }
+
+    #[test]
+    fn rect_clips_and_fills() {
+        let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| {
+                scene.push_layer(
+                    Fill::NonZero,
+                    Mix::Normal,
+                    1.0,
+                    Affine::IDENTITY,
+                    &Rect::new(0.0, 0.0, 80.0, 100.0),
+                    None,
+                    None,
+                );
+                scene.push_clip_layer(
+                    Fill::NonZero,
+                    Affine::translate((20.0, 20.0)),
+                    &Rect::new(0.0, 0.0, 80.0, 60.0),
+                );
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    RED,
+                    None,
+                    &Rect::new(0.0, 0.0, 100.0, 100.0),
+                );
+                scene.pop_layer();
+                scene.pop_layer();
+                scene.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    RED,
+                    None,
+                    &Rect::new(90.0, 90.0, 100.0, 100.0),
+                );
+            },
+            100,
+            100,
+        );
+        let pixel = |x: usize, y: usize| &buffer[(y * 100 + x) * 4..(y * 100 + x) * 4 + 4];
+        assert_eq!(pixel(50, 50), &[255, 0, 0, 255]);
+        assert_eq!(pixel(10, 50), &[0, 0, 0, 0]);
+        assert_eq!(pixel(50, 10), &[0, 0, 0, 0]);
+        assert_eq!(pixel(50, 90), &[0, 0, 0, 0]);
+        assert_eq!(pixel(85, 50), &[0, 0, 0, 0]);
+        assert_eq!(pixel(95, 95), &[255, 0, 0, 255]);
     }
 
     #[test]
