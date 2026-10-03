@@ -62,6 +62,7 @@ pub struct WebGlScenePainter<'s> {
     scene: &'s mut vello_gpu::Scene,
     layer_stack: Vec<LayerKind>,
     image_manager: WebGlImageManager<'s>,
+    glyph_caching: bool,
 }
 
 impl<'s> WebGlScenePainter<'s> {
@@ -70,7 +71,18 @@ impl<'s> WebGlScenePainter<'s> {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
+            glyph_caching: false,
         }
+    }
+
+    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
+        self.glyph_caching = enabled;
+        self
     }
 }
 
@@ -212,6 +224,8 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
+        let glyph_caching =
+            self.glyph_caching && crate::scene::supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -219,6 +233,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -235,6 +250,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)

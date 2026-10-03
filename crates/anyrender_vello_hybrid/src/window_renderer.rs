@@ -71,6 +71,12 @@ pub struct VelloHybridRendererOptions {
     /// lower values reduce memory usage and input latency at the cost of less
     /// buffering to absorb slow frames.
     pub desired_maximum_frame_latency: u32,
+    /// Whether to cache rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub glyph_caching: bool,
 }
 
 impl Default for VelloHybridRendererOptions {
@@ -82,6 +88,7 @@ impl Default for VelloHybridRendererOptions {
             base_color: Color::WHITE,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
+            glyph_caching: false,
         }
     }
 }
@@ -130,6 +137,18 @@ impl VelloHybridRendererOptions {
     pub const fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
         Self {
             desired_maximum_frame_latency,
+            ..self
+        }
+    }
+
+    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub const fn glyph_caching(self, glyph_caching: bool) -> Self {
+        Self {
+            glyph_caching,
             ..self
         }
     }
@@ -498,6 +517,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             image_manager,
             texture_bindings: &mut state.texture_bindings,
             device_handle: &render_surface.device_handle,
+            glyph_caching: self.config.glyph_caching,
         };
         if self.config.base_color != Color::TRANSPARENT {
             scene_painter.fill(
