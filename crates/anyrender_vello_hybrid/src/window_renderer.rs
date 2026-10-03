@@ -559,12 +559,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         }
         timer.record_time("present");
 
-        render_surface
-            .device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
+        // Progress cleanup and callbacks without serializing the next frame
+        // behind completion of this frame's GPU work. Surface acquisition
+        // provides bounded backpressure via desired_maximum_frame_latency.
+        render_surface.device().poll(wgpu::PollType::Poll).unwrap();
 
-        timer.record_time("wait");
+        timer.record_time("poll");
         timer.print_times("vello_hybrid: ");
 
         // Empty the Vello scene (memory optimisation)
