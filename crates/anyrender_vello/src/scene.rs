@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
-use kurbo::{Affine, Rect, Shape, Stroke};
+use kurbo::{Affine, Shape, Stroke};
 use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
@@ -175,12 +175,30 @@ impl PaintScene for VelloScenePainter<'_, '_> {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
-        rect: Rect,
-        brush: Color,
-        radius: f64,
+        box_shape: &anyrender::NonUniformRoundedRect,
+        offset: kurbo::Vec2,
+        spread: f64,
         std_dev: f64,
+        color: Color,
+        kind: anyrender::BoxShadowKind,
     ) {
-        self.inner
-            .draw_blurred_rounded_rect(transform, rect, brush, radius, std_dev);
+        let geometry = anyrender::BoxShadowGeometry::new(box_shape, offset, spread, std_dev, kind);
+        if geometry.std_dev == 0.0 {
+            geometry.draw_unblurred(self, transform, color);
+            return;
+        }
+        if geometry.is_inset() {
+            geometry.draw_inset_with_layers(self, transform, color);
+            return;
+        }
+        // TODO: draw shadows with matching individual radii instead of averaging them
+        self.inner.draw_blurred_rounded_rect_in(
+            &geometry.area,
+            transform,
+            geometry.shadow.rect,
+            color,
+            geometry.shadow.average_radius(),
+            geometry.std_dev,
+        );
     }
 }
