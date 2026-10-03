@@ -14,3 +14,6 @@ pub use webgl_scene::*;
 pub use window_renderer::*;
 
 pub use wgpu;
+
+/// Whether glyph caching is enabled when it is not explicitly configured.
+pub(crate) const DEFAULT_GLYPH_CACHING: bool = cfg!(feature = "glyph_caching");

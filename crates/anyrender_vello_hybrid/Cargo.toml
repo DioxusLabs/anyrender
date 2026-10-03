@@ -11,6 +11,9 @@ edition.workspace = true
 [features]
 log_frame_times = ["debug_timer/enable"]
 webgl = ["vello_gpu/webgl"]
+# Cache rasterized glyphs in Vello's (experimental) glyph atlas by default.
+# Can be overridden at runtime (see `VelloHybridRendererOptions::glyph_caching`).
+glyph_caching = []
 
 [dependencies]
 anyrender = { workspace = true }

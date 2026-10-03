@@ -10,6 +10,16 @@ use crate::image_cache::{ImageCache, ImageCacheConfig};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
+/// Whether a glyph run drawn with the given transforms can use Vello's glyph atlas cache.
+///
+/// Vello only supports caching glyphs that are drawn upright with a uniform scale. It checks
+/// this itself when inserting a glyph into the atlas, but not when looking one up, so a skewed
+/// (e.g. synthetic italic) or rotated run would otherwise be drawn using upright cached glyphs.
+fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) -> bool {
+    let [a, b, c, d, _, _] = (transform * glyph_transform.unwrap_or_default()).as_coeffs();
+    b == 0.0 && c == 0.0 && a == d && a > 0.0
+}
+
 enum LayerKind {
     Layer,
     Clip,
@@ -20,6 +30,7 @@ pub struct VelloCpuScenePainter {
     pub(crate) resources: vello_cpu::Resources,
     pub(crate) image_cache: ImageCache,
     layer_stack: Vec<LayerKind>,
+    glyph_caching: bool,
 }
 
 impl VelloCpuScenePainter {
@@ -33,7 +44,17 @@ impl VelloCpuScenePainter {
             resources: vello_cpu::Resources::new(),
             image_cache: ImageCache::new(config),
             layer_stack: Vec::new(),
+            glyph_caching: cfg!(feature = "glyph_caching"),
         }
+    }
+
+    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub fn set_glyph_caching(&mut self, enabled: bool) {
+        self.glyph_caching = enabled;
     }
 
     fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
@@ -196,6 +217,8 @@ impl PaintScene for VelloCpuScenePainter {
         let paint = self.convert_paint(paint.into());
         self.render_ctx.set_paint(paint);
 
+        let glyph_caching =
+            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -203,6 +226,7 @@ impl PaintScene for VelloCpuScenePainter {
                 let _ = self
                     .render_ctx
                     .glyph_run(&mut self.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -219,6 +243,7 @@ impl PaintScene for VelloCpuScenePainter {
                 let _ = self
                     .render_ctx
                     .glyph_run(&mut self.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)

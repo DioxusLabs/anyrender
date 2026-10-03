@@ -16,6 +16,16 @@ use wgpu_context::DeviceHandle;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
+/// Whether a glyph run drawn with the given transforms can use Vello's glyph atlas cache.
+///
+/// Vello only supports caching glyphs that are drawn upright with a uniform scale. It checks
+/// this itself when inserting a glyph into the atlas, but not when looking one up, so a skewed
+/// (e.g. synthetic italic) or rotated run would otherwise be drawn using upright cached glyphs.
+pub(crate) fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) -> bool {
+    let [a, b, c, d, _, _] = (transform * glyph_transform.unwrap_or_default()).as_coeffs();
+    b == 0.0 && c == 0.0 && a == d && a > 0.0
+}
+
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
     paint: PaintRef<'a>,
     image_manager: &mut ImageManager<'_>,
@@ -131,6 +141,7 @@ pub struct VelloHybridScenePainter<'s> {
     pub(crate) image_manager: ImageManager<'s>,
     pub(crate) texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
     pub(crate) device_handle: &'s DeviceHandle,
+    pub(crate) glyph_caching: bool,
 }
 
 impl VelloHybridScenePainter<'_> {
@@ -146,7 +157,18 @@ impl VelloHybridScenePainter<'_> {
             image_manager,
             texture_bindings,
             device_handle,
+            glyph_caching: crate::DEFAULT_GLYPH_CACHING,
         }
+    }
+
+    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
+        self.glyph_caching = enabled;
+        self
     }
 
     fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
@@ -301,6 +323,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.reset_paint_transform();
         self.scene.set_transform(transform);
 
+        let glyph_caching =
+            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -308,6 +332,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -324,6 +349,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)

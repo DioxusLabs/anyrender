@@ -19,6 +19,15 @@ impl VelloCpuImageRenderer {
         }
     }
 
+    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    ///
+    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    ///
+    /// Note: Vello considers atlas-backed glyph caching experimental.
+    pub fn set_glyph_caching(&mut self, enabled: bool) {
+        self.scene.set_glyph_caching(enabled);
+    }
+
     /// Drop all cached image conversions.
     pub fn clear_image_cache(&mut self) {
         self.scene.clear_image_cache();
