@@ -84,3 +84,13 @@ wasm-bindgen-futures = "0.4"
 
 # Dev-dependencies
 winit = { version = "0.30.2", features = ["rwh_06"] }
+# TODO: remove once linebender/vello#1718 is released
+[patch.crates-io]
+vello = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_encoding = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_shaders = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_common = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_cpu = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_gpu = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+vello_gpu_shaders = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }
+glifo = { git = "https://github.com/nicoburns/vello", branch = "inverse-blur-classic" }

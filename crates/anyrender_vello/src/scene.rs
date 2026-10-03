@@ -187,10 +187,6 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             geometry.draw_unblurred(self, transform, color);
             return;
         }
-        if geometry.is_inset() {
-            geometry.draw_inset_with_layers(self, transform, color);
-            return;
-        }
         // TODO: draw shadows with matching individual radii instead of averaging them
         self.inner.draw_blurred_rounded_rect_in(
             &geometry.area,
@@ -199,6 +195,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             color,
             geometry.shadow.average_radius(),
             geometry.std_dev,
+            geometry.is_inset(),
         );
     }
 }
