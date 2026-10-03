@@ -5,6 +5,23 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-03
+
+### Added
+
+- Support for SVG gradient `spreadMethod` values `pad`, `reflect` and `repeat` (#86).
+- Support for SVG `image-rendering` on raster images (#87).
+- Support for SVG `clip-rule`, including even-odd clipping (#105).
+
+### Changed
+
+- Updated to AnyRender 0.14.
+
+### Fixed
+
+- Correct radial gradient focal/center mapping and focal radius (#84).
+- Correct fallback group clipping bounds and preserve antialiased pixels at layer edges (#89).
+
 ## [0.14.0] - 2026-08-16
 
 ### Changed

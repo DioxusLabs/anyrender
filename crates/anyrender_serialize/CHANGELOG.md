@@ -5,6 +5,12 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-03
+
+### Changed
+
+- Updated to AnyRender 0.14, including clip fill-rule serialization. Archives without explicit clip fill rules remain readable using the nonzero default (#105).
+
 ## [0.7.0] - 2026-08-16
 
 ### Changed

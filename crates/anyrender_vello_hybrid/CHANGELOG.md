@@ -5,6 +5,23 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-10-03
+
+### Added
+
+- Configurable `desired_maximum_frame_latency` on `VelloHybridRendererOptions`, defaulting to 1 (#93).
+
+### Changed
+
+- Updated to AnyRender 0.14 and explicit clip fill rules (#105).
+- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30. The AnyRender crate name remains `anyrender_vello_hybrid` (#109).
+
+### Fixed
+
+- Reset the scene when surface acquisition or presentation fails, preventing skipped-frame commands from leaking into subsequent frames (#107).
+- Render external textures through the regular image paint path so clipping, opacity, blending and filters apply (#110).
+- Reset the paint transform before drawing box shadows, including in the WebGL backend (#111).
+
 ## [0.10.0] - 2026-08-16
 
 ### Changed
