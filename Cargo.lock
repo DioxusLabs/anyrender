@@ -1061,7 +1061,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1348,8 +1348,7 @@ dependencies = [
 [[package]]
 name = "glifo"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f1218dedd5348c1b166ec3b8b3cbca49d2f527bd43b3fa072ea5123c523ed3f"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -3177,7 +3176,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3644,7 +3643,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3964,8 +3963,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "vello"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "913abde56cab6131b62c0cc69b1a93b671d3c34b3097beb3714fd1dc93be8115"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "futures-intrusive",
@@ -3983,8 +3981,7 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73c2fbe53548bcd25c8ff42f75a93770a8611a16b37bee56d7ef7b44e36027f1"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -3999,8 +3996,7 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed1fec424fbba6acf6cbc78bb526447eb77590d95f40419d598870fe37535212"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "crossbeam-channel",
@@ -4015,8 +4011,7 @@ dependencies = [
 [[package]]
 name = "vello_encoding"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1fb9548d2b46b0f79137b5b1d208ecbd76d432f74e7a2ba838615d117f11532"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "guillotiere",
@@ -4028,8 +4023,7 @@ dependencies = [
 [[package]]
 name = "vello_gpu"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0e01b02c55094a3bcfbf80d736221a74bc3f8914b566298b4ad3c9f05e7ac08"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "glifo",
@@ -4046,8 +4040,7 @@ dependencies = [
 [[package]]
 name = "vello_gpu_shaders"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccf14e175813d9ddefdf52d9430d075de46c1d72560e917575857c97d6fc74cc"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "naga 30.0.1",
  "wesl",
@@ -4059,8 +4052,7 @@ dependencies = [
 [[package]]
 name = "vello_shaders"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e653222cee49f2571729c3e4b0fa99bc4f826c6bb9487dbb88b825d552b3a27"
+source = "git+https://github.com/nicoburns/vello?branch=inverse-blur-classic#56267c6744c589c99f38da897ff1577b9340d9b0"
 dependencies = [
  "bytemuck",
  "log",
@@ -4716,7 +4708,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

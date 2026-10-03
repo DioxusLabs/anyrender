@@ -248,14 +248,31 @@ pub trait PaintScene: RenderContext {
         glyphs: impl Iterator<Item = Glyph> + Clone,
     );
 
-    /// Draw a rounded rectangle blurred with a gaussian filter.
+    /// Fill `shape` with a box shadow: `rect` with its corners rounded by `radius`, blurred
+    /// by a gaussian filter with a standard deviation of `std_dev`.
+    ///
+    /// `shape` is filled using the non-zero fill rule, and both `shape` and `rect` are
+    /// transformed by `transform`.
+    ///
+    /// When `inset` is `false`, `brush` is painted with the coverage of the blurred rounded
+    /// rectangle, which is effectively zero more than approximately 2.5 times `std_dev` outside
+    /// of `rect`. For an outset shadow, `rect` is the box grown by the spread and translated by
+    /// the offset of the shadow, and `shape` is typically the area outside of the box.
+    ///
+    /// When `inset` is `true`, the inverse (`1 - alpha`) of that coverage is painted instead,
+    /// which is effectively full more than approximately 2.5 times `std_dev` outside of `rect`.
+    /// For an inset shadow, `shape` is the padding box, and `rect` is the padding box shrunk by
+    /// the spread and translated by the offset of the shadow.
+    #[allow(clippy::too_many_arguments)]
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
+        shape: &impl Shape,
         rect: Rect,
         brush: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     );
 
     // --- Provided methods
@@ -324,10 +341,12 @@ pub trait PaintScene: RenderContext {
                 ),
                 RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
                     scene_transform * cmd.transform,
+                    &cmd.shape,
                     cmd.rect,
                     cmd.brush,
                     cmd.radius,
                     cmd.std_dev,
+                    cmd.inset,
                 ),
             }
         }

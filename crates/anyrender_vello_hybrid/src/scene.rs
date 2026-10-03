@@ -327,15 +327,23 @@ impl PaintScene for VelloHybridScenePainter<'_> {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
+        shape: &impl Shape,
         rect: Rect,
         color: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         self.scene.set_transform(transform);
         self.scene.set_paint(PaintType::Solid(color));
         self.scene.reset_paint_transform();
-        self.scene
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+        self.scene.set_fill_rule(Fill::NonZero);
+        self.scene.fill_blurred_rounded_rect_in(
+            &shape.into_path(DEFAULT_TOLERANCE),
+            &rect,
+            radius as f32,
+            std_dev as f32,
+            inset,
+        );
     }
 }

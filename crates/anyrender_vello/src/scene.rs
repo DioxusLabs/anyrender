@@ -175,12 +175,14 @@ impl PaintScene for VelloScenePainter<'_, '_> {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
+        shape: &impl Shape,
         rect: Rect,
         brush: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         self.inner
-            .draw_blurred_rounded_rect(transform, rect, brush, radius, std_dev);
+            .draw_blurred_rounded_rect_in(shape, transform, rect, brush, radius, std_dev, inset);
     }
 }

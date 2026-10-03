@@ -157,10 +157,12 @@ impl PaintScene for NullScenePainter {
     fn draw_box_shadow(
         &mut self,
         _transform: kurbo::Affine,
+        _shape: &impl kurbo::Shape,
         _rect: kurbo::Rect,
         _brush: peniko::Color,
         _radius: f64,
         _std_dev: f64,
+        _inset: bool,
     ) {
     }
 }
