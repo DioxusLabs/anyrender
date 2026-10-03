@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in support for Vello's (experimental) glyph atlas cache, via the `glyph_caching`
-  cargo feature (which sets the default) and at runtime via
+- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
   `VelloCpuScenePainter::set_glyph_caching` / `VelloCpuImageRenderer::set_glyph_caching`.
 
 ## [0.18.0] - 2026-10-03

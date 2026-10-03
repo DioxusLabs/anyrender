@@ -73,7 +73,7 @@ pub struct VelloHybridRendererOptions {
     pub desired_maximum_frame_latency: u32,
     /// Whether to cache rasterized glyphs in Vello's glyph atlas.
     ///
-    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub glyph_caching: bool,
@@ -88,7 +88,7 @@ impl Default for VelloHybridRendererOptions {
             base_color: Color::WHITE,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
-            glyph_caching: crate::DEFAULT_GLYPH_CACHING,
+            glyph_caching: false,
         }
     }
 }
@@ -143,7 +143,7 @@ impl VelloHybridRendererOptions {
 
     /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
     ///
-    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub const fn glyph_caching(self, glyph_caching: bool) -> Self {

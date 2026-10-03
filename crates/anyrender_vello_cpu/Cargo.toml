@@ -18,9 +18,6 @@ log_frame_times = [
   "pixels_window_renderer?/log_frame_times",
 ]
 filters = []
-# Cache rasterized glyphs in Vello's (experimental) glyph atlas by default.
-# Can be overridden at runtime (see `VelloCpuImageRenderer::set_glyph_caching`).
-glyph_caching = []
 
 [dependencies]
 anyrender = { workspace = true }

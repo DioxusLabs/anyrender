@@ -157,13 +157,13 @@ impl VelloHybridScenePainter<'_> {
             image_manager,
             texture_bindings,
             device_handle,
-            glyph_caching: crate::DEFAULT_GLYPH_CACHING,
+            glyph_caching: false,
         }
     }
 
     /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
     ///
-    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub fn with_glyph_caching(mut self, enabled: bool) -> Self {

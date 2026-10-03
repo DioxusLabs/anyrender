@@ -44,13 +44,13 @@ impl VelloCpuScenePainter {
             resources: vello_cpu::Resources::new(),
             image_cache: ImageCache::new(config),
             layer_stack: Vec::new(),
-            glyph_caching: cfg!(feature = "glyph_caching"),
+            glyph_caching: false,
         }
     }
 
     /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
     ///
-    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub fn set_glyph_caching(&mut self, enabled: bool) {

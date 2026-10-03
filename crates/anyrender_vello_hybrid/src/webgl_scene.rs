@@ -71,13 +71,13 @@ impl<'s> WebGlScenePainter<'s> {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
-            glyph_caching: crate::DEFAULT_GLYPH_CACHING,
+            glyph_caching: false,
         }
     }
 
     /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
     ///
-    /// Defaults to `false` unless the `glyph_caching` cargo feature is enabled.
+    /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
