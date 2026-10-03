@@ -12,7 +12,7 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 enum LayerKind {
     Layer,
-    ClipRect,
+    Clip,
 }
 
 pub struct VelloCpuScenePainter {
@@ -114,20 +114,19 @@ impl PaintScene for VelloCpuScenePainter {
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
+        self.layer_stack.push(LayerKind::Clip);
         if let Some(rect) = clip.as_rect() {
-            self.layer_stack.push(LayerKind::ClipRect);
             self.render_ctx.push_clip_rect(&rect);
         } else {
-            self.layer_stack.push(LayerKind::Layer);
             self.render_ctx
-                .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
         }
     }
 
     fn pop_layer(&mut self) {
         match self.layer_stack.pop() {
             Some(LayerKind::Layer) => self.render_ctx.pop_layer(),
-            Some(LayerKind::ClipRect) => self.render_ctx.pop_clip(),
+            Some(LayerKind::Clip) => self.render_ctx.pop_clip(),
             None => {}
         }
     }
