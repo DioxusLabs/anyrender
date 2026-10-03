@@ -212,6 +212,7 @@ impl PaintScene for VelloCpuScenePainter {
     ) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_paint(PaintType::Solid(color));
+        self.render_ctx.reset_paint_transform();
         self.render_ctx
             .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
     }
@@ -290,5 +291,47 @@ mod clip_rule_tests {
     fn scene_replay_preserves_clip_rules() {
         assert_pixels(false, true);
         assert_pixels(true, true);
+    }
+}
+
+#[cfg(test)]
+mod box_shadow_tests {
+    use anyrender::{PaintScene, render_to_buffer};
+    use kurbo::{Affine, Rect};
+    use peniko::{Color, Fill};
+
+    use crate::VelloCpuImageRenderer;
+
+    fn render_shadow(preceding_brush_transform: Option<Affine>) -> Vec<u8> {
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| {
+                if let Some(brush_transform) = preceding_brush_transform {
+                    scene.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        Color::TRANSPARENT,
+                        Some(brush_transform),
+                        &Rect::new(0.0, 0.0, 1.0, 1.0),
+                    );
+                }
+                scene.draw_box_shadow(
+                    Affine::IDENTITY,
+                    Rect::new(40.0, 40.0, 60.0, 60.0),
+                    Color::BLACK,
+                    4.0,
+                    3.0,
+                );
+            },
+            100,
+            100,
+        )
+    }
+
+    #[test]
+    fn box_shadow_ignores_previous_brush_transform() {
+        assert_eq!(
+            render_shadow(None),
+            render_shadow(Some(Affine::translate((20.0, -20.0))))
+        );
     }
 }
