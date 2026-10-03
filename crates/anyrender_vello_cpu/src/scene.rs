@@ -117,16 +117,12 @@ impl PaintScene for VelloCpuScenePainter {
         if let Some(rect) = clip.as_rect() {
             self.layer_stack.push(LayerKind::Clip);
             self.render_ctx.push_clip_rect(&rect);
-        } else if self.render_ctx.is_multi_threaded() {
-            // The multi-threaded dispatcher flushes its pending work and rasterizes the clip on
-            // the main thread for every `push_clip_path`, which is slower than an isolated layer.
+        } else {
+            // An isolated layer (rather than `push_clip_path`) so that overlapping draws are
+            // anti-aliased against the clip edge once, instead of once per draw.
             self.layer_stack.push(LayerKind::Layer);
             self.render_ctx
                 .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
-        } else {
-            self.layer_stack.push(LayerKind::Clip);
-            self.render_ctx
-                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
         }
     }
 
@@ -314,6 +310,38 @@ mod clip_rule_tests {
     #[test]
     fn compositing_layers_respect_fill_rule() {
         assert_pixels(true, false);
+    }
+
+    #[test]
+    fn overlapping_fills_in_path_clip_are_antialiased_once() {
+        let render = |fills: usize| {
+            render_to_buffer::<VelloCpuImageRenderer, _>(
+                |scene| {
+                    scene.push_clip_layer(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        &kurbo::Circle::new((50.0, 50.0), 40.3),
+                    );
+                    for _ in 0..fills {
+                        scene.fill(
+                            Fill::NonZero,
+                            Affine::IDENTITY,
+                            RED,
+                            None,
+                            &Rect::new(0.0, 0.0, 100.0, 100.0),
+                        );
+                    }
+                    scene.pop_layer();
+                },
+                100,
+                100,
+            )
+        };
+        let once = render(1);
+        let twice = render(3);
+        let edge = (50 * 100 + 90) * 4;
+        assert!(once[edge + 3] > 0 && once[edge + 3] < 255);
+        assert_eq!(once, twice);
     }
 
     #[test]
