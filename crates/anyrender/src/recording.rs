@@ -126,10 +126,12 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoxShadowCommand {
     pub transform: Affine,
+    pub shape: BezPath, // TODO: more shape options
     pub rect: Rect,
     pub brush: Color,
     pub radius: f64,
     pub std_dev: f64,
+    pub inset: bool,
 }
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
@@ -292,17 +294,21 @@ impl PaintScene for Scene {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
+        shape: &impl Shape,
         rect: Rect,
         brush: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         let box_shadow = BoxShadowCommand {
             transform,
+            shape: shape.into_path(self.tolerance),
             rect,
             brush,
             radius,
             std_dev,
+            inset,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
     }

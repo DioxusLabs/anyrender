@@ -205,16 +205,24 @@ impl PaintScene for VelloCpuScenePainter {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
+        shape: &impl Shape,
         rect: Rect,
         color: Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_paint(PaintType::Solid(color));
         self.render_ctx.reset_paint_transform();
-        self.render_ctx
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+        self.render_ctx.set_fill_rule(Fill::NonZero);
+        self.render_ctx.fill_blurred_rounded_rect_in(
+            &shape.into_path(DEFAULT_TOLERANCE),
+            &rect,
+            radius as f32,
+            std_dev as f32,
+            inset,
+        );
     }
 }
 

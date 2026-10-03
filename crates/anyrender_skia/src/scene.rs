@@ -562,12 +562,16 @@ impl PaintScene for SkiaScenePainter<'_> {
     fn draw_box_shadow(
         &mut self,
         transform: kurbo::Affine,
+        shape: &impl kurbo::Shape,
         rect: kurbo::Rect,
         brush: peniko::Color,
         radius: f64,
         std_dev: f64,
+        inset: bool,
     ) {
+        self.inner.save();
         self.set_matrix(transform);
+        self.clip(peniko::Fill::NonZero, shape);
 
         self.reset_paint();
         self.set_paint_brush(brush, None);
@@ -592,7 +596,20 @@ impl PaintScene for SkiaScenePainter<'_> {
             radius as f32,
         );
 
-        self.inner.draw_rrect(rrect, &self.cache.paint);
+        if inset {
+            // Paint the blurred inverse of `rect` as a ring whose outer edge is far enough
+            // outside of `shape` that it isn't affected by the blur.
+            let outer = shape
+                .bounding_box()
+                .union(rect)
+                .inflate(3.0 * std_dev + 1.0, 3.0 * std_dev + 1.0);
+            let outer = RRect::new_rect(sk_kurbo::rect_from(outer));
+            self.inner.draw_drrect(outer, rrect, &self.cache.paint);
+        } else {
+            self.inner.draw_rrect(rrect, &self.cache.paint);
+        }
+
+        self.inner.restore();
     }
 }
 

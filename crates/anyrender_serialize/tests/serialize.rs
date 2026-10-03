@@ -7,7 +7,7 @@ use anyrender::{Glyph, Paint, PaintScene};
 use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
-use kurbo::{Affine, Rect, Stroke, Vec2};
+use kurbo::{Affine, Rect, RoundedRect, Stroke, Vec2};
 use peniko::{
     Blob, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix,
 };
@@ -96,10 +96,22 @@ fn test_all_command_types_roundtrip() {
     // Box shadow
     scene.draw_box_shadow(
         Affine::translate((0.0, 100.0)),
+        &Rect::new(-10.0, -10.0, 110.0, 60.0),
         Rect::new(0.0, 0.0, 100.0, 50.0),
         Color::from_rgba8(0, 0, 0, 100),
         5.0,
         3.0,
+        false,
+    );
+    // Inset box shadow
+    scene.draw_box_shadow(
+        Affine::translate((120.0, 100.0)),
+        &RoundedRect::new(0.0, 0.0, 100.0, 50.0, 5.0),
+        Rect::new(4.0, 4.0, 96.0, 46.0),
+        Color::from_rgba8(0, 0, 0, 100),
+        5.0,
+        3.0,
+        true,
     );
 
     // Clip layer
@@ -345,7 +357,7 @@ fn test_font_deduplication() {
 
 #[test]
 fn test_resource_manifest_version() {
-    assert_eq!(ResourceManifest::CURRENT_VERSION, 1);
+    assert_eq!(ResourceManifest::CURRENT_VERSION, 2);
 }
 
 #[test]
@@ -369,7 +381,7 @@ fn test_archive_contains_expected_files() {
         .read_to_string(&mut resources_json)
         .unwrap();
     let manifest: ResourceManifest = serde_json::from_str(&resources_json).unwrap();
-    assert_eq!(manifest.version, 1);
+    assert_eq!(manifest.version, 2);
     assert!(manifest.images.is_empty());
     assert!(manifest.fonts.is_empty());
 

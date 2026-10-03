@@ -75,10 +75,12 @@ fn create_demo_scene() -> Scene {
 
     scene.draw_box_shadow(
         Affine::translate((4.0, 4.0)),
+        &card_rect.inflate(20.0, 20.0),
         card_rect,
         Color::from_rgba8(0, 0, 0, 60),
         12.0,
         8.0,
+        false,
     );
 
     // Card background
