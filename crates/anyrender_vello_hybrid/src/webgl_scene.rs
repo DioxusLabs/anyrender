@@ -2,7 +2,7 @@
 
 use anyrender::{Filter, Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, Diagonal2, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
 use vello_common::paint::PaintType;
 
@@ -267,15 +267,48 @@ impl PaintScene for WebGlScenePainter<'_> {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
-        rect: Rect,
-        color: Color,
-        radius: f64,
+        box_shape: &anyrender::NonUniformRoundedRect,
+        offset: kurbo::Vec2,
+        spread: f64,
         std_dev: f64,
+        color: Color,
+        kind: anyrender::BoxShadowKind,
     ) {
+        let geometry = anyrender::BoxShadowGeometry::new(box_shape, offset, spread, std_dev, kind);
         self.scene.set_transform(transform);
         self.scene.set_paint(PaintType::Solid(color));
         self.scene.reset_paint_transform();
-        self.scene
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+        self.scene.set_fill_rule(Fill::NonZero);
+        if geometry.std_dev == 0.0 {
+            // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
+            let clip = geometry.needs_clip();
+            if clip {
+                self.scene.push_clip_path(&geometry.area);
+            }
+            self.scene.fill_path(&geometry.unblurred_path());
+            if clip {
+                self.scene.pop_clip();
+            }
+            return;
+        }
+        if geometry.is_inset() {
+            geometry.draw_inset_with_layers(self, transform, color);
+            return;
+        }
+        // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
+        let clip = geometry.needs_clip();
+        if clip {
+            self.scene.push_clip_path(&geometry.area);
+        }
+        // TODO: draw shadows with matching individual radii instead of averaging them
+        self.scene.fill_blurred_rounded_rect(
+            &geometry.shadow.rect,
+            geometry.shadow.average_radius() as f32,
+            geometry.std_dev as f32,
+            false,
+        );
+        if clip {
+            self.scene.pop_clip();
+        }
     }
 }

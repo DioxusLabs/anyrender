@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, Diagonal2, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
 use vello_cpu::{PaintType, Pixmap};
 
@@ -255,16 +255,49 @@ impl PaintScene for VelloCpuScenePainter {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
-        rect: Rect,
-        color: Color,
-        radius: f64,
+        box_shape: &anyrender::NonUniformRoundedRect,
+        offset: kurbo::Vec2,
+        spread: f64,
         std_dev: f64,
+        color: Color,
+        kind: anyrender::BoxShadowKind,
     ) {
+        let geometry = anyrender::BoxShadowGeometry::new(box_shape, offset, spread, std_dev, kind);
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_paint(PaintType::Solid(color));
         self.render_ctx.reset_paint_transform();
-        self.render_ctx
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+        self.render_ctx.set_fill_rule(Fill::NonZero);
+        if geometry.std_dev == 0.0 {
+            // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
+            let clip = geometry.needs_clip();
+            if clip {
+                self.render_ctx.push_clip_path(&geometry.area);
+            }
+            self.render_ctx.fill_path(&geometry.unblurred_path());
+            if clip {
+                self.render_ctx.pop_clip();
+            }
+            return;
+        }
+        if geometry.is_inset() {
+            geometry.draw_inset_with_layers(self, transform, color);
+            return;
+        }
+        // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
+        let clip = geometry.needs_clip();
+        if clip {
+            self.render_ctx.push_clip_path(&geometry.area);
+        }
+        // TODO: draw shadows with matching individual radii instead of averaging them
+        self.render_ctx.fill_blurred_rounded_rect(
+            &geometry.shadow.rect,
+            geometry.shadow.average_radius() as f32,
+            geometry.std_dev as f32,
+            false,
+        );
+        if clip {
+            self.render_ctx.pop_clip();
+        }
     }
 }
 
@@ -420,5 +453,98 @@ mod clip_rule_tests {
     fn scene_replay_preserves_clip_rules() {
         assert_pixels(false, true);
         assert_pixels(true, true);
+    }
+}
+
+#[cfg(test)]
+mod box_shadow_tests {
+    use anyrender::{BoxShadowKind, NonUniformRoundedRect, PaintScene, render_to_buffer};
+    use kurbo::{Affine, Rect, Vec2};
+    use peniko::color::palette::css::RED;
+
+    use crate::VelloCpuImageRenderer;
+
+    fn render_unblurred(box_rect: Rect, offset: Vec2, spread: f64, kind: BoxShadowKind) -> Vec<u8> {
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| {
+                scene.draw_box_shadow(
+                    Affine::IDENTITY,
+                    &NonUniformRoundedRect::from(box_rect),
+                    offset,
+                    spread,
+                    0.0,
+                    RED,
+                    kind,
+                );
+            },
+            100,
+            100,
+        )
+    }
+
+    fn alpha(buffer: &[u8], x: usize, y: usize) -> u8 {
+        buffer[(y * 100 + x) * 4 + 3]
+    }
+
+    #[test]
+    fn unblurred_outset_shadow_is_clipped_to_outside_of_box() {
+        let kind = BoxShadowKind::Outset { clip_to_box: true };
+        let buffer = render_unblurred(
+            Rect::new(20.0, 20.0, 60.0, 60.0),
+            Vec2::new(10.0, 10.0),
+            2.0,
+            kind,
+        );
+        assert_eq!(alpha(&buffer, 65, 65), 255);
+        assert_eq!(alpha(&buffer, 40, 40), 0);
+        assert_eq!(alpha(&buffer, 15, 15), 0);
+        assert_eq!(alpha(&buffer, 75, 75), 0);
+
+        let kind = BoxShadowKind::Outset { clip_to_box: false };
+        let buffer = render_unblurred(Rect::new(20.0, 20.0, 60.0, 60.0), Vec2::ZERO, 0.0, kind);
+        assert_eq!(alpha(&buffer, 40, 40), 255);
+    }
+
+    #[test]
+    fn blurred_shadows_are_clipped_to_box() {
+        let render = |kind| {
+            render_to_buffer::<VelloCpuImageRenderer, _>(
+                |scene| {
+                    scene.draw_box_shadow(
+                        Affine::IDENTITY,
+                        &NonUniformRoundedRect::from(Rect::new(20.0, 20.0, 80.0, 80.0)),
+                        Vec2::ZERO,
+                        10.0,
+                        2.0,
+                        RED,
+                        kind,
+                    );
+                },
+                100,
+                100,
+            )
+        };
+        let inset = render(BoxShadowKind::Inset);
+        assert!(alpha(&inset, 22, 50) > 250);
+        assert_eq!(alpha(&inset, 50, 50), 0);
+        assert_eq!(alpha(&inset, 15, 50), 0);
+
+        let outset = render(BoxShadowKind::Outset { clip_to_box: true });
+        assert!(alpha(&outset, 15, 50) > 250);
+        assert_eq!(alpha(&outset, 50, 50), 0);
+        assert_eq!(alpha(&outset, 2, 50), 0);
+    }
+
+    #[test]
+    fn unblurred_inset_shadow_surrounds_hole() {
+        let buffer = render_unblurred(
+            Rect::new(20.0, 20.0, 80.0, 80.0),
+            Vec2::ZERO,
+            10.0,
+            BoxShadowKind::Inset,
+        );
+        assert_eq!(alpha(&buffer, 25, 50), 255);
+        assert_eq!(alpha(&buffer, 50, 50), 0);
+        assert_eq!(alpha(&buffer, 10, 10), 0);
     }
 }

@@ -12,7 +12,7 @@ use peniko::color::AlphaColor;
 use skia_safe::{
     BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments,
     FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle,
-    PathEffect, Point, Point3, RRect, Rect, Shader, Typeface,
+    PathEffect, Point, Point3, RRect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -562,37 +562,55 @@ impl PaintScene for SkiaScenePainter<'_> {
     fn draw_box_shadow(
         &mut self,
         transform: kurbo::Affine,
-        rect: kurbo::Rect,
-        brush: peniko::Color,
-        radius: f64,
+        box_shape: &anyrender::NonUniformRoundedRect,
+        offset: kurbo::Vec2,
+        spread: f64,
         std_dev: f64,
+        brush: peniko::Color,
+        kind: anyrender::BoxShadowKind,
     ) {
+        let geometry = anyrender::BoxShadowGeometry::new(box_shape, offset, spread, std_dev, kind);
+        let box_rrect = sk_kurbo::rrect_from_non_uniform(box_shape);
+
+        self.inner.save();
         self.set_matrix(transform);
+        match kind {
+            anyrender::BoxShadowKind::Outset { clip_to_box: true } => {
+                self.inner
+                    .clip_rrect(box_rrect, skia_safe::ClipOp::Difference, true);
+            }
+            anyrender::BoxShadowKind::Outset { clip_to_box: false } => {}
+            anyrender::BoxShadowKind::Inset => {
+                self.inner
+                    .clip_rrect(box_rrect, skia_safe::ClipOp::Intersect, true);
+            }
+        }
 
         self.reset_paint();
         self.set_paint_brush(brush, None);
         self.cache.paint.set_style(PaintStyle::Fill);
-
-        if std_dev > 0.0 {
+        if geometry.std_dev > 0.0 {
             self.cache.paint.set_mask_filter(
-                MaskFilter::blur(BlurStyle::Normal, std_dev as f32, true).unwrap(),
+                MaskFilter::blur(BlurStyle::Normal, geometry.std_dev as f32, true).unwrap(),
             );
         }
 
-        let rrect = RRect::new_nine_patch(
-            Rect::new(
-                rect.x0 as f32,
-                rect.y0 as f32,
-                rect.x1 as f32,
-                rect.y1 as f32,
-            ),
-            radius as f32,
-            radius as f32,
-            radius as f32,
-            radius as f32,
-        );
+        let shadow = sk_kurbo::rrect_from_non_uniform(&geometry.shadow);
+        if geometry.is_inset() {
+            // Paint the blurred inverse of the hole as a ring whose outer edge is far enough
+            // outside of the box that it isn't affected by the blur.
+            let margin = 3.0 * geometry.std_dev + 1.0;
+            let outer = box_shape
+                .rect
+                .union(geometry.shadow.rect)
+                .inflate(margin, margin);
+            let outer = RRect::new_rect(sk_kurbo::rect_from(outer));
+            self.inner.draw_drrect(outer, shadow, &self.cache.paint);
+        } else {
+            self.inner.draw_rrect(shadow, &self.cache.paint);
+        }
 
-        self.inner.draw_rrect(rrect, &self.cache.paint);
+        self.inner.restore();
     }
 }
 
@@ -1265,6 +1283,27 @@ mod sk_kurbo {
             rect.y0 as f32,
             rect.x1 as f32,
             rect.y1 as f32,
+        )
+    }
+
+    pub(super) fn rrect_from_non_uniform(shape: &anyrender::NonUniformRoundedRect) -> SkRRect {
+        let radius = |r: kurbo::Vec2| {
+            if r.x <= 0.0 || r.y <= 0.0 {
+                SkPoint::new(0.0, 0.0)
+            } else {
+                SkPoint::new(r.x as f32, r.y as f32)
+            }
+        };
+        let radii = &shape.radii;
+        // Corner order: upper-left, upper-right, lower-right, lower-left
+        SkRRect::new_rect_radii(
+            rect_from(shape.rect),
+            &[
+                radius(radii.top_left),
+                radius(radii.top_right),
+                radius(radii.bottom_right),
+                radius(radii.bottom_left),
+            ],
         )
     }
 
