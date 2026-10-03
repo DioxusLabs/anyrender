@@ -536,6 +536,41 @@ mod box_shadow_tests {
     }
 
     #[test]
+    fn blurred_inset_shadow_keeps_background() {
+        for box_shape in [
+            NonUniformRoundedRect::from(Rect::new(20.0, 20.0, 80.0, 80.0)),
+            NonUniformRoundedRect::from(kurbo::RoundedRect::new(20.0, 20.0, 80.0, 80.0, 8.0)),
+        ] {
+            let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+                |scene| {
+                    scene.fill(
+                        peniko::Fill::NonZero,
+                        Affine::IDENTITY,
+                        peniko::color::palette::css::WHITE,
+                        None,
+                        &Rect::new(0.0, 0.0, 100.0, 100.0),
+                    );
+                    scene.draw_box_shadow(
+                        Affine::IDENTITY,
+                        &box_shape,
+                        Vec2::ZERO,
+                        5.0,
+                        2.0,
+                        RED,
+                        BoxShadowKind::Inset,
+                    );
+                },
+                100,
+                100,
+            );
+            let center = (50 * 100 + 50) * 4;
+            assert_eq!(&buffer[center..center + 4], &[255, 255, 255, 255]);
+            let edge = (50 * 100 + 21) * 4;
+            assert!(buffer[edge + 1] < 8 && buffer[edge + 2] < 8 && buffer[edge + 3] == 255);
+        }
+    }
+
+    #[test]
     fn unblurred_inset_shadow_surrounds_hole() {
         let buffer = render_unblurred(
             Rect::new(20.0, 20.0, 80.0, 80.0),

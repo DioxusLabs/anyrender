@@ -96,7 +96,17 @@ impl BoxShadowGeometry {
         transform: Affine,
         brush: Color,
     ) {
-        scene.push_clip_layer(Fill::NonZero, transform, &self.box_shape);
+        // An isolated layer (not a clip, which may not be isolated) so that the `DestOut` layer
+        // only cuts the hole out of the shadow, not out of what is underneath it.
+        scene.push_layer(
+            Fill::NonZero,
+            Mix::Normal,
+            1.0,
+            transform,
+            &self.box_shape,
+            None,
+            None,
+        );
         scene.fill(Fill::NonZero, transform, brush, None, &self.box_shape);
         scene.push_layer(
             Fill::NonZero,
