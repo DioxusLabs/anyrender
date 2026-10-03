@@ -1,6 +1,8 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use crate::{
+    Backdrop, Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer,
+};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -46,7 +48,8 @@ impl WindowRenderer for NullWindowRenderer {
 
     fn set_size(&mut self, _width: u32, _height: u32) {}
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F) {}
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _backdrop: Backdrop, _draw_fn: F) {
+    }
 }
 
 #[derive(Copy, Clone, Default)]
@@ -75,12 +78,19 @@ impl ImageRenderer for NullImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        _backdrop: Backdrop,
         _draw_fn: F,
         _vec: &mut Vec<u8>,
     ) {
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, _draw_fn: F, _buffer: &mut [u8]) {}
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        _backdrop: Backdrop,
+        _draw_fn: F,
+        _buffer: &mut [u8],
+    ) {
+    }
 }
 
 #[derive(Copy, Clone, Default)]

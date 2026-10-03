@@ -5,7 +5,7 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use anyrender::recording::Scene;
-use anyrender::{Glyph, PaintScene, render_to_buffer};
+use anyrender::{Backdrop, Glyph, PaintScene, render_to_buffer};
 use anyrender_serialize::{SceneArchive, SerializeConfig};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
@@ -307,6 +307,7 @@ fn create_checkerboard_image(width: u32, height: u32) -> ImageData {
 /// Render a scene to an RGBA buffer using Vello CPU.
 fn render_scene_to_buffer(scene: &Scene) -> Vec<u8> {
     render_to_buffer::<VelloCpuImageRenderer, _>(
+        Backdrop::default(),
         |painter| {
             painter.append_scene(scene.clone(), Affine::IDENTITY);
         },

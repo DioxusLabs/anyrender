@@ -1,5 +1,5 @@
 use anyrender::{
-    RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+    Backdrop, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
@@ -61,7 +61,6 @@ enum RenderState {
 pub struct VelloRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
-    pub base_color: Color,
     pub antialiasing_method: AaConfig,
     /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: anyrender::CompositeAlphaMode,
@@ -87,7 +86,6 @@ impl VelloRendererOptions {
         Self {
             features: None,
             limits: None,
-            base_color: Color::WHITE,
             antialiasing_method: AaConfig::Msaa16,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             pipeline_cache: None,
@@ -107,10 +105,6 @@ impl VelloRendererOptions {
             limits: Some(limits),
             ..self
         }
-    }
-
-    pub fn base_color(self, base_color: Color) -> Self {
-        Self { base_color, ..self }
     }
 
     pub fn antialiasing_method(self, antialiasing_method: AaConfig) -> Self {
@@ -148,7 +142,6 @@ impl VelloRendererOptions {
 impl From<anyrender::RendererConfig> for VelloRendererOptions {
     fn from(config: anyrender::RendererConfig) -> Self {
         Self {
-            base_color: config.base_color.unwrap_or(Color::WHITE),
             composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
             ..Default::default()
         }
@@ -435,7 +428,7 @@ impl WindowRenderer for VelloWindowRenderer {
         };
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, backdrop: Backdrop, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -460,6 +453,20 @@ impl WindowRenderer for VelloWindowRenderer {
             return;
         };
 
+        let backdrop_image = if matches!(backdrop, Backdrop::Preserve) {
+            let mut scene = VelloScene::new();
+            let image_data = state
+                .renderer
+                .register_texture(texture_view.texture().clone());
+            let image = peniko::ImageBrush::new(image_data.clone());
+            scene.draw_image(&image, kurbo::Affine::IDENTITY);
+            std::mem::swap(&mut self.scene, &mut scene);
+            self.scene.append(&scene, None);
+            Some(image_data)
+        } else {
+            None
+        };
+
         for handle in self.texture_handles.values() {
             state.renderer.mark_override_image_dirty(handle);
         }
@@ -472,7 +479,10 @@ impl WindowRenderer for VelloWindowRenderer {
                 &self.scene,
                 &texture_view,
                 &RenderParams {
-                    base_color: self.config.base_color,
+                    base_color: match backdrop {
+                        Backdrop::Preserve => Color::TRANSPARENT,
+                        Backdrop::Clear(color) => color,
+                    },
                     width: render_surface.config.width,
                     height: render_surface.config.height,
                     antialiasing_method: self.config.antialiasing_method,
@@ -480,6 +490,10 @@ impl WindowRenderer for VelloWindowRenderer {
             )
             .expect("failed to render to texture");
         timer.record_time("render");
+
+        if let Some(image) = backdrop_image {
+            state.renderer.unregister_texture(image);
+        }
 
         drop(texture_view);
 

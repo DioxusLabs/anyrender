@@ -1,4 +1,4 @@
-use anyrender::{ImageRenderer, RenderContext, ResourceId};
+use anyrender::{Backdrop, ImageRenderer, RenderContext, ResourceId};
 use peniko::ImageData;
 use rustc_hash::FxHashMap;
 use vello::{Renderer as VelloRenderer, RendererOptions, Scene as VelloScene};
@@ -77,16 +77,18 @@ impl ImageRenderer for VelloImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        backdrop: Backdrop,
         draw_fn: F,
         cpu_buffer: &mut Vec<u8>,
     ) {
         let size = self.buffer_renderer.size();
         cpu_buffer.resize((size.width * size.height * 4) as usize, 0);
-        self.render(draw_fn, cpu_buffer);
+        self.render(backdrop, draw_fn, cpu_buffer);
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        backdrop: Backdrop,
         draw_fn: F,
         cpu_buffer: &mut [u8],
     ) {
@@ -96,6 +98,20 @@ impl ImageRenderer for VelloImageRenderer {
             device_handle: Some(&self.buffer_renderer.device_handle),
             texture_handles: Some(&mut self.texture_handles),
         });
+        let texture_view = self.buffer_renderer.target_texture_view();
+        let backdrop_image = if matches!(backdrop, Backdrop::Preserve) {
+            let mut scene = VelloScene::new();
+            let image_data = self
+                .vello_renderer
+                .register_texture(texture_view.texture().clone());
+            let image = peniko::ImageBrush::new(image_data.clone());
+            scene.draw_image(&image, kurbo::Affine::IDENTITY);
+            std::mem::swap(&mut self.scene, &mut scene);
+            self.scene.append(&scene, None);
+            Some(image_data)
+        } else {
+            None
+        };
 
         for handle in self.texture_handles.values() {
             self.vello_renderer.mark_override_image_dirty(handle);
@@ -107,15 +123,22 @@ impl ImageRenderer for VelloImageRenderer {
                 self.buffer_renderer.device(),
                 self.buffer_renderer.queue(),
                 &self.scene,
-                &self.buffer_renderer.target_texture_view(),
+                &texture_view,
                 &vello::RenderParams {
-                    base_color: vello::peniko::Color::TRANSPARENT,
+                    base_color: match backdrop {
+                        Backdrop::Preserve => vello::peniko::Color::TRANSPARENT,
+                        Backdrop::Clear(color) => color,
+                    },
                     width: size.width,
                     height: size.height,
                     antialiasing_method: vello::AaConfig::Area,
                 },
             )
             .expect("Got non-Send/Sync error from rendering");
+
+        if let Some(image) = backdrop_image {
+            self.vello_renderer.unregister_texture(image);
+        }
 
         self.buffer_renderer.copy_texture_to_buffer(cpu_buffer);
 

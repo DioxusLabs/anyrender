@@ -1,7 +1,8 @@
 use crate::{ImageCacheConfig, VelloCpuScenePainter};
-use anyrender::{ImageRenderer, RenderContext as AnyRenderContext};
+use anyrender::{Backdrop, ImageRenderer, RenderContext as AnyRenderContext};
 use debug_timer::debug_timer;
-use vello_cpu::{PixmapMut, RenderContext};
+use kurbo::{Point, Rect, Shape as _, Size};
+use vello_cpu::{CompositeMode, PixmapMut, RenderContext};
 
 pub struct VelloCpuImageRenderer {
     scene: VelloCpuScenePainter,
@@ -43,16 +44,34 @@ impl ImageRenderer for VelloCpuImageRenderer {
         self.scene.render_ctx.reset();
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        backdrop: Backdrop,
+        draw_fn: F,
+        buffer: &mut [u8],
+    ) {
         debug_timer!(timer, feature = "log_frame_times");
 
+        if let Backdrop::Clear(color) = backdrop {
+            self.scene.render_ctx.set_paint(color);
+            self.scene.render_ctx.fill_path(
+                &Rect::from_origin_size(
+                    Point::ORIGIN,
+                    Size::new(
+                        self.scene.render_ctx.width() as f64,
+                        self.scene.render_ctx.height() as f64,
+                    ),
+                )
+                .to_path(0.1),
+            );
+        }
         draw_fn(&mut self.scene);
         timer.record_time("cmds");
 
         self.scene.render_ctx.flush();
         timer.record_time("flush");
 
-        self.scene.render_ctx.render(
+        self.scene.render_ctx.render_with(
             PixmapMut::new(
                 self.scene.render_ctx.width(),
                 self.scene.render_ctx.height(),
@@ -60,6 +79,13 @@ impl ImageRenderer for VelloCpuImageRenderer {
             )
             .unwrap(),
             &mut self.scene.resources,
+            vello_cpu::RasterizerSettings {
+                composite_mode: match backdrop {
+                    Backdrop::Preserve => CompositeMode::SrcOver,
+                    Backdrop::Clear(_) => CompositeMode::Replace,
+                },
+                ..Default::default()
+            },
         );
         timer.record_time("render");
 
@@ -71,12 +97,13 @@ impl ImageRenderer for VelloCpuImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        backdrop: Backdrop,
         draw_fn: F,
         buffer: &mut Vec<u8>,
     ) {
         let width = self.scene.render_ctx.width();
         let height = self.scene.render_ctx.height();
         buffer.resize(width as usize * height as usize * 4, 0);
-        self.render(draw_fn, buffer);
+        self.render(backdrop, draw_fn, buffer);
     }
 }

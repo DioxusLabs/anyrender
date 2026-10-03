@@ -1,4 +1,4 @@
-use anyrender::{NullWindowRenderer, PaintScene, Scene, WindowRenderer};
+use anyrender::{Backdrop, NullWindowRenderer, PaintScene, Scene, WindowRenderer};
 use anyrender_serialize::SceneArchive;
 use anyrender_skia::SkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
@@ -182,24 +182,24 @@ impl ApplicationHandler for App {
                 self.request_redraw();
             }
             WindowEvent::RedrawRequested => match renderer {
-                Renderer::Skia(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
-                Renderer::Gpu(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
-                Renderer::Hybrid(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
-                Renderer::Cpu(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
-                Renderer::CpuSoftbuffer(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
-                Renderer::Null(r) => {
-                    r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
-                }
+                Renderer::Skia(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
+                Renderer::Gpu(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
+                Renderer::Hybrid(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
+                Renderer::Cpu(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
+                Renderer::CpuSoftbuffer(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
+                Renderer::Null(r) => r.render(Backdrop::default(), |painter| {
+                    painter.append_scene(self.scene.clone(), Affine::IDENTITY)
+                }),
             },
             WindowEvent::KeyboardInput {
                 event:

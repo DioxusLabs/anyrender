@@ -1,6 +1,6 @@
-use anyrender::{RenderContext, WindowRenderer};
+use anyrender::{Backdrop, RenderContext, WindowRenderer};
 use debug_timer::debug_timer;
-use skia_safe::{Color, Surface, graphics};
+use skia_safe::{Surface, graphics};
 use std::any::Any;
 use std::sync::Arc;
 
@@ -28,8 +28,6 @@ struct ActiveRenderState {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct SkiaRendererOptions {
-    /// Background color used to clear the canvas.
-    pub base_color: Color,
     /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: anyrender::CompositeAlphaMode,
 }
@@ -43,13 +41,8 @@ impl Default for SkiaRendererOptions {
 impl SkiaRendererOptions {
     pub const fn new() -> Self {
         Self {
-            base_color: Color::WHITE,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
         }
-    }
-
-    pub const fn base_color(self, base_color: Color) -> Self {
-        Self { base_color, ..self }
     }
 
     pub const fn composite_alpha_mode(
@@ -66,10 +59,6 @@ impl SkiaRendererOptions {
 impl From<anyrender::RendererConfig> for SkiaRendererOptions {
     fn from(config: anyrender::RendererConfig) -> Self {
         let mut options = Self::default();
-        if let Some(color) = config.base_color {
-            let rgba8 = color.to_rgba8();
-            options.base_color = skia_safe::Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
-        }
         if let Some(mode) = config.composite_alpha_mode {
             options.composite_alpha_mode = mode;
         }
@@ -163,7 +152,7 @@ impl WindowRenderer for SkiaWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, backdrop: Backdrop, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -176,7 +165,11 @@ impl WindowRenderer for SkiaWindowRenderer {
         };
 
         surface.canvas().restore_to_count(1);
-        surface.canvas().clear(self.options.base_color);
+        if let Backdrop::Clear(color) = backdrop {
+            surface
+                .canvas()
+                .clear(crate::scene::sk_peniko::color4f_from_alpha_color(color));
+        }
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
