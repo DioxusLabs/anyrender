@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-03
+
+### Added
+
+- Explicit clip fill rules on `PaintScene::push_layer` and `push_clip_layer`, and `fill` fields on recorded `LayerCommand` and `ClipCommand` (breaking). Older serialized scenes default to the nonzero fill rule (#105).
+- `ColorMatrix` constructors for CSS brightness, contrast, invert and opacity filters (#104).
+
+### Changed
+
+- CSS brightness, contrast, invert and opacity filters now use `ColorMatrix` instead of `ComponentTransfer`, enabling them in the Vello CPU/GPU backends (#104).
+- Raised the workspace MSRV to Rust 1.90 (#94).
+
 ## [0.13.0] - 2026-08-16
 
 ### Fixed

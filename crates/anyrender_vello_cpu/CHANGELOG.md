@@ -5,6 +5,17 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-10-03
+
+### Changed
+
+- Updated to AnyRender 0.14 and explicit clip fill rules (#105).
+- Upgraded `vello_cpu` and `vello_common` to 0.3 and `glifo` to 0.4 (#109).
+
+### Fixed
+
+- Reset the paint transform before drawing box shadows, preventing transforms from previous image or gradient paints from affecting shadows (#111).
+
 ## [0.17.0] - 2026-08-24
 
 ### Added
