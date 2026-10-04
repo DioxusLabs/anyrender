@@ -5,8 +5,8 @@ use debug_timer::debug_timer;
 use futures_channel::oneshot;
 use peniko::Color;
 use rustc_hash::FxHashMap;
-use std::future::Future;
 use std::sync::Arc;
+use std::{future::Future, sync::Mutex};
 use vello_common::{TextureId, paint::ImageId};
 use vello_gpu::{
     ClearSettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
@@ -77,6 +77,7 @@ pub struct VelloHybridRendererOptions {
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub glyph_caching: bool,
+    pub wgpu_context: Option<Arc<Mutex<WGPUContext>>>,
 }
 
 impl Default for VelloHybridRendererOptions {
@@ -89,6 +90,7 @@ impl Default for VelloHybridRendererOptions {
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
             glyph_caching: false,
+            wgpu_context: None,
         }
     }
 }
@@ -99,42 +101,39 @@ impl VelloHybridRendererOptions {
         Self::default()
     }
 
-    pub const fn features(self, features: Features) -> Self {
+    pub fn features(self, features: Features) -> Self {
         Self {
             features: Some(features),
             ..self
         }
     }
 
-    pub const fn limits(self, limits: Limits) -> Self {
+    pub fn limits(self, limits: Limits) -> Self {
         Self {
             limits: Some(limits),
             ..self
         }
     }
 
-    pub const fn render_settings(self, render_settings: RenderSettings) -> Self {
+    pub fn render_settings(self, render_settings: RenderSettings) -> Self {
         Self {
             render_settings,
             ..self
         }
     }
 
-    pub const fn base_color(self, base_color: Color) -> Self {
+    pub fn base_color(self, base_color: Color) -> Self {
         Self { base_color, ..self }
     }
 
-    pub const fn composite_alpha_mode(
-        self,
-        composite_alpha_mode: anyrender::CompositeAlphaMode,
-    ) -> Self {
+    pub fn composite_alpha_mode(self, composite_alpha_mode: anyrender::CompositeAlphaMode) -> Self {
         Self {
             composite_alpha_mode,
             ..self
         }
     }
 
-    pub const fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
+    pub fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
         Self {
             desired_maximum_frame_latency,
             ..self
@@ -146,9 +145,16 @@ impl VelloHybridRendererOptions {
     /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
-    pub const fn glyph_caching(self, glyph_caching: bool) -> Self {
+    pub fn glyph_caching(self, glyph_caching: bool) -> Self {
         Self {
             glyph_caching,
+            ..self
+        }
+    }
+
+    pub fn wgpu_context(self, context: Arc<Mutex<WGPUContext>>) -> Self {
+        Self {
+            wgpu_context: Some(context),
             ..self
         }
     }
@@ -164,13 +170,18 @@ impl From<anyrender::RendererConfig> for VelloHybridRendererOptions {
     }
 }
 
+enum WGPUContextType {
+    Owned(WGPUContext),
+    Shared(Arc<Mutex<WGPUContext>>),
+}
+
 pub struct VelloHybridWindowRenderer {
     // The fields MUST be in this order, so that the surface is dropped before the window
     // Window is cached even when suspended so that it can be reused when the app is resumed after being suspended
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
-    wgpu_context: WGPUContext,
+    wgpu_context: WGPUContextType,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
     cached_images: FxHashMap<u64, ImageId>,
@@ -184,7 +195,18 @@ impl VelloHybridWindowRenderer {
     pub fn with_options(config: impl Into<VelloHybridRendererOptions>) -> Self {
         let config = config.into();
         let render_settings = config.render_settings;
-        let wgpu_context = build_wgpu_context(&config);
+        let wgpu_context = config.wgpu_context.clone().map_or_else(
+            || {
+                let features = config.features.unwrap_or_default()
+                    | Features::CLEAR_TEXTURE
+                    | Features::PIPELINE_CACHE;
+                WGPUContextType::Owned(WGPUContext::with_features_and_limits(
+                    Some(features),
+                    config.limits.clone(),
+                ))
+            },
+            WGPUContextType::Shared,
+        );
         Self {
             render_state: RenderState::Suspended,
             config,
@@ -201,12 +223,6 @@ impl VelloHybridWindowRenderer {
             _ => None,
         }
     }
-}
-
-fn build_wgpu_context(config: &VelloHybridRendererOptions) -> WGPUContext {
-    let features =
-        config.features.unwrap_or_default() | Features::CLEAR_TEXTURE | Features::PIPELINE_CACHE;
-    WGPUContext::with_features_and_limits(Some(features), config.limits.clone())
 }
 
 // TODO: Make configurable?
@@ -305,13 +321,31 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let render_settings = self.config.render_settings;
         self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings.level);
 
-        let surface = self
-            .wgpu_context
-            .create_surface(window_handle)
-            .expect("Error creating surface");
-        let instance = self.wgpu_context.instance.clone();
-        let extra_features = self.wgpu_context.extra_features();
-        let override_limits = self.wgpu_context.override_limits();
+        let (surface, instance, extra_features, override_limits) = match &self.wgpu_context {
+            WGPUContextType::Owned(ctx) => {
+                let surface = ctx
+                    .create_surface(window_handle)
+                    .expect("Error creating surface");
+                (
+                    surface,
+                    ctx.instance.clone(),
+                    ctx.extra_features(),
+                    ctx.override_limits(),
+                )
+            }
+            WGPUContextType::Shared(c) => {
+                let ctx = c.lock().unwrap();
+                let surface = ctx
+                    .create_surface(window_handle)
+                    .expect("Error creating surface");
+                (
+                    surface,
+                    ctx.instance.clone(),
+                    ctx.extra_features(),
+                    ctx.override_limits(),
+                )
+            }
+        };
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -329,9 +363,13 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             }
         };
         let desired_maximum_frame_latency = self.config.desired_maximum_frame_latency;
-        let existing_device_handle = self
-            .wgpu_context
-            .find_compatible_device_handle(Some(&surface));
+        let existing_device_handle = match &mut self.wgpu_context {
+            WGPUContextType::Owned(ctx) => ctx.find_compatible_device_handle(Some(&surface)),
+            WGPUContextType::Shared(c) => {
+                let mut ctx = c.lock().unwrap();
+                ctx.find_compatible_device_handle(Some(&surface))
+            }
+        };
 
         spawn_init(async move {
             let device_handle = match existing_device_handle {
@@ -453,7 +491,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
                     let device_handle = active.render_surface.device_handle.clone();
-                    self.wgpu_context.device_pool.push(device_handle);
+                    match &mut self.wgpu_context {
+                        WGPUContextType::Owned(ctx) => ctx.device_pool.push(device_handle),
+                        WGPUContextType::Shared(c) => {
+                            c.lock().unwrap().device_pool.push(device_handle)
+                        }
+                    }
                     self.render_state = RenderState::Active(active);
                     true
                 }
