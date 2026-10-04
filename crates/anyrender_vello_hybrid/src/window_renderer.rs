@@ -1,9 +1,11 @@
 use anyrender::{
-    PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+    Backdrop, Paint, PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId,
+    WindowHandle, WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
-use peniko::Color;
+use kurbo::Point;
+use peniko::{Color, ImageBrush, ImageSampler};
 use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -63,7 +65,6 @@ pub struct VelloHybridRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub render_settings: RenderSettings,
-    pub base_color: Color,
     /// Alpha mode used when compositing the window surface.
     pub composite_alpha_mode: anyrender::CompositeAlphaMode,
     /// Maximum number of frames the presentation engine may queue ahead of the
@@ -85,7 +86,6 @@ impl Default for VelloHybridRendererOptions {
             features: None,
             limits: None,
             render_settings: RenderSettings::default(),
-            base_color: Color::WHITE,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
             glyph_caching: false,
@@ -118,10 +118,6 @@ impl VelloHybridRendererOptions {
             render_settings,
             ..self
         }
-    }
-
-    pub const fn base_color(self, base_color: Color) -> Self {
-        Self { base_color, ..self }
     }
 
     pub const fn composite_alpha_mode(
@@ -157,7 +153,6 @@ impl VelloHybridRendererOptions {
 impl From<anyrender::RendererConfig> for VelloHybridRendererOptions {
     fn from(config: anyrender::RendererConfig) -> Self {
         Self {
-            base_color: config.base_color.unwrap_or(Color::WHITE),
             composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
             ..Default::default()
         }
@@ -486,12 +481,14 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         }
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, backdrop: Backdrop, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
 
         let render_surface = &mut state.render_surface;
+
+        let target_texture = render_surface.target_texture_view().clone();
 
         debug_timer!(timer, feature = "log_frame_times");
 
@@ -519,25 +516,51 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             device_handle: &render_surface.device_handle,
             glyph_caching: self.config.glyph_caching,
         };
-        if self.config.base_color != Color::TRANSPARENT {
-            scene_painter.fill(
-                peniko::Fill::NonZero,
-                kurbo::Affine::IDENTITY,
-                self.config.base_color,
-                None,
-                &kurbo::Rect::new(
-                    0.,
-                    0.,
+        match backdrop {
+            Backdrop::Preserve => {
+                let size = kurbo::Size::new(
                     render_surface.config.width as f64,
                     render_surface.config.height as f64,
-                ),
-            );
+                );
+                if let Ok(tv) = &target_texture {
+                    let resource = scene_painter
+                        .try_register_custom_resource(Box::new(tv.clone()))
+                        .unwrap();
+                    let paint = Paint::Resource(ImageBrush {
+                        image: resource,
+                        sampler: ImageSampler::default(),
+                    });
+                    scene_painter.fill(
+                        peniko::Fill::NonZero,
+                        kurbo::Affine::IDENTITY,
+                        &paint,
+                        None,
+                        &kurbo::Rect::from_origin_size(Point::ORIGIN, size),
+                    );
+                }
+            }
+            Backdrop::Clear(color) => {
+                if color != Color::TRANSPARENT {
+                    scene_painter.fill(
+                        peniko::Fill::NonZero,
+                        kurbo::Affine::IDENTITY,
+                        color,
+                        None,
+                        &kurbo::Rect::new(
+                            0.,
+                            0.,
+                            render_surface.config.width as f64,
+                            render_surface.config.height as f64,
+                        ),
+                    );
+                }
+            }
         }
         // Regenerate the vello scene
         draw_fn(&mut scene_painter);
         timer.record_time("cmd");
 
-        let Ok(texture_view) = render_surface.target_texture_view() else {
+        let Ok(texture_view) = target_texture else {
             // Skip frame in case of error getting surface texture
             render_surface.clear_surface_texture();
             self.scene.reset();

@@ -1,4 +1,4 @@
-use anyrender::{PaintScene, WindowRenderer};
+use anyrender::{Backdrop, PaintScene, WindowRenderer};
 use anyrender_skia::{SkiaImageRenderer, SkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
@@ -225,7 +225,7 @@ impl ApplicationHandler for App {
                     self.bunny_manager.count(),
                 );
                 match renderer {
-                    Renderer::Skia(r) => r.render(|scene_painter| {
+                    Renderer::Skia(r) => r.render(Backdrop::default(), |scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -235,7 +235,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::SkiaRaster(r) => r.render(|scene_painter| {
+                    Renderer::SkiaRaster(r) => r.render(Backdrop::default(), |scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -245,7 +245,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::Gpu(r) => r.render(|scene_painter| {
+                    Renderer::Gpu(r) => r.render(Backdrop::default(), |scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -255,7 +255,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::Hybrid(r) => r.render(|scene_painter| {
+                    Renderer::Hybrid(r) => r.render(Backdrop::default(), |scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -265,7 +265,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::Cpu(r) => r.render(|scene_painter| {
+                    Renderer::Cpu(r) => r.render(Backdrop::default(), |scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
