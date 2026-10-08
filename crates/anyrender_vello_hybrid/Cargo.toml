@@ -9,6 +9,8 @@ license.workspace = true
 edition.workspace = true
 
 [features]
+default = ["png"]
+png = ["glifo/png"]
 log_frame_times = ["debug_timer/enable"]
 webgl = ["vello_gpu/webgl"]
 

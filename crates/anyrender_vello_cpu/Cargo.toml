@@ -9,6 +9,8 @@ license.workspace = true
 edition.workspace = true
 
 [features]
+default = ["png"]
+png = ["glifo/png"]
 pixels_window_renderer = ["dep:pixels_window_renderer"]
 softbuffer_window_renderer = ["dep:softbuffer_window_renderer"]
 multithreading = ["vello_cpu/multithreading"]
