@@ -430,7 +430,10 @@ pub enum FilterEffect {
 // This is just for documentation purposes. Feel free to update the value as necessary
 #[cfg(target_pointer_width = "64")]
 const _: [u8; 128] = [0; std::mem::size_of::<FilterEffect>()];
-#[cfg(target_pointer_width = "32")]
+// On 32-bit x86, 64-bit fields only have 4-byte alignment.
+#[cfg(all(target_pointer_width = "32", target_arch = "x86"))]
+const _: [u8; 84] = [0; std::mem::size_of::<FilterEffect>()];
+#[cfg(all(target_pointer_width = "32", not(target_arch = "x86")))]
 const _: [u8; 88] = [0; std::mem::size_of::<FilterEffect>()];
 
 impl FilterEffect {
