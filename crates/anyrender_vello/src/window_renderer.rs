@@ -466,7 +466,7 @@ impl WindowRenderer for VelloWindowRenderer {
             state.renderer.mark_override_image_dirty(handle);
         }
 
-        self.gpu_timer.start_frame();
+        self.gpu_timer.start();
         state
             .renderer
             .render_to_texture(
@@ -482,6 +482,8 @@ impl WindowRenderer for VelloWindowRenderer {
                 },
             )
             .expect("failed to render to texture");
+        self.gpu_timer
+            .submitted("render", render_surface.device(), render_surface.queue());
         timer.record_time("render");
 
         drop(texture_view);
@@ -491,19 +493,20 @@ impl WindowRenderer for VelloWindowRenderer {
         }
         timer.record_time("acquire");
 
+        self.gpu_timer.start();
+
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
-        self.gpu_timer.end_frame(render_surface.queue());
+        self.gpu_timer
+            .submitted("blit", render_surface.device(), render_surface.queue());
         timer.record_time("present");
 
         // Progress cleanup and callbacks without serializing the next frame
         // behind completion of this frame's GPU work. Surface acquisition
         // provides bounded backpressure via desired_maximum_frame_latency.
         render_surface.device().poll(wgpu::PollType::Poll).unwrap();
-
-        timer.record_time("poll");
         timer.print_times("vello: ");
         self.gpu_timer.print_completed("vello: ");
 

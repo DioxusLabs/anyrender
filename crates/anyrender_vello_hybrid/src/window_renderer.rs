@@ -547,6 +547,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             self.scene.reset();
             return;
         };
+        // Without an intermediate texture the surface texture was just acquired above
+        if !render_surface.has_intermediate_texture() {
+            timer.record_time("acquire");
+        }
 
         // Construct Vello Hybrid TextureBindings
         let mut texture_bindings = TextureBindings::new();
@@ -572,30 +576,34 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 TargetInit::Clear(ClearSettings::default()),
             )
             .expect("failed to render to texture");
-        self.gpu_timer.start_frame();
+        self.gpu_timer.start();
         render_surface.queue().submit([encoder.finish()]);
+        self.gpu_timer
+            .submitted("render", render_surface.device(), render_surface.queue());
         timer.record_time("render");
 
         drop(texture_view);
 
-        if render_surface.ensure_current_surface_texture().is_err() {
-            return;
+        if render_surface.has_intermediate_texture() {
+            if render_surface.ensure_current_surface_texture().is_err() {
+                return;
+            }
+            timer.record_time("acquire");
+            self.gpu_timer.start();
         }
-        timer.record_time("acquire");
 
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
-        self.gpu_timer.end_frame(render_surface.queue());
+        self.gpu_timer
+            .submitted("blit", render_surface.device(), render_surface.queue());
         timer.record_time("present");
 
         // Progress cleanup and callbacks without serializing the next frame
         // behind completion of this frame's GPU work. Surface acquisition
         // provides bounded backpressure via desired_maximum_frame_latency.
         render_surface.device().poll(wgpu::PollType::Poll).unwrap();
-
-        timer.record_time("poll");
         timer.print_times("vello_hybrid: ");
         self.gpu_timer.print_completed("vello_hybrid: ");
 

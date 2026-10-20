@@ -288,6 +288,12 @@ impl<'s> SurfaceRenderer<'s> {
     ///
     /// If there is an intermediate texture, this is a view of that intermediate texture, otherwise
     /// it is a view of the surface texture.
+    /// Whether rendering goes via an intermediate texture that is blitted to the surface on
+    /// present, rather than directly into the surface texture.
+    pub fn has_intermediate_texture(&self) -> bool {
+        self.intermediate_texture.is_some()
+    }
+
     pub fn target_texture_view(&mut self) -> Result<TextureView, GetCurrentSurfaceTextureErr> {
         match &self.intermediate_texture {
             Some(intermediate_texture) => Ok(intermediate_texture.texture_view.clone()),
