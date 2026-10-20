@@ -16,7 +16,7 @@ use wgpu::{
     TextureUsages,
 };
 use wgpu_context::{
-    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    AlphaConversion, DeviceHandle, GpuFrameTimer, SurfaceRenderer, SurfaceRendererConfiguration,
     TextureConfiguration, WGPUContext,
 };
 
@@ -164,6 +164,7 @@ pub struct VelloWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloScene,
     config: VelloRendererOptions,
+    gpu_timer: GpuFrameTimer,
 
     // Resources
     texture_handles: FxHashMap<ResourceId, ImageData>,
@@ -181,6 +182,7 @@ impl VelloWindowRenderer {
             render_state: RenderState::Suspended,
             wgpu_context: build_wgpu_context(&config),
             config,
+            gpu_timer: GpuFrameTimer::new(),
             window_handle: None,
             scene: VelloScene::new(),
             texture_handles: FxHashMap::default(),
@@ -464,6 +466,7 @@ impl WindowRenderer for VelloWindowRenderer {
             state.renderer.mark_override_image_dirty(handle);
         }
 
+        self.gpu_timer.start_frame();
         state
             .renderer
             .render_to_texture(
@@ -483,10 +486,16 @@ impl WindowRenderer for VelloWindowRenderer {
 
         drop(texture_view);
 
+        if render_surface.ensure_current_surface_texture().is_err() {
+            return;
+        }
+        timer.record_time("acquire");
+
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
+        self.gpu_timer.end_frame(render_surface.queue());
         timer.record_time("present");
 
         // Progress cleanup and callbacks without serializing the next frame
@@ -496,6 +505,7 @@ impl WindowRenderer for VelloWindowRenderer {
 
         timer.record_time("poll");
         timer.print_times("vello: ");
+        self.gpu_timer.print_completed("vello: ");
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();

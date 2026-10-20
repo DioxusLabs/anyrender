@@ -16,7 +16,9 @@ use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
     TextureFormat, TextureView, TextureViewDescriptor,
 };
-use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
+use wgpu_context::{
+    DeviceHandle, GpuFrameTimer, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext,
+};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
 
@@ -173,6 +175,7 @@ pub struct VelloHybridWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
+    gpu_timer: GpuFrameTimer,
     cached_images: FxHashMap<u64, ImageId>,
 }
 impl VelloHybridWindowRenderer {
@@ -188,6 +191,7 @@ impl VelloHybridWindowRenderer {
         Self {
             render_state: RenderState::Suspended,
             config,
+            gpu_timer: GpuFrameTimer::new(),
             wgpu_context,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings.level),
@@ -568,15 +572,22 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 TargetInit::Clear(ClearSettings::default()),
             )
             .expect("failed to render to texture");
+        self.gpu_timer.start_frame();
         render_surface.queue().submit([encoder.finish()]);
         timer.record_time("render");
 
         drop(texture_view);
 
+        if render_surface.ensure_current_surface_texture().is_err() {
+            return;
+        }
+        timer.record_time("acquire");
+
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
+        self.gpu_timer.end_frame(render_surface.queue());
         timer.record_time("present");
 
         // Progress cleanup and callbacks without serializing the next frame
@@ -586,6 +597,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         timer.record_time("poll");
         timer.print_times("vello_hybrid: ");
+        self.gpu_timer.print_completed("vello_hybrid: ");
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
