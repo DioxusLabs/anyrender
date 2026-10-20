@@ -9,7 +9,7 @@ license.workspace = true
 edition.workspace = true
 
 [features]
-log_frame_times = ["debug_timer/enable"]
+log_frame_times = ["debug_timer/enable", "wgpu_context/log_frame_times"]
 
 [dependencies]
 anyrender = { workspace = true }

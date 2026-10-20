@@ -10,12 +10,14 @@ use wgpu::{
 mod alpha_blitter;
 mod buffer_renderer;
 mod error;
+mod gpu_frame_timer;
 mod surface_renderer;
 mod util;
 
 pub use alpha_blitter::{AlphaConversion, AlphaConvertBlitter};
 pub use buffer_renderer::{BufferRenderer, BufferRendererConfig};
 pub use error::WgpuContextError;
+pub use gpu_frame_timer::GpuFrameTimer;
 pub use surface_renderer::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration};
 pub use util::block_on_wgpu;
 

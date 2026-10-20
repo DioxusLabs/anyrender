@@ -8,6 +8,9 @@ repository.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+log_frame_times = []
+
 [dependencies]
 wgpu = { workspace = true }
 futures-intrusive = { workspace = true }

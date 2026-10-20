@@ -16,7 +16,7 @@ use wgpu::{
     TextureUsages,
 };
 use wgpu_context::{
-    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    AlphaConversion, DeviceHandle, GpuFrameTimer, SurfaceRenderer, SurfaceRendererConfiguration,
     TextureConfiguration, WGPUContext,
 };
 
@@ -164,6 +164,7 @@ pub struct VelloWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloScene,
     config: VelloRendererOptions,
+    gpu_timer: GpuFrameTimer,
 
     // Resources
     texture_handles: FxHashMap<ResourceId, ImageData>,
@@ -181,6 +182,7 @@ impl VelloWindowRenderer {
             render_state: RenderState::Suspended,
             wgpu_context: build_wgpu_context(&config),
             config,
+            gpu_timer: GpuFrameTimer::new(),
             window_handle: None,
             scene: VelloScene::new(),
             texture_handles: FxHashMap::default(),
@@ -464,6 +466,7 @@ impl WindowRenderer for VelloWindowRenderer {
             state.renderer.mark_override_image_dirty(handle);
         }
 
+        self.gpu_timer.start();
         state
             .renderer
             .render_to_texture(
@@ -479,23 +482,33 @@ impl WindowRenderer for VelloWindowRenderer {
                 },
             )
             .expect("failed to render to texture");
+        self.gpu_timer
+            .submitted("render", render_surface.device(), render_surface.queue());
         timer.record_time("render");
 
         drop(texture_view);
+
+        if render_surface.ensure_current_surface_texture().is_err() {
+            return;
+        }
+        timer.record_time("acquire");
+
+        self.gpu_timer.start();
 
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
+        self.gpu_timer
+            .submitted("blit", render_surface.device(), render_surface.queue());
         timer.record_time("present");
 
-        render_surface
-            .device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
-
-        timer.record_time("wait");
+        // Progress cleanup and callbacks without serializing the next frame
+        // behind completion of this frame's GPU work. Surface acquisition
+        // provides bounded backpressure via desired_maximum_frame_latency.
+        render_surface.device().poll(wgpu::PollType::Poll).unwrap();
         timer.print_times("vello: ");
+        self.gpu_timer.print_completed("vello: ");
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
