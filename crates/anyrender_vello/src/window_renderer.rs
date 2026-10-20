@@ -60,7 +60,7 @@ impl GpuState {
 }
 
 /// A GPU context shared between windows. Pass it to
-/// [`VelloWindowRenderer::with_shared_context`] for every window so they reuse the same
+/// [`VelloWindowRenderer::with_options_and_shared_context`] for every window so they reuse the same
 /// wgpu device and Vello renderer instead of creating one each.
 #[derive(Clone)]
 pub struct SharedVelloContext(Rc<RefCell<GpuState>>);
@@ -211,12 +211,12 @@ impl VelloWindowRenderer {
     pub fn with_options(config: impl Into<VelloRendererOptions>) -> Self {
         let config = config.into();
         let gpu = SharedVelloContext::new(&config);
-        Self::with_shared_context(config, gpu)
+        Self::with_options_and_shared_context(config, gpu)
     }
 
     /// Create a renderer that uses `gpu` for its device and Vello renderer, so that
     /// several windows can share them. `gpu` should be created with compatible options.
-    pub fn with_shared_context(
+    pub fn with_options_and_shared_context(
         config: impl Into<VelloRendererOptions>,
         gpu: SharedVelloContext,
     ) -> Self {
