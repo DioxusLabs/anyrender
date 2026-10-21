@@ -2,7 +2,7 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{Backdrop, ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use pixels::{
     Pixels, PixelsBuilder, SurfaceTexture,
@@ -206,7 +206,11 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         };
     }
 
-    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(&mut self, draw_fn: F) {
+    fn render<F: FnOnce(&mut Renderer::ScenePainter<'_>)>(
+        &mut self,
+        backdrop: Backdrop,
+        draw_fn: F,
+    ) {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
@@ -214,7 +218,8 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Paint
-        self.renderer.render(draw_fn, state.pixels.frame_mut());
+        self.renderer
+            .render(backdrop, draw_fn, state.pixels.frame_mut());
         timer.record_time("render");
         state.pixels.render().unwrap();
         timer.record_time("present");

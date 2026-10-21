@@ -925,7 +925,7 @@ fn distant_light_direction(light: &DistantLightSource) -> Point3 {
     )
 }
 
-mod sk_peniko {
+pub(crate) mod sk_peniko {
     use peniko::color::{AlphaColor, ColorSpaceTag, HueDirection, Srgb};
     use peniko::{
         BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageBrush, ImageData,
@@ -1148,7 +1148,7 @@ mod sk_peniko {
         }
     }
 
-    pub(super) fn color4f_from_alpha_color(color: AlphaColor<Srgb>) -> SkColor4f {
+    pub(crate) fn color4f_from_alpha_color(color: AlphaColor<Srgb>) -> SkColor4f {
         SkColor4f::new(
             color.components[0],
             color.components[1],

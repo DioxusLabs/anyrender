@@ -1,5 +1,5 @@
 #[cfg(feature = "softbuffer_window_renderer")]
-pub use softbuffer_window_renderer::{SoftbufferRendererOptions, SoftbufferWindowRenderer};
+pub use softbuffer_window_renderer::SoftbufferWindowRenderer;
 
 #[cfg(feature = "pixels_window_renderer")]
 pub use pixels_window_renderer::PixelsRendererOptions;
