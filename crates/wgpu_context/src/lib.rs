@@ -18,6 +18,7 @@ pub use buffer_renderer::{BufferRenderer, BufferRendererConfig};
 pub use error::WgpuContextError;
 pub use surface_renderer::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration};
 pub use util::block_on_wgpu;
+pub use wgpu;
 
 /// A wgpu `Device`, it's associated `Queue`, and the `Adapter` and `Instance` used to create them
 #[derive(Clone, Debug)]
@@ -36,42 +37,139 @@ impl DeviceHandle {
         extra_features: Option<Features>,
         override_limits: Option<Limits>,
     ) -> Result<Self, WgpuContextError> {
+        Self::new_from_compatible_surface_with_backends(
+            instance,
+            compatible_surface,
+            extra_features,
+            override_limits,
+            None,
+        )
+        .await
+    }
+
+    /// Creates a `DeviceHandle` with `Device` that's compatible with the specified `Surface`,
+    /// supporting an optional explicit programmatic backend override and ordered fallback.
+    pub async fn new_from_compatible_surface_with_backends(
+        instance: Instance,
+        compatible_surface: Option<&Surface<'_>>,
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+        override_backends: Option<wgpu::Backends>,
+    ) -> Result<Self, WgpuContextError> {
+        let requested_features = extra_features.unwrap_or(Features::empty());
+
+        async fn try_create_device(
+            instance: Instance,
+            adapter: Adapter,
+            requested_features: Features,
+            override_limits: &Option<Limits>,
+        ) -> Result<DeviceHandle, WgpuContextError> {
+            let available_features = adapter.features();
+            let required_features = requested_features & available_features;
+            let required_limits = override_limits.clone().unwrap_or_else(|| Limits {
+                max_inter_stage_shader_variables: 15,
+                ..Limits::default()
+            });
+
+            let descripter = wgpu::DeviceDescriptor {
+                label: None,
+                required_features,
+                required_limits,
+                memory_hints: MemoryHints::MemoryUsage,
+                trace: wgpu::Trace::default(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+            };
+            let (device, queue) = adapter.request_device(&descripter).await?;
+            Ok(DeviceHandle {
+                instance,
+                adapter,
+                device,
+                queue,
+            })
+        }
+
+        // 1. Honor explicit environment variable or explicit programmatic override first
+        if wgpu::Backends::from_env().is_some()
+            || std::env::var_os("WGPU_ADAPTER_NAME").is_some()
+            || override_backends.is_some()
+        {
+            let adapter =
+                wgpu::util::initialize_adapter_from_env_or_default(&instance, compatible_surface)
+                    .await?;
+            return try_create_device(instance, adapter, requested_features, &override_limits).await;
+        }
+
+        // 2. On Windows when unset: Real sequential fallback policy (DX12-First -> Vulkan)
+        #[cfg(target_os = "windows")]
+        {
+            // Priority 1: DirectX 12
+            let mut dx12_adapters = instance.enumerate_adapters(wgpu::Backends::DX12).await;
+            dx12_adapters.sort_by_key(|a| match a.get_info().device_type {
+                wgpu::DeviceType::DiscreteGpu => 0,
+                wgpu::DeviceType::IntegratedGpu => 1,
+                wgpu::DeviceType::VirtualGpu => 2,
+                wgpu::DeviceType::Cpu => 3,
+                wgpu::DeviceType::Other => 4,
+            });
+
+            for adapter in dx12_adapters {
+                if let Some(surface) = compatible_surface {
+                    if !adapter.is_surface_supported(surface) {
+                        continue;
+                    }
+                }
+                match try_create_device(
+                    instance.clone(),
+                    adapter.clone(),
+                    requested_features,
+                    &override_limits,
+                )
+                .await
+                {
+                    Ok(handle) => {
+                        return Ok(handle);
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            // Priority 2: Vulkan fallback
+            let mut vk_adapters = instance.enumerate_adapters(wgpu::Backends::VULKAN).await;
+            vk_adapters.sort_by_key(|a| match a.get_info().device_type {
+                wgpu::DeviceType::DiscreteGpu => 0,
+                wgpu::DeviceType::IntegratedGpu => 1,
+                wgpu::DeviceType::VirtualGpu => 2,
+                wgpu::DeviceType::Cpu => 3,
+                wgpu::DeviceType::Other => 4,
+            });
+
+            for adapter in vk_adapters {
+                if let Some(surface) = compatible_surface {
+                    if !adapter.is_surface_supported(surface) {
+                        continue;
+                    }
+                }
+                match try_create_device(
+                    instance.clone(),
+                    adapter.clone(),
+                    requested_features,
+                    &override_limits,
+                )
+                .await
+                {
+                    Ok(handle) => {
+                        return Ok(handle);
+                    }
+                    Err(_) => continue,
+                }
+            }
+        }
+
+        // 3. Fallback to default wgpu adapter selection (non-Windows or if both DX12 & Vulkan enumerations exhausted)
         let adapter =
             wgpu::util::initialize_adapter_from_env_or_default(&instance, compatible_surface)
                 .await?;
-
-        // Determine features to request
-        // The user may request additional features
-        let requested_features = extra_features.unwrap_or(Features::empty());
-        let available_features = adapter.features();
-        let required_features = requested_features & available_features;
-
-        // Determine limits to request
-        // The user may override the limits
-        let required_limits = override_limits.clone().unwrap_or_else(|| Limits {
-            // Fix iOS simulator
-            max_inter_stage_shader_variables: 15,
-            ..Limits::default()
-        });
-
-        // Create the device and the queue
-        let descripter = wgpu::DeviceDescriptor {
-            label: None,
-            required_features,
-            required_limits,
-            memory_hints: MemoryHints::MemoryUsage,
-            trace: wgpu::Trace::default(),
-            experimental_features: wgpu::ExperimentalFeatures::default(),
-        };
-        let (device, queue) = adapter.request_device(&descripter).await?;
-
-        // Create the device handle and store in the pool
-        Ok(DeviceHandle {
-            instance,
-            adapter,
-            device,
-            queue,
-        })
+        try_create_device(instance, adapter, requested_features, &override_limits).await
     }
 
     /// Creates a new surface for the specified window and dimensions.
@@ -103,6 +201,7 @@ pub struct WGPUContext {
     // Config
     extra_features: Option<Features>,
     override_limits: Option<Limits>,
+    override_backends: Option<wgpu::Backends>,
 }
 
 impl Default for WGPUContext {
@@ -120,9 +219,21 @@ impl WGPUContext {
         extra_features: Option<Features>,
         override_limits: Option<Limits>,
     ) -> Self {
+        Self::with_features_limits_and_backends(extra_features, override_limits, None)
+    }
+
+    pub fn with_features_limits_and_backends(
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+        override_backends: Option<wgpu::Backends>,
+    ) -> Self {
+        let backends = wgpu::Backends::from_env()
+            .or(override_backends)
+            .unwrap_or_default();
+
         Self {
             instance: Instance::new(wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::from_env().unwrap_or_default(),
+                backends,
                 flags: wgpu::InstanceFlags::from_build_config().with_env(),
                 backend_options: wgpu::BackendOptions::from_env_or_default(),
                 memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
@@ -134,6 +245,7 @@ impl WGPUContext {
             device_pool: Vec::new(),
             extra_features,
             override_limits,
+            override_backends,
         }
     }
 
@@ -143,6 +255,10 @@ impl WGPUContext {
 
     pub fn override_limits(&self) -> Option<Limits> {
         self.override_limits.clone()
+    }
+
+    pub fn override_backends(&self) -> Option<wgpu::Backends> {
+        self.override_backends
     }
 
     /// Creates a new surface for the specified window and dimensions.
