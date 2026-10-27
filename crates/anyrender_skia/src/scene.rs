@@ -10,7 +10,7 @@ use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
-    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Font, FontArguments,
+    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Data, Font, FontArguments,
     FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle,
     PathEffect, Point, Point3, RRect, Rect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
@@ -31,9 +31,7 @@ pub struct SkiaSceneCache {
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
-    // The `Blob` is held alongside the `Shader` because the shader references the
-    // image pixels without owning them (see `shader_from_image_brush`).
-    image_shader: GenerationalCache<u64, (Shader, peniko::Blob<u8>)>,
+    image_shader: GenerationalCache<u64, Shader>,
     font: GenerationalCache<FontCacheKey, Font>,
     font_mgr: FontMgr,
     glyph_id_buf: Vec<GlyphId>,
@@ -145,8 +143,7 @@ impl SkiaScenePainter<'_> {
                     .set_shader(sk_peniko::shader_from_gradient(gradient, brush_transform));
             }
             anyrender::Paint::Image(image_brush) => {
-                if let Some((shader, _)) = self.cache.image_shader.hit(&image_brush.image.data.id())
-                {
+                if let Some(shader) = self.cache.image_shader.hit(&image_brush.image.data.id()) {
                     self.cache.paint.set_shader(shader.clone());
                     return;
                 }
@@ -154,10 +151,9 @@ impl SkiaScenePainter<'_> {
                 let image_shader = sk_peniko::shader_from_image_brush(image_brush, brush_transform);
 
                 if let Some(shader) = &image_shader {
-                    self.cache.image_shader.insert(
-                        image_brush.image.data.id(),
-                        (shader.clone(), image_brush.image.data.clone()),
-                    );
+                    self.cache
+                        .image_shader
+                        .insert(image_brush.image.data.id(), shader.clone());
                 }
 
                 self.cache.paint.set_shader(image_shader);
@@ -400,7 +396,7 @@ impl SkiaScenePainter<'_> {
         let Some(typeface) = self
             .cache
             .font_mgr
-            .new_from_bytes(font.data.data(), font.index)
+            .new_from_data(Data::new_with_owner(font.data.clone()), font.index)
         else {
             let tf = Typeface::make_deserialize(font.data.data(), None);
             eprintln!(
@@ -968,9 +964,7 @@ mod sk_peniko {
             },
             None,
         );
-        let pixels = unsafe {
-            SkData::new_bytes(image_data.data.data()) // We have to ensure the src image data lives long enough
-        };
+        let pixels = SkData::new_with_owner(image_data.data.clone());
         let image =
             skia_safe::images::raster_from_data(&image_info, pixels, image_info.min_row_bytes())
                 .unwrap();
