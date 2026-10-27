@@ -328,7 +328,6 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    env_logger::init();
     let mut app = App {
         render_state: RenderState::Suspended(None),
         bunny_manager: BunnyManager::new(1024.0, 1024.0),

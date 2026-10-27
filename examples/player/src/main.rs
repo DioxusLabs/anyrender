@@ -232,7 +232,6 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    env_logger::init();
     let mut args = std::env::args_os();
     let maybe_path = args.nth(1).map(PathBuf::from);
 

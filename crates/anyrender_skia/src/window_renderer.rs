@@ -176,11 +176,11 @@ fn try_windows_backends<T>(
         };
         match create(attempt) {
             Ok(backend) => {
-                log::info!("Selected Skia {name} backend");
+                tracing::info!("Selected Skia {name} backend");
                 return Ok(backend);
             }
             Err(error) => {
-                log::warn!("Skia {name} initialization failed: {error}");
+                tracing::warn!("Skia {name} initialization failed: {error}");
                 errors.push(format!("{name}: {error}"));
             }
         }
@@ -227,7 +227,7 @@ fn create_backend(
                     },
                 );
             } else {
-                log::info!("Skia D3D12 does not support per-pixel HWND alpha; using OpenGL");
+                tracing::info!("Skia D3D12 does not support per-pixel HWND alpha; using OpenGL");
             }
             SkiaBackendPreference::OpenGL
         }
@@ -248,7 +248,7 @@ fn create_backend(
             let backend =
                 crate::opengl::OpenGLBackend::new(window, width, height, composite_alpha_mode)
                     .inspect_err(|error| {
-                        log::warn!("Skia OpenGL initialization failed: {error}")
+                        tracing::warn!("Skia OpenGL initialization failed: {error}")
                     })?;
             tracing::info!("Selected Skia OpenGL backend");
             Ok(Box::new(backend))
