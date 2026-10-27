@@ -203,7 +203,6 @@ dependencies = [
  "glutin",
  "hashbrown 0.17.1",
  "kurbo",
- "log",
  "oaty",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -217,6 +216,7 @@ dependencies = [
  "skia-safe",
  "skrifa",
  "softbuffer_window_renderer",
+ "tracing",
 ]
 
 [[package]]
