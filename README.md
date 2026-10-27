@@ -78,7 +78,7 @@ crates in your project.
     <tr><td><code>vello_cpu</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>0.3</td></tr>
     <tr><td><code>anyrender_vello_cpu</code></td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.14</td><td>0.15</td><td>0.16–0.17</td><td>0.18</td></tr>
     <tr><th colspan="10" align=left>Skia</th></tr>
-    <tr><td><code>skia-safe</code></td><td>0.89</td><td>0.91</td><td>0.93</td><td>0.93</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.97</td><td>0.97</td><td>0.99</td><td>0.153.3</td></tr>
+    <tr><td><code>skia-safe</code></td><td>0.89</td><td>0.91</td><td>0.93</td><td>0.93</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.97</td><td>0.97</td><td>0.99</td><td>0.156.0</td></tr>
     <tr><td><code>anyrender_skia</code></td><td>0.1</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td></tr>
     <tr><th colspan="10" align=left>Content Libs</th></tr>
     <tr><td><code>anyrender_svg</code></td><td>0.6</td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.13</td><td>0.14</td><td>0.15</td></tr>
