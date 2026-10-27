@@ -12,7 +12,7 @@ edition.workspace = true
 pixels_window_renderer = ["dep:pixels_window_renderer"]
 softbuffer_window_renderer = ["dep:softbuffer_window_renderer"]
 log_frame_times = ["debug_timer/enable", "pixels_window_renderer?/log_frame_times", "softbuffer_window_renderer?/log_frame_times"]
-vulkan = ["skia-safe/vulkan"]
+vulkan = ["skia-safe/vulkan"] # Linux/Android-only for prebuilts; Windows requires a source build.
 
 [dependencies]
 anyrender = { workspace = true }
@@ -35,9 +35,11 @@ gl = "0.14.0"
 ash = "^0.38.0"
 ash-window = "0.13.0"
 
-# Keep `textlayout` on Windows: rust-skia only publishes a prebuilt Ganesh + GL + Vulkan binary with it.
+# Windows prebuilt key: d3d-ganesh-gl-jpegd-jpege-pdf (no textlayout).
+# Vulkan prebuilts are Linux/Android-only with this configuration.
 [target.'cfg(windows)'.dependencies]
-skia-safe = { version = "0.156.0", features = ["textlayout"] }
+skia-safe = { version = "0.156.0", features = ["d3d"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["objc2-quartz-core", "NSView", "NSResponder"] }

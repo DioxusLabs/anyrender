@@ -216,6 +216,7 @@ dependencies = [
  "skia-safe",
  "softbuffer_window_renderer",
  "tracing",
+ "windows",
 ]
 
 [[package]]
@@ -3402,6 +3403,7 @@ checksum = "38c60bc899f4b9e23eba0223187ff572b25d26155d0176b26e9b3a743f1e75b1"
 dependencies = [
  "bitflags 2.13.1",
  "skia-bindings",
+ "windows",
 ]
 
 [[package]]

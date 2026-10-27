@@ -4,6 +4,8 @@ mod window_renderer;
 
 // Backends
 mod cache;
+#[cfg(windows)]
+mod d3d;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod metal;
 #[cfg(not(any(target_os = "macos", target_os = "ios")))]
