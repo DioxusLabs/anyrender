@@ -202,6 +202,9 @@ impl OpenGLBackend {
 
 impl SkiaBackend for OpenGLBackend {
     fn set_size(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
         self.surface = Some(
             Self::create_surface(
                 width,
