@@ -52,3 +52,21 @@ pub(crate) fn surface_props() -> skia_safe::SurfaceProps {
         gamma,
     )
 }
+
+/// An error initializing a Skia GPU backend.
+#[derive(Debug)]
+pub(crate) struct BackendError(String);
+
+impl BackendError {
+    pub(crate) fn new(message: impl std::fmt::Display) -> Self {
+        Self(message.to_string())
+    }
+}
+
+impl std::fmt::Display for BackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for BackendError {}
