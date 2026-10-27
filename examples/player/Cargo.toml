@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+env_logger = "0.11"
 kurbo = { workspace = true }
 winit = { workspace = true }
 peniko = { workspace = true }
