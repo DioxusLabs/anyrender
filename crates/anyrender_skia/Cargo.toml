@@ -26,7 +26,7 @@ pixels_window_renderer = { workspace = true, optional = true }
 skia-safe = { version = "0.156.0" }
 oaty = "0.2"
 hashbrown = "0.17.0"
-log = "0.4"
+tracing = { version = "0.1", default-features = false }
 
 [target.'cfg(not(any(target_os = "macos", target_os = "ios")))'.dependencies]
 skia-safe = { version = "0.156.0", features = ["gl"] }
