@@ -45,14 +45,14 @@ impl SkiaBackendPreference {
     fn with_env_override(self) -> Self {
         match std::env::var("ANYRENDER_SKIA_BACKEND") {
             Ok(value) => Self::from_env_value(&value).unwrap_or_else(|| {
-                log::warn!(
+                tracing::warn!(
                     "Unknown or unavailable ANYRENDER_SKIA_BACKEND value {value:?}; using Auto"
                 );
                 Self::Auto
             }),
             Err(std::env::VarError::NotPresent) => self,
             Err(std::env::VarError::NotUnicode(_)) => {
-                log::warn!("Invalid ANYRENDER_SKIA_BACKEND value; using Auto");
+                tracing::warn!("Invalid ANYRENDER_SKIA_BACKEND value; using Auto");
                 Self::Auto
             }
         }
@@ -240,7 +240,7 @@ fn create_backend(
         SkiaBackendPreference::Auto | SkiaBackendPreference::Metal => {
             let backend =
                 crate::metal::MetalBackend::new(window, width, height, composite_alpha_mode)?;
-            log::info!("Selected Skia Metal backend");
+            tracing::info!("Selected Skia Metal backend");
             Ok(Box::new(backend))
         }
         #[cfg(not(any(target_os = "macos", target_os = "ios")))]
@@ -250,7 +250,7 @@ fn create_backend(
                     .inspect_err(|error| {
                         log::warn!("Skia OpenGL initialization failed: {error}")
                     })?;
-            log::info!("Selected Skia OpenGL backend");
+            tracing::info!("Selected Skia OpenGL backend");
             Ok(Box::new(backend))
         }
     }
