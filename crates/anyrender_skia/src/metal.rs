@@ -139,7 +139,7 @@ impl SkiaBackend for MetalBackend {
     }
 
     fn flush(&mut self, surface: Surface) {
-        self.skia.flush_and_submit();
+        self.skia.flush_and_submit().expect("Skia GPU flush failed");
         drop(surface);
         let command_buffer = self
             .command_queue

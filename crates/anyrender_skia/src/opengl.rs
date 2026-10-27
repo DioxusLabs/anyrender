@@ -215,7 +215,9 @@ impl SkiaBackend for OpenGLBackend {
     }
 
     fn flush(&mut self, mut surface: Surface) {
-        self.gr_context.flush_and_submit();
+        self.gr_context
+            .flush_and_submit()
+            .expect("Skia GPU flush failed");
         self.gl_surface.swap_buffers(&self.gl_context).unwrap();
         surface.canvas().discard();
 

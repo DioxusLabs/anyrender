@@ -375,7 +375,9 @@ impl VulkanBackend {
 
         swapchain_surface.canvas().draw_paint(&paint);
 
-        self.gr_context.flush_and_submit();
+        self.gr_context
+            .flush_and_submit()
+            .expect("Skia GPU flush failed");
     }
 }
 
@@ -448,7 +450,9 @@ impl SkiaBackend for VulkanBackend {
         if self.current_alpha_mode == CompositeAlphaFlagsKHR::POST_MULTIPLIED {
             self.flush_post_multiplied(&mut surface);
         } else {
-            self.gr_context.flush_and_submit();
+            self.gr_context
+                .flush_and_submit()
+                .expect("Skia GPU flush failed");
         }
 
         let image = self.swapchain_images[self.swapchain_image_index as usize];
