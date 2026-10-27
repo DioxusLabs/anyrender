@@ -91,7 +91,7 @@ impl D3DBackend {
             .iter()
             .position(|&c| c == 0)
             .unwrap_or(desc.Description.len());
-        log::info!(
+        tracing::info!(
             "Skia D3D adapter: {}",
             String::from_utf16_lossy(&desc.Description[..end])
         );
@@ -200,7 +200,7 @@ impl D3DBackend {
     }
 
     fn mark_lost(&mut self, error: impl std::fmt::Display) {
-        log::warn!("Skia D3D backend lost: {error}");
+        tracing::warn!("Skia D3D backend lost: {error}");
         self.lost = true;
     }
 }
