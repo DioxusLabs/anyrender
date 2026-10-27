@@ -16,7 +16,7 @@ use skia_safe::{
     },
 };
 
-use crate::window_renderer::SkiaBackend;
+use crate::{BackendError, window_renderer::SkiaBackend};
 
 pub(crate) struct OpenGLBackend {
     surface: Option<Surface>,
@@ -32,9 +32,9 @@ impl OpenGLBackend {
         width: u32,
         height: u32,
         composite_alpha_mode: anyrender::CompositeAlphaMode,
-    ) -> OpenGLBackend {
-        let raw_display_handle = window.display_handle().unwrap().as_raw();
-        let raw_window_handle = window.window_handle().unwrap().as_raw();
+    ) -> Result<Self, BackendError> {
+        let raw_display_handle = window.display_handle().map_err(BackendError::new)?.as_raw();
+        let raw_window_handle = window.window_handle().map_err(BackendError::new)?.as_raw();
 
         let gl_display = unsafe {
             Display::new(
@@ -42,11 +42,11 @@ impl OpenGLBackend {
                 #[cfg(any(target_os = "macos", target_os = "ios"))]
                 DisplayApiPreference::Cgl,
                 #[cfg(target_os = "windows")]
-                DisplayApiPreference::Wgl(Some(raw_window_handle.clone())),
+                DisplayApiPreference::Wgl(Some(raw_window_handle)),
                 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "ios")))]
                 DisplayApiPreference::Egl,
             )
-            .unwrap()
+            .map_err(BackendError::new)?
         };
 
         let transparency = !matches!(
@@ -64,7 +64,7 @@ impl OpenGLBackend {
         let gl_config = unsafe {
             gl_display
                 .find_configs(gl_config_template)
-                .unwrap()
+                .map_err(BackendError::new)?
                 .reduce(|accum, config| {
                     let config_transparency = config.supports_transparency().unwrap_or(false);
                     let accum_transparency = accum.supports_transparency().unwrap_or(false);
@@ -92,48 +92,51 @@ impl OpenGLBackend {
                         }
                     }
                 })
-                .unwrap()
+                .ok_or_else(|| BackendError::new("No suitable OpenGL configuration"))?
         };
 
         let gl_context_attrs = ContextAttributesBuilder::new().build(Some(raw_window_handle));
         let gl_surface_attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
             raw_window_handle,
-            NonZeroU32::new(width).expect("width should be a positive value"),
-            NonZeroU32::new(height).expect("height should be a positive value"),
+            NonZeroU32::new(width).ok_or_else(|| BackendError::new("Width must be positive"))?,
+            NonZeroU32::new(height).ok_or_else(|| BackendError::new("Height must be positive"))?,
         );
 
         let gl_not_current_context = unsafe {
             gl_display
                 .create_context(&gl_config, &gl_context_attrs)
-                .unwrap()
+                .map_err(BackendError::new)?
         };
 
         let gl_surface = unsafe {
             gl_config
                 .display()
                 .create_window_surface(&gl_config, &gl_surface_attrs)
-                .unwrap()
+                .map_err(BackendError::new)?
         };
 
-        let gl_context = gl_not_current_context.make_current(&gl_surface).unwrap();
+        let gl_context = gl_not_current_context
+            .make_current(&gl_surface)
+            .map_err(BackendError::new)?;
 
         gl::load_with(|s| {
-            gl_config
-                .display()
-                .get_proc_address(CString::new(s).unwrap().as_c_str())
+            CString::new(s).map_or(std::ptr::null(), |s| {
+                gl_config.display().get_proc_address(&s)
+            })
         });
 
         let interface = Interface::new_load_with(|name| {
             if name == "eglGetCurrentDisplay" {
                 return std::ptr::null();
             }
-            gl_config
-                .display()
-                .get_proc_address(CString::new(name).unwrap().as_c_str())
+            CString::new(name).map_or(std::ptr::null(), |name| {
+                gl_config.display().get_proc_address(&name)
+            })
         })
-        .unwrap();
+        .ok_or_else(|| BackendError::new("Failed to load OpenGL interface"))?;
 
-        let mut gr_context = direct_contexts::make_gl(interface, None).unwrap();
+        let mut gr_context = direct_contexts::make_gl(interface, None)
+            .ok_or_else(|| BackendError::new("Failed to create Skia OpenGL context"))?;
 
         let mut fb_info = {
             let mut fboid: gl::types::GLint = 0;
@@ -142,13 +145,13 @@ impl OpenGLBackend {
             }
 
             FramebufferInfo {
-                fboid: fboid.try_into().unwrap(),
+                fboid: fboid.try_into().map_err(BackendError::new)?,
                 format: skia_safe::gpu::gl::Format::RGBA8.into(),
                 ..Default::default()
             }
         };
 
-        OpenGLBackend {
+        Ok(Self {
             surface: Some(Self::create_surface(
                 width,
                 height,
@@ -156,12 +159,12 @@ impl OpenGLBackend {
                 &gl_surface,
                 &gl_context,
                 &mut fb_info,
-            )),
+            )?),
             gr_context,
             gl_surface,
             gl_context,
             fb_info,
-        }
+        })
     }
 
     fn create_surface(
@@ -171,11 +174,11 @@ impl OpenGLBackend {
         gl_surface: &glutin::surface::Surface<WindowSurface>,
         gl_context: &PossiblyCurrentContext,
         fb_info: &mut FramebufferInfo,
-    ) -> Surface {
+    ) -> Result<Surface, BackendError> {
         gl_surface.resize(
             gl_context,
-            NonZeroU32::new(width).unwrap(),
-            NonZeroU32::new(height).unwrap(),
+            NonZeroU32::new(width).ok_or_else(|| BackendError::new("Width must be positive"))?,
+            NonZeroU32::new(height).ok_or_else(|| BackendError::new("Height must be positive"))?,
         );
 
         let backend_render_target = skia_safe::gpu::backend_render_targets::make_gl(
@@ -193,20 +196,23 @@ impl OpenGLBackend {
             None,
             None,
         )
-        .unwrap()
+        .ok_or_else(|| BackendError::new("Failed to wrap OpenGL render target"))
     }
 }
 
 impl SkiaBackend for OpenGLBackend {
     fn set_size(&mut self, width: u32, height: u32) {
-        self.surface = Some(Self::create_surface(
-            width,
-            height,
-            &mut self.gr_context,
-            &self.gl_surface,
-            &self.gl_context,
-            &mut self.fb_info,
-        ));
+        self.surface = Some(
+            Self::create_surface(
+                width,
+                height,
+                &mut self.gr_context,
+                &self.gl_surface,
+                &self.gl_context,
+                &mut self.fb_info,
+            )
+            .expect("Failed to resize OpenGL surface"),
+        );
     }
 
     fn prepare(&mut self) -> Option<Surface> {
