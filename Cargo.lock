@@ -214,6 +214,7 @@ dependencies = [
  "pixels_window_renderer",
  "raw-window-handle",
  "skia-safe",
+ "skrifa",
  "softbuffer_window_renderer",
 ]
 
