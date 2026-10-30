@@ -125,7 +125,7 @@ impl<'a> ImageManager<'a> {
 
         // Store ImageId in cache
         self.cache
-            .insert(peniko_id, atlas_id, image.width, image.height);
+            .insert(&image.data, atlas_id, image.width, image.height);
 
         // Return ImageId
         atlas_id

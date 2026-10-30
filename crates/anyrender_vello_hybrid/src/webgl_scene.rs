@@ -49,7 +49,7 @@ impl<'a> WebGlImageManager<'a> {
 
         let atlas_id = self.renderer.upload_image(self.resources, &pixmap)?;
         self.cache
-            .insert(peniko_id, atlas_id, image.width, image.height);
+            .insert(&image.data, atlas_id, image.width, image.height);
         Ok(atlas_id)
     }
 
