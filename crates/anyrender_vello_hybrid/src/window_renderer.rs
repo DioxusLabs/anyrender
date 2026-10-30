@@ -7,7 +7,7 @@ use peniko::Color;
 use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
-use vello_common::{TextureId, paint::ImageId};
+use vello_common::TextureId;
 use vello_gpu::{
     ClearSettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
     Resources, Scene as VelloHybridScene, TargetInit, TextureBindings,
@@ -18,7 +18,7 @@ use wgpu::{
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use crate::{VelloHybridScenePainter, scene::ImageManager};
+use crate::{ImageCache, VelloHybridScenePainter, scene::ImageManager};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
 /// queue (blocking is not allowed). On native we drive it inline with
@@ -173,7 +173,7 @@ pub struct VelloHybridWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
-    cached_images: FxHashMap<u64, ImageId>,
+    cached_images: ImageCache,
 }
 impl VelloHybridWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -191,7 +191,7 @@ impl VelloHybridWindowRenderer {
             wgpu_context,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings.level),
-            cached_images: FxHashMap::default(),
+            cached_images: ImageCache::default(),
         }
     }
 
@@ -452,6 +452,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             RenderState::Suspended => false,
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
+                    self.cached_images.clear();
                     let device_handle = active.render_surface.device_handle.clone();
                     self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
@@ -488,6 +489,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
+            self.cached_images.clear();
             return;
         };
 
@@ -541,6 +543,16 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             // Skip frame in case of error getting surface texture
             render_surface.clear_surface_texture();
             self.scene.reset();
+            ImageManager::new(
+                &mut state.renderer,
+                &mut state.resources,
+                render_surface.device(),
+                render_surface.queue(),
+                &mut encoder,
+                &mut self.cached_images,
+            )
+            .finish_frame();
+            render_surface.queue().submit([encoder.finish()]);
             return;
         };
 
@@ -568,6 +580,15 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 TargetInit::Clear(ClearSettings::default()),
             )
             .expect("failed to render to texture");
+        ImageManager::new(
+            &mut state.renderer,
+            &mut state.resources,
+            render_surface.device(),
+            render_surface.queue(),
+            &mut encoder,
+            &mut self.cached_images,
+        )
+        .finish_frame();
         render_surface.queue().submit([encoder.finish()]);
         timer.record_time("render");
 
