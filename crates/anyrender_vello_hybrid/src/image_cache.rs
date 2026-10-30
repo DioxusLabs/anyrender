@@ -13,13 +13,35 @@ struct CachedImage {
 }
 
 /// Persistent image residency shared by successive scene painters.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ImageCache {
     entries: FxHashMap<u64, CachedImage>,
     frame: u64,
+    max_image_size: (u16, u16),
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self {
+            entries: FxHashMap::default(),
+            frame: 0,
+            max_image_size: vello_common::multi_atlas::AtlasConfig::default().atlas_size,
+        }
+    }
 }
 
 impl ImageCache {
+    /// Set the renderer's normalized atlas size before uploading images.
+    ///
+    /// The cache must be empty; clear it when replacing the renderer.
+    pub fn set_max_image_size(&mut self, size: (u16, u16)) {
+        assert!(size.0 > 0 && size.1 > 0 && self.entries.is_empty());
+        self.max_image_size = size;
+    }
+
+    pub(crate) fn fits(&self, width: u32, height: u32) -> bool {
+        width <= u32::from(self.max_image_size.0) && height <= u32::from(self.max_image_size.1)
+    }
     /// Discard identities when their renderer resources are replaced.
     pub fn clear(&mut self) {
         self.entries.clear();
@@ -89,6 +111,18 @@ impl ImageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_size_limit() {
+        let mut cache = ImageCache::default();
+        assert!(cache.fits(4096, 4096));
+        assert!(!cache.fits(4097, 1));
+        assert!(!cache.fits(1, u16::MAX as u32 + 1));
+        cache.set_max_image_size((100, 200));
+        assert!(cache.fits(100, 200));
+        assert!(!cache.fits(101, 200));
+        assert!(!cache.fits(100, 201));
+    }
 
     #[test]
     fn empty_frames() {

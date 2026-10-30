@@ -453,6 +453,20 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
                     self.cached_images.clear();
+                    let max = active
+                        .render_surface
+                        .device()
+                        .limits()
+                        .max_texture_dimension_2d
+                        .min(u16::MAX as u32) as u16;
+                    let (width, height) = self
+                        .config
+                        .render_settings
+                        .memory_settings
+                        .image_atlas_config
+                        .atlas_size;
+                    self.cached_images
+                        .set_max_image_size((width.clamp(1, max), height.clamp(1, max)));
                     let device_handle = active.render_surface.device_handle.clone();
                     self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
