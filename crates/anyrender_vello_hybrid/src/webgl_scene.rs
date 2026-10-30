@@ -36,11 +36,14 @@ impl<'a> WebGlImageManager<'a> {
     pub(crate) fn upload_image(
         &mut self,
         image: &peniko::ImageData,
-    ) -> Result<ImageId, vello_gpu::WebGlError> {
+    ) -> Result<Option<ImageId>, vello_gpu::WebGlError> {
+        if !self.cache.fits(image.width, image.height) {
+            return Ok(None);
+        }
         let peniko_id = image.data.id();
 
         if let Some(atlas_id) = self.cache.get(peniko_id) {
-            return Ok(atlas_id);
+            return Ok(Some(atlas_id));
         }
 
         let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
@@ -50,7 +53,7 @@ impl<'a> WebGlImageManager<'a> {
         let atlas_id = self.renderer.upload_image(self.resources, &pixmap)?;
         self.cache
             .insert(&image.data, atlas_id, image.width, image.height);
-        Ok(atlas_id)
+        Ok(Some(atlas_id))
     }
 
     /// Evict unused images after rendering a frame, including skipped frames.
@@ -112,7 +115,7 @@ impl WebGlScenePainter<'_> {
     }
 
     fn convert_image_paint(&mut self, image_brush: peniko::ImageBrushRef<'_>) -> PaintType {
-        let Ok(image_id) = self.image_manager.upload_image(image_brush.image) else {
+        let Ok(Some(image_id)) = self.image_manager.upload_image(image_brush.image) else {
             return PaintType::Solid(Color::TRANSPARENT);
         };
         PaintType::Image(ImageBrush {
