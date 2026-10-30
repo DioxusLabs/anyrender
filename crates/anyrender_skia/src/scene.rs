@@ -89,7 +89,9 @@ impl SkiaScenePainter<'_> {
         self.cache.paint.set_anti_alias(true);
     }
 
+    /// Multiplies the paint's alpha (including a solid brush's own alpha) by `alpha`.
     fn set_paint_alpha(&mut self, alpha: f32) {
+        let alpha = self.cache.paint.alpha_f() * alpha;
         self.cache.paint.set_alpha_f(alpha);
     }
 
