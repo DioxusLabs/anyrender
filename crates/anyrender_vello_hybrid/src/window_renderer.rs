@@ -465,6 +465,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
+        self.cached_images.clear();
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
@@ -489,7 +490,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
         let RenderState::Active(state) = &mut self.render_state else {
-            self.cached_images.clear();
             return;
         };
 
