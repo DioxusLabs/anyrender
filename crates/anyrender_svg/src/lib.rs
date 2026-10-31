@@ -22,6 +22,8 @@
 
 mod error;
 mod render;
+#[cfg(feature = "text")]
+mod text;
 mod util;
 
 pub use error::Error;
@@ -75,11 +77,13 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     transform: Affine,
     error_handler: &mut F,
 ) {
+    let mut text_ctx = render::text_ctx_for_tree(svg);
     render::render_group(
         scene,
         svg.root(),
         Affine::IDENTITY,
         transform,
+        &mut text_ctx,
         error_handler,
     );
 }
