@@ -14,7 +14,7 @@ use skia_safe::{
     scalar,
 };
 
-use crate::window_renderer::SkiaBackend;
+use crate::{BackendError, window_renderer::SkiaBackend};
 
 pub struct MetalBackend {
     pub metal_layer: Retained<CAMetalLayer>,
@@ -29,8 +29,12 @@ impl MetalBackend {
         width: u32,
         height: u32,
         composite_alpha_mode: anyrender::CompositeAlphaMode,
-    ) -> Self {
-        let device = MTLCreateSystemDefaultDevice().expect("no device found");
+    ) -> Result<Self, BackendError> {
+        if width == 0 || height == 0 {
+            return Err(BackendError::new("Surface dimensions must be positive"));
+        }
+        let device = MTLCreateSystemDefaultDevice()
+            .ok_or_else(|| BackendError::new("No Metal device found"))?;
 
         let metal_layer = {
             let layer = CAMetalLayer::new();
@@ -46,7 +50,7 @@ impl MetalBackend {
             layer.setFramebufferOnly(false);
             layer.setDrawableSize(CGSize::new(width as f64, height as f64));
 
-            let view_ptr = match window.window_handle().unwrap().as_raw() {
+            let view_ptr = match window.window_handle().map_err(BackendError::new)?.as_raw() {
                 #[cfg(target_os = "macos")]
                 raw_window_handle::RawWindowHandle::AppKit(appkit) => {
                     appkit.ns_view.as_ptr() as *mut NSView
@@ -55,9 +59,10 @@ impl MetalBackend {
                 raw_window_handle::RawWindowHandle::UiKit(uikit) => {
                     uikit.ui_view.as_ptr() as *mut UIView
                 }
-                _ => panic!("Wrong window handle type"),
+                _ => return Err(BackendError::new("Wrong window handle type for Metal")),
             };
-            let view = unsafe { view_ptr.as_ref().unwrap() };
+            let view =
+                unsafe { view_ptr.as_ref() }.ok_or_else(|| BackendError::new("Null Metal view"))?;
 
             #[cfg(target_os = "macos")]
             {
@@ -78,7 +83,7 @@ impl MetalBackend {
 
         let command_queue = device
             .newCommandQueue()
-            .expect("unable to get command queue");
+            .ok_or_else(|| BackendError::new("Unable to get Metal command queue"))?;
 
         let backend = unsafe {
             mtl::BackendContext::new(
@@ -87,14 +92,15 @@ impl MetalBackend {
             )
         };
 
-        let skia_context = gpu::direct_contexts::make_metal(&backend, None).unwrap();
+        let skia_context = gpu::direct_contexts::make_metal(&backend, None)
+            .ok_or_else(|| BackendError::new("Failed to create Skia Metal context"))?;
 
-        Self {
+        Ok(Self {
             metal_layer,
             command_queue,
             skia: skia_context,
             prepared_drawable: None,
-        }
+        })
     }
 }
 

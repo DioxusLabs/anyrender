@@ -215,6 +215,7 @@ dependencies = [
  "raw-window-handle",
  "skia-safe",
  "softbuffer_window_renderer",
+ "tracing",
 ]
 
 [[package]]
