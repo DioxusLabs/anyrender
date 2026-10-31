@@ -5,7 +5,9 @@ use debug_timer::debug_timer;
 use futures_channel::oneshot;
 use peniko::{Color, ImageData};
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
 use std::future::Future;
+use std::rc::Rc;
 use std::sync::Arc;
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
@@ -37,8 +39,39 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 }
 
 struct ActiveRenderState {
-    renderer: VelloRenderer,
+    renderer: Rc<RefCell<VelloRenderer>>,
     render_surface: SurfaceRenderer<'static>,
+}
+
+/// GPU state that can be shared by several windows: one wgpu instance, its device pool,
+/// and one Vello renderer per device (shaders, pipelines and Vello's internal buffers).
+struct GpuState {
+    wgpu_context: WGPUContext,
+    renderers: Vec<(wgpu::Device, Rc<RefCell<VelloRenderer>>)>,
+}
+
+impl GpuState {
+    fn renderer_for(&self, device: &wgpu::Device) -> Option<Rc<RefCell<VelloRenderer>>> {
+        self.renderers
+            .iter()
+            .find(|(d, _)| d == device)
+            .map(|(_, renderer)| Rc::clone(renderer))
+    }
+}
+
+/// A GPU context shared between windows. Pass it to
+/// [`VelloWindowRenderer::with_options_and_shared_context`] for every window so they reuse the same
+/// wgpu device and Vello renderer instead of creating one each.
+#[derive(Clone)]
+pub struct SharedVelloContext(Rc<RefCell<GpuState>>);
+
+impl SharedVelloContext {
+    pub fn new(config: &VelloRendererOptions) -> Self {
+        Self(Rc::new(RefCell::new(GpuState {
+            wgpu_context: build_wgpu_context(config),
+            renderers: Vec::new(),
+        })))
+    }
 }
 
 /// Result of a successful asynchronous resume; both the active state and the
@@ -161,7 +194,7 @@ pub struct VelloWindowRenderer {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
-    wgpu_context: WGPUContext,
+    gpu: SharedVelloContext,
     scene: VelloScene,
     config: VelloRendererOptions,
 
@@ -177,9 +210,20 @@ impl VelloWindowRenderer {
 
     pub fn with_options(config: impl Into<VelloRendererOptions>) -> Self {
         let config = config.into();
+        let gpu = SharedVelloContext::new(&config);
+        Self::with_options_and_shared_context(config, gpu)
+    }
+
+    /// Create a renderer that uses `gpu` for its device and Vello renderer, so that
+    /// several windows can share them. `gpu` should be created with compatible options.
+    pub fn with_options_and_shared_context(
+        config: impl Into<VelloRendererOptions>,
+        gpu: SharedVelloContext,
+    ) -> Self {
+        let config = config.into();
         Self {
             render_state: RenderState::Suspended,
-            wgpu_context: build_wgpu_context(&config),
+            gpu,
             config,
             window_handle: None,
             scene: VelloScene::new(),
@@ -207,7 +251,7 @@ impl RenderContext for VelloWindowRenderer {
         if let Ok(texture) = resource.downcast::<Texture>() {
             let id = ResourceId::new();
             self.texture_handles
-                .insert(id, active.renderer.register_texture(*texture));
+                .insert(id, active.renderer.borrow_mut().register_texture(*texture));
             Ok(id)
         } else {
             Err(anyrender::RegisterResourceErrorKind::UnsupportedResourceKind.into())
@@ -220,7 +264,7 @@ impl RenderContext for VelloWindowRenderer {
         };
 
         if let Some(handle) = self.texture_handles.remove(&resource_id) {
-            active.renderer.unregister_texture(handle);
+            active.renderer.borrow_mut().unregister_texture(handle);
         }
     }
 
@@ -276,13 +320,15 @@ impl WindowRenderer for VelloWindowRenderer {
         self.render_state = RenderState::Pending { receiver };
         self.window_handle = Some(window_handle.clone());
 
-        let surface = self
+        let gpu = self.gpu.clone();
+        let mut gpu_state = gpu.0.borrow_mut();
+        let surface = gpu_state
             .wgpu_context
             .create_surface(window_handle)
             .expect("Error creating surface");
-        let instance = self.wgpu_context.instance.clone();
-        let extra_features = self.wgpu_context.extra_features();
-        let override_limits = self.wgpu_context.override_limits();
+        let instance = gpu_state.wgpu_context.instance.clone();
+        let extra_features = gpu_state.wgpu_context.extra_features();
+        let override_limits = gpu_state.wgpu_context.override_limits();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -301,21 +347,32 @@ impl WindowRenderer for VelloWindowRenderer {
         };
         let pipeline_cache = self.config.pipeline_cache.clone();
         let desired_maximum_frame_latency = self.config.desired_maximum_frame_latency;
-        let existing_device_handle = self
+        let existing_device_handle = gpu_state
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
+        drop(gpu_state);
 
         spawn_init(async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
-                None => DeviceHandle::new_from_compatible_surface(
-                    instance,
-                    Some(&surface),
-                    extra_features,
-                    override_limits,
-                )
-                .await
-                .expect("Error creating DeviceHandle"),
+                None => {
+                    let device_handle = DeviceHandle::new_from_compatible_surface(
+                        instance,
+                        Some(&surface),
+                        extra_features,
+                        override_limits,
+                    )
+                    .await
+                    .expect("Error creating DeviceHandle");
+                    // Register now (not in `complete_resume`) so that windows resumed before
+                    // this one completes, e.g. all startup windows, can reuse the device
+                    gpu.0
+                        .borrow_mut()
+                        .wgpu_context
+                        .device_pool
+                        .push(device_handle.clone());
+                    device_handle
+                }
             };
 
             let adapter = &device_handle.adapter;
@@ -382,16 +439,30 @@ impl WindowRenderer for VelloWindowRenderer {
             )
             .expect("Error creating SurfaceRenderer");
 
-            let renderer = VelloRenderer::new(
-                render_surface.device(),
-                RendererOptions {
-                    antialiasing_support: AaSupport::all(),
-                    use_cpu: false,
-                    num_init_threads: DEFAULT_THREADS,
-                    pipeline_cache,
-                },
-            )
-            .unwrap();
+            // Reuse the Vello renderer of this device if another window already created it
+            let existing_renderer = gpu.0.borrow().renderer_for(render_surface.device());
+            let renderer = match existing_renderer {
+                Some(renderer) => renderer,
+                None => {
+                    let renderer = Rc::new(RefCell::new(
+                        VelloRenderer::new(
+                            render_surface.device(),
+                            RendererOptions {
+                                antialiasing_support: AaSupport::all(),
+                                use_cpu: false,
+                                num_init_threads: DEFAULT_THREADS,
+                                pipeline_cache,
+                            },
+                        )
+                        .unwrap(),
+                    ));
+                    gpu.0
+                        .borrow_mut()
+                        .renderers
+                        .push((render_surface.device().clone(), Rc::clone(&renderer)));
+                    renderer
+                }
+            };
 
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
@@ -409,8 +480,6 @@ impl WindowRenderer for VelloWindowRenderer {
             RenderState::Suspended => false,
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
-                    let device_handle = active.render_surface.device_handle.clone();
-                    self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
                     true
                 }
@@ -423,7 +492,7 @@ impl WindowRenderer for VelloWindowRenderer {
         if let RenderState::Active(active) = &mut self.render_state {
             // Unregister all textures on suspend
             for (_id, handle) in self.texture_handles.drain() {
-                active.renderer.unregister_texture(handle);
+                active.renderer.borrow_mut().unregister_texture(handle);
             }
         }
         self.render_state = RenderState::Suspended;
@@ -441,13 +510,14 @@ impl WindowRenderer for VelloWindowRenderer {
         };
 
         let render_surface = &mut state.render_surface;
+        let mut renderer = state.renderer.borrow_mut();
 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Regenerate the vello scene
         draw_fn(&mut VelloScenePainter {
             inner: &mut self.scene,
-            renderer: Some(&mut state.renderer),
+            renderer: Some(&mut renderer),
             device_handle: Some(&render_surface.device_handle),
             texture_handles: Some(&mut self.texture_handles),
         });
@@ -461,11 +531,10 @@ impl WindowRenderer for VelloWindowRenderer {
         };
 
         for handle in self.texture_handles.values() {
-            state.renderer.mark_override_image_dirty(handle);
+            renderer.mark_override_image_dirty(handle);
         }
 
-        state
-            .renderer
+        renderer
             .render_to_texture(
                 render_surface.device(),
                 render_surface.queue(),
