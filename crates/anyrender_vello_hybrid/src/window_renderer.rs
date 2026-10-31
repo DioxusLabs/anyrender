@@ -16,7 +16,9 @@ use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
     TextureFormat, TextureView, TextureViewDescriptor,
 };
-use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
+use wgpu_context::{
+    DeviceHandle, GpuFrameTimer, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext,
+};
 
 use crate::{VelloHybridScenePainter, scene::ImageManager};
 
@@ -173,6 +175,7 @@ pub struct VelloHybridWindowRenderer {
     wgpu_context: WGPUContext,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
+    gpu_timer: GpuFrameTimer,
     cached_images: FxHashMap<u64, ImageId>,
 }
 impl VelloHybridWindowRenderer {
@@ -188,6 +191,7 @@ impl VelloHybridWindowRenderer {
         Self {
             render_state: RenderState::Suspended,
             config,
+            gpu_timer: GpuFrameTimer::new(),
             wgpu_context,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings.level),
@@ -543,6 +547,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             self.scene.reset();
             return;
         };
+        // Without an intermediate texture the surface texture was just acquired above
+        if !render_surface.has_intermediate_texture() {
+            timer.record_time("acquire");
+        }
 
         // Construct Vello Hybrid TextureBindings
         let mut texture_bindings = TextureBindings::new();
@@ -568,24 +576,36 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 TargetInit::Clear(ClearSettings::default()),
             )
             .expect("failed to render to texture");
+        self.gpu_timer.start();
         render_surface.queue().submit([encoder.finish()]);
+        self.gpu_timer
+            .submitted("render", render_surface.device(), render_surface.queue());
         timer.record_time("render");
 
         drop(texture_view);
+
+        if render_surface.has_intermediate_texture() {
+            if render_surface.ensure_current_surface_texture().is_err() {
+                return;
+            }
+            timer.record_time("acquire");
+            self.gpu_timer.start();
+        }
 
         if render_surface.maybe_blit_and_present().is_err() {
             self.scene.reset();
             return;
         }
+        self.gpu_timer
+            .submitted("blit", render_surface.device(), render_surface.queue());
         timer.record_time("present");
 
-        render_surface
-            .device()
-            .poll(wgpu::PollType::wait_indefinitely())
-            .unwrap();
-
-        timer.record_time("wait");
+        // Progress cleanup and callbacks without serializing the next frame
+        // behind completion of this frame's GPU work. Surface acquisition
+        // provides bounded backpressure via desired_maximum_frame_latency.
+        render_surface.device().poll(wgpu::PollType::Poll).unwrap();
         timer.print_times("vello_hybrid: ");
+        self.gpu_timer.print_completed("vello_hybrid: ");
 
         // Empty the Vello scene (memory optimisation)
         self.scene.reset();
