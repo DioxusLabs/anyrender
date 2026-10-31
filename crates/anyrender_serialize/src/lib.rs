@@ -82,7 +82,7 @@ pub struct ResourceManifest {
 
 impl ResourceManifest {
     /// Current archive format version. Bump this when the format changes.
-    pub const CURRENT_VERSION: u32 = 1;
+    pub const CURRENT_VERSION: u32 = 2;
 
     pub fn new(tolerance: f64) -> Self {
         Self {

@@ -74,11 +74,13 @@ fn create_demo_scene() -> Scene {
     let rounded_card = RoundedRect::from_rect(card_rect, 12.0);
 
     scene.draw_box_shadow(
-        Affine::translate((4.0, 4.0)),
-        card_rect,
-        Color::from_rgba8(0, 0, 0, 60),
-        12.0,
+        Affine::IDENTITY,
+        &rounded_card.into(),
+        kurbo::Vec2::new(4.0, 4.0),
+        0.0,
         8.0,
+        Color::from_rgba8(0, 0, 0, 60),
+        anyrender::BoxShadowKind::Outset { clip_to_box: false },
     );
 
     // Card background
