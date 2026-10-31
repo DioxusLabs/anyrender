@@ -1,6 +1,6 @@
-use anyrender::{ImageRenderer, RenderContext};
+use anyrender::{Backdrop, ImageRenderer, RenderContext};
 use debug_timer::debug_timer;
-use skia_safe::{AlphaType, Color, ColorType, ImageInfo, SurfaceProps, graphics, surfaces};
+use skia_safe::{AlphaType, ColorType, ImageInfo, SurfaceProps, graphics, surfaces};
 
 use crate::{SkiaScenePainter, scene::SkiaSceneCache};
 
@@ -47,6 +47,7 @@ impl ImageRenderer for SkiaImageRenderer {
 
     fn render_to_vec<F: FnOnce(&mut Self::ScenePainter<'_>)>(
         &mut self,
+        backdrop: Backdrop,
         draw_fn: F,
         buffer: &mut Vec<u8>,
     ) {
@@ -62,8 +63,11 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        // Clear surface with transparent background to allow transparency in rendered images
-        surface.canvas().clear(Color::TRANSPARENT);
+        if let Backdrop::Clear(color) = backdrop {
+            surface
+                .canvas()
+                .clear(crate::scene::sk_peniko::color4f_from_alpha_color(color));
+        }
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),
@@ -77,7 +81,12 @@ impl ImageRenderer for SkiaImageRenderer {
         timer.print_times("skia_raster: ");
     }
 
-    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
+    fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(
+        &mut self,
+        backdrop: Backdrop,
+        draw_fn: F,
+        buffer: &mut [u8],
+    ) {
         debug_timer!(timer, feature = "log_frame_times");
 
         let mut surface = surfaces::wrap_pixels(
@@ -88,8 +97,11 @@ impl ImageRenderer for SkiaImageRenderer {
         )
         .unwrap();
 
-        // Clear surface with transparent background to allow transparency in rendered images
-        surface.canvas().clear(Color::TRANSPARENT);
+        if let Backdrop::Clear(color) = backdrop {
+            surface
+                .canvas()
+                .clear(crate::scene::sk_peniko::color4f_from_alpha_color(color));
+        }
 
         draw_fn(&mut SkiaScenePainter {
             inner: surface.canvas(),

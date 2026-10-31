@@ -17,6 +17,7 @@ fn render(glyph_caching: bool, font: &FontData) -> Vec<u8> {
     for _ in 0..2 {
         renderer.reset();
         renderer.render(
+            anyrender::Backdrop::default(),
             |scene| {
                 // Upright in the top half, skewed in the bottom half.
                 for (y, glyph_transform) in [(60.0, None), (140.0, Some(skew))] {
