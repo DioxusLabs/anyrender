@@ -14,7 +14,7 @@ use crate::{BackendError, SkiaScenePainter, scene::SkiaSceneCache};
 /// `ANYRENDER_SKIA_BACKEND` overrides this preference at resume time. Values are
 /// case-insensitive: `gl`/`opengl`, `d3d`/`d3d12`, or `metal`. Unknown or unavailable backends warn
 /// and keep this preference.
-/// `ANYRENDER_SKIA_D3D_ALLOW_WARP=1` moves software D3D12 ahead of OpenGL.
+/// `ANYRENDER_SKIA_D3D_PREFER_WARP=1` moves software D3D12 ahead of OpenGL.
 /// Explicit OpenGL and transparent Windows surfaces never fall back to D3D12.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -66,47 +66,38 @@ fn create_backend(
     height: u32,
     composite_alpha_mode: anyrender::CompositeAlphaMode,
 ) -> Result<Box<dyn SkiaBackend>, BackendError> {
-    #[cfg(windows)]
-    let preference = match preference {
-        SkiaBackendPreference::Auto | SkiaBackendPreference::D3D => {
+    match preference {
+        #[cfg(windows)]
+        SkiaBackendPreference::Auto | SkiaBackendPreference::D3D
             if matches!(
                 composite_alpha_mode,
                 anyrender::CompositeAlphaMode::Opaque | anyrender::CompositeAlphaMode::Auto
-            ) {
-                return try_windows_backends(
-                    std::env::var("ANYRENDER_SKIA_D3D_ALLOW_WARP").as_deref() == Ok("1"),
-                    |attempt| -> Result<Box<dyn SkiaBackend>, BackendError> {
-                        match attempt {
-                            WindowsBackendAttempt::HardwareD3D
-                            | WindowsBackendAttempt::SoftwareD3D => {
-                                Ok(Box::new(crate::d3d::D3DBackend::new(
-                                    window.clone(),
-                                    width,
-                                    height,
-                                    attempt == WindowsBackendAttempt::SoftwareD3D,
-                                )?))
-                            }
-                            WindowsBackendAttempt::OpenGL => {
-                                Ok(Box::new(crate::opengl::OpenGLBackend::new(
-                                    window.clone(),
-                                    width,
-                                    height,
-                                    composite_alpha_mode,
-                                )?))
-                            }
+            ) =>
+        {
+            try_windows_backends(
+                std::env::var("ANYRENDER_SKIA_D3D_PREFER_WARP").as_deref() == Ok("1"),
+                |attempt| -> Result<Box<dyn SkiaBackend>, BackendError> {
+                    match attempt {
+                        WindowsBackendAttempt::HardwareD3D | WindowsBackendAttempt::SoftwareD3D => {
+                            Ok(Box::new(crate::d3d::D3DBackend::new(
+                                window.clone(),
+                                width,
+                                height,
+                                attempt == WindowsBackendAttempt::SoftwareD3D,
+                            )?))
                         }
-                    },
-                );
-            } else {
-                tracing::info!("Skia D3D12 does not support per-pixel HWND alpha; using OpenGL");
-            }
-            SkiaBackendPreference::OpenGL
+                        WindowsBackendAttempt::OpenGL => {
+                            Ok(Box::new(crate::opengl::OpenGLBackend::new(
+                                window.clone(),
+                                width,
+                                height,
+                                composite_alpha_mode,
+                            )?))
+                        }
+                    }
+                },
+            )
         }
-        preference => preference,
-    };
-    match preference {
-        #[cfg(windows)]
-        SkiaBackendPreference::D3D => unreachable!(),
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         SkiaBackendPreference::Auto | SkiaBackendPreference::Metal => {
             let backend =
@@ -115,7 +106,11 @@ fn create_backend(
             Ok(Box::new(backend))
         }
         #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-        SkiaBackendPreference::Auto | SkiaBackendPreference::OpenGL => {
+        _ => {
+            #[cfg(windows)]
+            if preference != SkiaBackendPreference::OpenGL {
+                tracing::info!("Skia D3D12 does not support per-pixel HWND alpha; using OpenGL");
+            }
             let backend =
                 crate::opengl::OpenGLBackend::new(window, width, height, composite_alpha_mode)
                     .inspect_err(|error| {
@@ -148,7 +143,12 @@ struct ActiveRenderState {
     window: Arc<dyn anyrender::WindowHandle>,
     size: (u32, u32),
     scene_cache: SkiaSceneCache,
+    /// Backends recreated since the last frame that presented without losing its device.
+    consecutive_losses: u32,
 }
+
+/// Give up once this many recreated backends in a row are lost before presenting a frame.
+const MAX_CONSECUTIVE_BACKEND_LOSSES: u32 = 3;
 
 /// Options for configuring the Skia renderer.
 #[derive(Debug, Clone)]
@@ -270,6 +270,7 @@ impl WindowRenderer for SkiaWindowRenderer {
             window,
             size: (width, height),
             scene_cache: SkiaSceneCache::default(),
+            consecutive_losses: 0,
         }));
         on_ready();
     }
@@ -308,6 +309,13 @@ impl WindowRenderer for SkiaWindowRenderer {
             .as_ref()
             .is_some_and(|backend| backend.is_lost())
         {
+            state.consecutive_losses += 1;
+            if state.consecutive_losses > MAX_CONSECUTIVE_BACKEND_LOSSES {
+                panic!(
+                    "Skia backend lost {} times in a row; giving up",
+                    state.consecutive_losses
+                );
+            }
             state.backend = None;
         }
         if state.backend.is_none() {
@@ -341,6 +349,9 @@ impl WindowRenderer for SkiaWindowRenderer {
         timer.record_time("cmd");
 
         backend.flush(surface);
+        if !backend.is_lost() {
+            state.consecutive_losses = 0;
+        }
         timer.record_time("render");
 
         state.scene_cache.next_gen();

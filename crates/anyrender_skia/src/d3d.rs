@@ -37,6 +37,7 @@ fn create_device(adapter: &IDXGIAdapter1) -> Result<ID3D12Device, BackendError> 
 }
 
 fn is_software_adapter(desc: &DXGI_ADAPTER_DESC1) -> bool {
+    // 0x1414/0x8c is the Microsoft Basic Render Driver, which is not always flagged as software.
     desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0
         || (desc.VendorId == 0x1414 && desc.DeviceId == 0x8c)
 }
@@ -191,7 +192,7 @@ impl D3DBackend {
                 SurfaceOrigin::TopLeft,
                 ColorType::RGBA8888,
                 None,
-                None,
+                Some(&crate::surface_props()),
             )
             .ok_or_else(|| BackendError::new("Failed to wrap D3D render target"))?;
             self.surfaces[index] = Some((surface, target));
@@ -248,13 +249,18 @@ impl SkiaBackend for D3DBackend {
     }
 
     fn flush(&mut self, mut surface: Surface) {
-        if let Err(error) = self
-            .context
-            .as_mut()
-            .unwrap()
-            .flush_and_submit_surface(&mut surface, None)
-        {
+        let context = self.context.as_mut().unwrap();
+        // Transition the back buffer to PRESENT; `flush_and_submit_surface` leaves it in RENDER_TARGET.
+        if let Err(error) = context.flush_surface_with_access(
+            &mut surface,
+            skia_safe::surfaces::BackendSurfaceAccess::Present,
+            &gpu::FlushInfo::default(),
+        ) {
             self.mark_lost(error);
+            return;
+        }
+        if !context.submit(gpu::SyncCpu::No) {
+            self.mark_lost("Skia submit failed");
             return;
         }
         let result = unsafe { self.swapchain.as_ref().unwrap().Present(1, DXGI_PRESENT(0)) };
