@@ -37,7 +37,9 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
         Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
 
         Paint::Image(image_brush) => {
-            let image_id = image_manager.upload_image(image_brush.image);
+            let Some(image_id) = image_manager.upload_image(image_brush.image) else {
+                return PaintType::Solid(Color::TRANSPARENT);
+            };
             PaintType::Image(ImageBrush {
                 image: ImageSource::OpaqueId {
                     id: image_id,
@@ -101,12 +103,15 @@ impl<'a> ImageManager<'a> {
         }
     }
 
-    pub(crate) fn upload_image(&mut self, image: &ImageData) -> ImageId {
+    pub(crate) fn upload_image(&mut self, image: &ImageData) -> Option<ImageId> {
+        if !self.cache.fits(image.width, image.height) {
+            return None;
+        }
         let peniko_id = image.data.id();
 
         // Try to get ImageId from cache first
         if let Some(atlas_id) = self.cache.get(peniko_id) {
-            return atlas_id;
+            return Some(atlas_id);
         };
 
         // Convert ImageData to Pixmap
@@ -125,10 +130,10 @@ impl<'a> ImageManager<'a> {
 
         // Store ImageId in cache
         self.cache
-            .insert(peniko_id, atlas_id, image.width, image.height);
+            .insert(&image.data, atlas_id, image.width, image.height);
 
         // Return ImageId
-        atlas_id
+        Some(atlas_id)
     }
 
     /// Evict unused images after encoding the frame's rendering, before submitting the encoder.
