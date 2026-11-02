@@ -319,23 +319,21 @@ impl SkiaScenePainter<'_> {
             return Some(typeface);
         }
 
-        let coordinates: Vec<Coordinate> = axes
-            .iter()
-            .zip(normalized_coords.iter().map(|c| f2dot14_to_f32(*c)))
-            .filter(|(_, value)| *value != 0.0)
-            .map(|(axis, factor)| {
-                let value = if factor < 0.0 {
-                    lerp_f32(axis.min, axis.def, -factor)
-                } else {
-                    lerp_f32(axis.def, axis.max, factor)
-                };
-
-                Coordinate {
-                    axis: axis.tag,
-                    value,
-                }
-            })
-            .collect();
+        let coordinates = design_coordinates(font.data.data(), font.index, normalized_coords)
+            .unwrap_or_else(|| {
+                axes.iter()
+                    .zip(normalized_coords.iter().map(|c| f2dot14_to_f32(*c)))
+                    .filter(|(_, value)| *value != 0.0)
+                    .map(|(axis, factor)| Coordinate {
+                        axis: axis.tag,
+                        value: if factor < 0.0 {
+                            lerp_f32(axis.def, axis.min, -factor)
+                        } else {
+                            lerp_f32(axis.def, axis.max, factor)
+                        },
+                    })
+                    .collect()
+            });
         let variation_position = VariationPosition {
             coordinates: &coordinates,
         };
@@ -592,6 +590,52 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         self.inner.draw_rrect(rrect, &self.cache.paint);
     }
+}
+
+/// The design-space position of `normalized_coords`, which carry the font's `avar` mapping
+/// (shapers such as parley and harfrust normalize through it). Skia takes design coordinates and
+/// applies `avar` itself, so the mapping is inverted per axis by bisection; it is monotonic.
+fn design_coordinates(
+    data: &[u8],
+    index: u32,
+    normalized_coords: &[anyrender::NormalizedCoord],
+) -> Option<Vec<Coordinate>> {
+    use skrifa::{FontRef, MetadataProvider};
+
+    let font = FontRef::from_index(data, index).ok()?;
+    let axes = font.axes();
+    let coordinates = axes
+        .iter()
+        .enumerate()
+        .zip(normalized_coords)
+        .filter(|(_, target)| **target != 0)
+        .map(|((index, axis), &target)| {
+            let normalize = |value: f32| {
+                axes.location([(axis.tag(), value)])
+                    .coords()
+                    .get(index)
+                    .map_or(0, |coord| coord.to_bits())
+            };
+            let (mut low, mut high) = if target < 0 {
+                (axis.min_value(), axis.default_value())
+            } else {
+                (axis.default_value(), axis.max_value())
+            };
+            for _ in 0..24 {
+                let mid = (low + high) / 2.0;
+                if normalize(mid) < target {
+                    low = mid;
+                } else {
+                    high = mid;
+                }
+            }
+            Coordinate {
+                axis: u32::from_be_bytes(axis.tag().to_be_bytes()).into(),
+                value: (low + high) / 2.0,
+            }
+        })
+        .collect();
+    Some(coordinates)
 }
 
 fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
@@ -1360,5 +1404,47 @@ mod sk_kurbo {
             }
             PathEl::ClosePath => _ = sk_path.close(),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::design_coordinates;
+    use skrifa::{FontRef, MetadataProvider};
+
+    /// One `wght` axis from 100 to 900 whose default is 900 (as in Fraunces), with a non-linear
+    /// `avar` map (-0.5 -> -0.8). Generated with fontTools; no glyph variations.
+    const AVAR_TEST: &[u8] = include_bytes!("../tests/fonts/avar-test.ttf");
+
+    fn normalized(weight: f32) -> Vec<i16> {
+        let font = FontRef::new(AVAR_TEST).unwrap();
+        let location = font.axes().location([("wght", weight)]);
+        location
+            .coords()
+            .iter()
+            .map(|coord| coord.to_bits())
+            .collect()
+    }
+
+    #[test]
+    fn design_coordinates_invert_avar_below_the_default() {
+        for weight in [100.0, 300.0, 500.0, 700.0, 850.0] {
+            let coords = design_coordinates(AVAR_TEST, 0, &normalized(weight)).unwrap();
+            assert_eq!(coords.len(), 1);
+            assert!(
+                (coords[0].value - weight).abs() < 0.5,
+                "wght {weight} came back as {}",
+                coords[0].value
+            );
+        }
+    }
+
+    #[test]
+    fn design_coordinates_skip_axes_at_their_default() {
+        assert!(
+            design_coordinates(AVAR_TEST, 0, &normalized(900.0))
+                .unwrap()
+                .is_empty()
+        );
     }
 }
