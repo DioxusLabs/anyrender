@@ -27,24 +27,30 @@ fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) ->
 /// at 17-33ppem and whole pixels from 34ppem. Vello positions glyphs continuously, so without
 /// this, stems land up to 1/2px away from native ones. Only x is snapped, and only on Apple
 /// platforms; elsewhere glyphs keep their continuous positions.
+///
+/// CoreGraphics font smoothing also dilates glyphs upwards only: stems grow by the same amount
+/// on both sides in x, but the bottom edge stays on the baseline and the top grows by twice
+/// that. Vello's embolden grows both sides in y, so emboldened glyphs are raised by the
+/// vertical embolden amount, which keeps baselines and other bottom edges as crisp as native.
 #[derive(Clone, Copy)]
 pub(crate) struct GlyphOriginSnap {
     scale_x: f64,
     offset_x: f64,
     positions_per_px: f64,
+    lift_y: f64,
 }
 
 impl GlyphOriginSnap {
     const ENABLED: bool = cfg!(any(target_os = "macos", target_os = "ios"));
 
-    pub(crate) fn new(transform: Affine, font_size: f32) -> Option<Self> {
+    pub(crate) fn new(transform: Affine, font_size: f32, embolden: kurbo::Vec2) -> Option<Self> {
         if !Self::ENABLED {
             return None;
         }
-        Self::core_graphics(transform, font_size)
+        Self::core_graphics(transform, font_size, embolden)
     }
 
-    fn core_graphics(transform: Affine, font_size: f32) -> Option<Self> {
+    fn core_graphics(transform: Affine, font_size: f32, embolden: kurbo::Vec2) -> Option<Self> {
         let [a, b, c, d, e, _] = transform.as_coeffs();
         let ppem = font_size as f64 * d.abs();
         if b != 0.0 || c != 0.0 || a <= 0.0 || !ppem.is_finite() || ppem <= 0.0 {
@@ -55,6 +61,8 @@ impl GlyphOriginSnap {
             offset_x: e,
             // CoreGraphics' grid gets coarser as glyphs grow: n = ceil(100 / (3 * ppem)), at most 5.
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
+            // The embolden amount is in device pixels; device y points down.
+            lift_y: embolden.y / d,
         })
     }
 
@@ -62,6 +70,10 @@ impl GlyphOriginSnap {
         let device_x = self.scale_x * x as f64 + self.offset_x;
         let snapped = (device_x * self.positions_per_px).floor() / self.positions_per_px;
         ((snapped - self.offset_x) / self.scale_x) as f32
+    }
+
+    pub(crate) fn y(self, y: f32) -> f32 {
+        (y as f64 - self.lift_y) as f32
     }
 }
 
@@ -260,7 +272,7 @@ impl PaintScene for VelloCpuScenePainter {
 
         let glyph_caching =
             self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
-        let snap = GlyphOriginSnap::new(transform, font_size);
+        let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -277,7 +289,7 @@ impl PaintScene for VelloCpuScenePainter {
                     .fill_glyphs(glyphs.map(|g| vello_cpu::Glyph {
                         id: g.id,
                         x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: g.y,
+                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
                     }));
             }
             StyleRef::Stroke(stroke) => {
@@ -293,7 +305,7 @@ impl PaintScene for VelloCpuScenePainter {
                     .stroke_glyphs(glyphs.map(|g| vello_cpu::Glyph {
                         id: g.id,
                         x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: g.y,
+                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
                     }));
             }
         }
@@ -475,7 +487,7 @@ mod glyph_origin_snap_tests {
     use kurbo::Affine;
 
     fn snapped_device_x(transform: Affine, font_size: f32, x: f32) -> f64 {
-        let snap = GlyphOriginSnap::core_graphics(transform, font_size).unwrap();
+        let snap = GlyphOriginSnap::core_graphics(transform, font_size, kurbo::Vec2::ZERO).unwrap();
         transform.as_coeffs()[0] * snap.x(x) as f64 + transform.as_coeffs()[4]
     }
 
@@ -491,7 +503,8 @@ mod glyph_origin_snap_tests {
             (34.0, 1.0),
             (72.0, 1.0),
         ] {
-            let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, ppem).unwrap();
+            let snap =
+                GlyphOriginSnap::core_graphics(Affine::IDENTITY, ppem, kurbo::Vec2::ZERO).unwrap();
             assert_eq!(snap.positions_per_px, (1.0f64 / step).round(), "{ppem}ppem");
         }
     }
@@ -507,7 +520,21 @@ mod glyph_origin_snap_tests {
     }
 
     #[test]
+    fn raises_emboldened_glyphs_by_vertical_embolden() {
+        let embolden = kurbo::Vec2::new(0.1, 0.3);
+        let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, 16.0, embolden).unwrap();
+        assert!((snap.y(10.0) - 9.7).abs() < 1e-6);
+        // At 2x, a 0.3 device px lift is 0.15 user units.
+        let snap = GlyphOriginSnap::core_graphics(Affine::scale(2.0), 8.0, embolden).unwrap();
+        assert!((snap.y(10.0) - 9.85).abs() < 1e-6);
+        let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, 16.0, kurbo::Vec2::ZERO);
+        assert_eq!(snap.unwrap().y(10.0), 10.0);
+    }
+
+    #[test]
     fn skips_rotated_runs() {
-        assert!(GlyphOriginSnap::core_graphics(Affine::rotate(0.3), 16.0).is_none());
+        assert!(
+            GlyphOriginSnap::core_graphics(Affine::rotate(0.3), 16.0, kurbo::Vec2::ZERO).is_none()
+        );
     }
 }
