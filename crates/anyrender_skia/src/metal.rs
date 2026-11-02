@@ -4,6 +4,7 @@ use objc2::{rc::Retained, runtime::ProtocolObject};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSView;
 use objc2_core_foundation::CGSize;
+use objc2_core_graphics::{CGColorSpace, kCGColorSpaceSRGB};
 use objc2_metal::{MTLCommandBuffer, MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 #[cfg(target_os = "ios")]
@@ -46,6 +47,10 @@ impl MetalBackend {
             // More about: https://developer.apple.com/documentation/quartzcore/cametallayer/1478168-framebufferonly
             layer.setFramebufferOnly(false);
             layer.setDrawableSize(CGSize::new(width as f64, height as f64));
+            // Without a colorspace macOS shows the sRGB values Skia renders unconverted
+            // in the display's native space (Display P3 on most Macs).
+            let srgb = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
+            layer.setColorspace(srgb.as_deref());
 
             let view_ptr = match window.window_handle().map_err(BackendError::new)?.as_raw() {
                 #[cfg(target_os = "macos")]
