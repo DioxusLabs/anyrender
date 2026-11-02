@@ -511,7 +511,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         font_size: f32,
         hint: bool,
         normalized_coords: &'a [anyrender::NormalizedCoord],
-        _embolden: kurbo::Vec2,
+        embolden: kurbo::Vec2,
         style: impl Into<peniko::StyleRef<'a>>,
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_alpha: f32,
@@ -529,6 +529,12 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.set_paint_brush(brush, None);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
+
+        // CoreText doesn't hint outlines, and Skia only uses the hinting level there to decide
+        // whether to request CoreText font smoothing (stem dilation). Request it for emboldened
+        // text, which is how callers ask for the native macOS look.
+        let hint = hint
+            || (cfg!(any(target_os = "macos", target_os = "ios")) && embolden != kurbo::Vec2::ZERO);
 
         let Some(font) = self.get_or_cache_font(font, normalized_coords, font_size, hint) else {
             return;
