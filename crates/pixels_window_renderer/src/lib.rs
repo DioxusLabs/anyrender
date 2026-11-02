@@ -177,6 +177,8 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
             .clear_color(self.config.base_color)
             .build()
             .unwrap();
+        #[cfg(target_os = "macos")]
+        tag_metal_layers_as_srgb(&*window_handle);
         self.render_state = RenderState::Active(ActiveRenderState { pixels });
         self.window_handle = Some(window_handle);
 
@@ -222,5 +224,40 @@ impl<Renderer: ImageRenderer> WindowRenderer for PixelsWindowRenderer<Renderer> 
 
         // Reset the renderer ready for the next render
         self.renderer.reset();
+    }
+}
+
+/// wgpu leaves the colorspace of the `CAMetalLayer` it adds to the window's view unset,
+/// so macOS shows the sRGB values we render unconverted in the display's native space
+/// (Display P3 on most Macs). `pixels` keeps its wgpu surface private, so find the layer
+/// through the view.
+#[cfg(target_os = "macos")]
+fn tag_metal_layers_as_srgb(window: &dyn WindowHandle) {
+    use objc2_app_kit::NSView;
+    use objc2_core_graphics::{CGColorSpace, kCGColorSpaceSRGB};
+    use objc2_quartz_core::CAMetalLayer;
+    use raw_window_handle::RawWindowHandle;
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: the AppKit handle points to a live `NSView`.
+    let view = unsafe { appkit.ns_view.cast::<NSView>().as_ref() };
+    let Some(root) = view.layer() else {
+        return;
+    };
+    let colorspace = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
+    let mut layers = vec![root];
+    while let Some(layer) = layers.pop() {
+        if let Some(metal_layer) = layer.downcast_ref::<CAMetalLayer>() {
+            metal_layer.setColorspace(colorspace.as_deref());
+        }
+        // SAFETY: the layer tree is only read, on the main thread that owns the view.
+        if let Some(sublayers) = unsafe { layer.sublayers() } {
+            layers.extend(sublayers.iter());
+        }
     }
 }
