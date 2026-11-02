@@ -161,40 +161,30 @@ jobs:
         run: |
           ${{ env.RUST_CARGO_COMMAND }} ${{ matrix.platform.command }} ${{ matrix.platform.args }} --target ${{ matrix.platform.target }}
 
+  # Fails if rust-skia doesn't publish a prebuilt binary matching anyrender_skia's skia-bindings
+  # features, which would make downstream builds silently fall back to a full Skia source build.
+  # Computes the binary-cache key with `cargo tree` and checks the download URL; nothing is compiled.
   skia-prebuilt-guard:
     name: Skia prebuilt guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: >-
+          python3 .github/scripts/check_skia_prebuilt.py
+          x86_64-pc-windows-msvc
+          aarch64-pc-windows-msvc
+          x86_64-unknown-linux-gnu
+          aarch64-unknown-linux-gnu
+          x86_64-apple-darwin
+          aarch64-apple-darwin
+
+  clippy-skia-windows:
+    name: "Clippy [anyrender_skia, windows]"
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Build and verify x86_64 prebuilt
-        shell: pwsh
-        run: |
-          Remove-Item Env:SKIA_BINARIES_URL -ErrorAction SilentlyContinue
-          cargo build -p anyrender_skia
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $outputs = Get-ChildItem target/debug/build/skia-bindings-*/output
-          $found = $outputs | Where-Object {
-            $text = Get-Content $_ -Raw
-            $text.Contains('DOWNLOAD AND INSTALL SUCCEEDED') -and
-            $text.Contains('x86_64-pc-windows-msvc-d3d-ganesh-gl-jpegd-jpege-pdf')
-          }
-          if (-not $found) { throw 'Expected x86_64 Skia prebuilt was not downloaded' }
-      - name: Build and verify aarch64 prebuilt
-        shell: pwsh
-        run: |
-          Remove-Item Env:SKIA_BINARIES_URL -ErrorAction SilentlyContinue
-          rustup target add aarch64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cargo build -p anyrender_skia --target aarch64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $outputs = Get-ChildItem target/aarch64-pc-windows-msvc/debug/build/skia-bindings-*/output
-          $found = $outputs | Where-Object {
-            $text = Get-Content $_ -Raw
-            $text.Contains('DOWNLOAD AND INSTALL SUCCEEDED') -and
-            $text.Contains('aarch64-pc-windows-msvc-d3d-ganesh-gl-jpegd-jpege-pdf')
-          }
-          if (-not $found) { throw 'Expected aarch64 Skia prebuilt was not downloaded' }
       - run: cargo clippy -p anyrender_skia -- -D warnings
