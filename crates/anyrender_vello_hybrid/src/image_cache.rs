@@ -46,6 +46,22 @@ impl ImageCache {
     }
 
     fn evict(&mut self, budget: u64) -> Vec<ImageId> {
+        let evicted = self.evict_unused_over_budget(budget);
+        self.advance_frame();
+        evicted
+    }
+
+    fn evict_unused_over_budget(&mut self, budget: u64) -> Vec<ImageId> {
+        let unused_bytes: u64 = self
+            .entries
+            .values()
+            .filter(|entry| entry.last_used != self.frame)
+            .map(|entry| entry.bytes)
+            .sum();
+        if unused_bytes <= budget {
+            return Vec::new();
+        }
+
         let mut unused: Vec<_> = self
             .entries
             .iter()
@@ -63,6 +79,10 @@ impl ImageCache {
                 evicted.push(self.entries.remove(&id).unwrap().atlas_id);
             }
         }
+        evicted
+    }
+
+    fn advance_frame(&mut self) {
         if self.frame == u64::MAX {
             for entry in self.entries.values_mut() {
                 entry.last_used = 0;
@@ -71,7 +91,6 @@ impl ImageCache {
         } else {
             self.frame += 1;
         }
-        evicted
     }
 }
 
