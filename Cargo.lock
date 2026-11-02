@@ -216,6 +216,7 @@ dependencies = [
  "skia-safe",
  "skrifa",
  "softbuffer_window_renderer",
+ "tracing",
 ]
 
 [[package]]
