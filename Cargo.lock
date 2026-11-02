@@ -4655,6 +4655,8 @@ name = "wgpu_context"
 version = "0.10.0"
 dependencies = [
  "futures-intrusive",
+ "objc2-core-graphics",
+ "objc2-quartz-core 0.3.2",
  "wgpu 30.0.1",
 ]
 

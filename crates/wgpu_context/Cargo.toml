@@ -11,3 +11,7 @@ edition.workspace = true
 [dependencies]
 wgpu = { workspace = true }
 futures-intrusive = { workspace = true }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGColorSpace"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CALayer", "CAMetalLayer"] }
