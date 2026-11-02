@@ -24,6 +24,9 @@ use crate::cache::{
 };
 use crate::scene::sk_peniko::color4f_from_alpha_color;
 
+/// Number of frames a font resource can go unused before it is evicted.
+const FONT_CACHE_MAX_AGE: usize = 10;
+
 pub struct SkiaSceneCache {
     paint: Paint,
     dash_intervals: Vec<f32>,
@@ -59,11 +62,11 @@ impl Default for SkiaSceneCache {
             paint: Paint::default(),
             dash_intervals: Vec::new(),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
-            extracted_font_data: GenerationalCache::new(10),
-            typeface: GenerationalCache::new(1),
-            normalized_typeface: GenerationalCache::new(1),
+            extracted_font_data: GenerationalCache::new(FONT_CACHE_MAX_AGE),
+            typeface: GenerationalCache::new(FONT_CACHE_MAX_AGE),
+            normalized_typeface: GenerationalCache::new(FONT_CACHE_MAX_AGE),
             image_shader: GenerationalCache::new(1),
-            font: GenerationalCache::new(10),
+            font: GenerationalCache::new(FONT_CACHE_MAX_AGE),
             font_mgr: FontMgr::new(),
             glyph_id_buf: Default::default(),
             glyph_pos_buf: Default::default(),
@@ -259,7 +262,20 @@ impl SkiaScenePainter<'_> {
         };
 
         if let Some(cached) = self.cache.font.hit(&cache_key_borrowed) {
-            return Some(cached.clone());
+            let cached = cached.clone();
+            // Keep the typefaces this font was built from alive for as long as the font,
+            // so that a new size of the same font reuses them instead of creating new ones.
+            self.cache.typeface.hit(&(font.data.id(), font.index));
+            if !normalized_coords.is_empty() {
+                self.cache
+                    .normalized_typeface
+                    .hit(&NormalizedTypefaceCacheKeyBorrowed {
+                        typeface_id: font.data.id(),
+                        typeface_index: font.index,
+                        normalized_coords,
+                    });
+            }
+            return Some(cached);
         }
 
         let typeface = self.get_or_cache_normalized_typeface(font, normalized_coords)?;
