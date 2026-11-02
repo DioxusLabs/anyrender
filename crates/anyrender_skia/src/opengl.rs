@@ -191,7 +191,7 @@ impl OpenGLBackend {
             skia_safe::gpu::SurfaceOrigin::BottomLeft,
             skia_safe::ColorType::RGBA8888,
             None,
-            None,
+            Some(&crate::surface_props()),
         )
         .unwrap()
     }

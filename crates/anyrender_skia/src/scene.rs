@@ -274,7 +274,13 @@ impl SkiaScenePainter<'_> {
 
         let mut font = Font::from_typeface(typeface, font_size);
         font.set_hinting(if hint {
-            FontHinting::Normal
+            // Slight (vertical-only) hinting is the fontconfig default, and what Chrome and
+            // Firefox use on Linux. Full hinting distorts glyph shapes at small sizes.
+            if crate::FREETYPE_TEXT {
+                FontHinting::Slight
+            } else {
+                FontHinting::Normal
+            }
         } else {
             FontHinting::None
         });
