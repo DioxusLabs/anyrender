@@ -10,7 +10,7 @@ use crate::{BackendError, SkiaScenePainter, scene::SkiaSceneCache};
 ///
 /// `ANYRENDER_SKIA_BACKEND` overrides this preference at resume time. Values are
 /// case-insensitive: `gl`/`opengl` or `metal`. Unknown or unavailable backends warn
-/// and use Auto instead.
+/// and keep this preference.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SkiaBackendPreference {
@@ -37,62 +37,15 @@ impl SkiaBackendPreference {
         match std::env::var("ANYRENDER_SKIA_BACKEND") {
             Ok(value) => Self::from_env_value(&value).unwrap_or_else(|| {
                 tracing::warn!(
-                    "Unknown or unavailable ANYRENDER_SKIA_BACKEND value {value:?}; using Auto"
+                    "Unknown or unavailable ANYRENDER_SKIA_BACKEND value {value:?}; using {self:?}"
                 );
-                Self::Auto
+                self
             }),
             Err(std::env::VarError::NotPresent) => self,
             Err(std::env::VarError::NotUnicode(_)) => {
-                tracing::warn!("Invalid ANYRENDER_SKIA_BACKEND value; using Auto");
-                Self::Auto
+                tracing::warn!("Invalid ANYRENDER_SKIA_BACKEND value; using {self:?}");
+                self
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SkiaBackendPreference, SkiaRendererOptions};
-
-    #[test]
-    fn backend_options() {
-        assert_eq!(
-            SkiaRendererOptions::new().backend,
-            SkiaBackendPreference::Auto
-        );
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-        let preference = SkiaBackendPreference::OpenGL;
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        let preference = SkiaBackendPreference::Metal;
-        assert_eq!(
-            SkiaRendererOptions::new().backend(preference).backend,
-            preference
-        );
-    }
-
-    #[test]
-    fn backend_env_values() {
-        for value in ["", "unknown", "d3d"] {
-            assert_eq!(SkiaBackendPreference::from_env_value(value), None);
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-        {
-            for value in ["gl", "GL", "OpenGL"] {
-                assert_eq!(
-                    SkiaBackendPreference::from_env_value(value),
-                    Some(SkiaBackendPreference::OpenGL)
-                );
-            }
-            assert_eq!(SkiaBackendPreference::from_env_value("metal"), None);
-        }
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        {
-            assert_eq!(
-                SkiaBackendPreference::from_env_value("MeTaL"),
-                Some(SkiaBackendPreference::Metal)
-            );
-            assert_eq!(SkiaBackendPreference::from_env_value("gl"), None);
-            assert_eq!(SkiaBackendPreference::from_env_value("opengl"), None);
         }
     }
 }
@@ -341,4 +294,51 @@ pub mod raster {
         not(feature = "pixels_window_renderer")
     ))]
     pub type SkiaRasterRendererOptions = SoftbufferRendererOptions;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SkiaBackendPreference, SkiaRendererOptions};
+
+    #[test]
+    fn backend_options() {
+        assert_eq!(
+            SkiaRendererOptions::new().backend,
+            SkiaBackendPreference::Auto
+        );
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        let preference = SkiaBackendPreference::OpenGL;
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        let preference = SkiaBackendPreference::Metal;
+        assert_eq!(
+            SkiaRendererOptions::new().backend(preference).backend,
+            preference
+        );
+    }
+
+    #[test]
+    fn backend_env_values() {
+        for value in ["", "unknown", "d3d"] {
+            assert_eq!(SkiaBackendPreference::from_env_value(value), None);
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        {
+            for value in ["gl", "GL", "OpenGL"] {
+                assert_eq!(
+                    SkiaBackendPreference::from_env_value(value),
+                    Some(SkiaBackendPreference::OpenGL)
+                );
+            }
+            assert_eq!(SkiaBackendPreference::from_env_value("metal"), None);
+        }
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        {
+            assert_eq!(
+                SkiaBackendPreference::from_env_value("MeTaL"),
+                Some(SkiaBackendPreference::Metal)
+            );
+            assert_eq!(SkiaBackendPreference::from_env_value("gl"), None);
+            assert_eq!(SkiaBackendPreference::from_env_value("opengl"), None);
+        }
+    }
 }

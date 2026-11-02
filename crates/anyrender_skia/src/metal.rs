@@ -30,9 +30,6 @@ impl MetalBackend {
         height: u32,
         composite_alpha_mode: anyrender::CompositeAlphaMode,
     ) -> Result<Self, BackendError> {
-        if width == 0 || height == 0 {
-            return Err(BackendError::new("Surface dimensions must be positive"));
-        }
         let device = MTLCreateSystemDefaultDevice()
             .ok_or_else(|| BackendError::new("No Metal device found"))?;
 
