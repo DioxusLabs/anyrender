@@ -20,6 +20,51 @@ fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) ->
     b == 0.0 && c == 0.0 && a == d && a > 0.0
 }
 
+/// Snaps glyph origins to the horizontal subpixel grid of the platform's native text renderer.
+///
+/// CoreGraphics (and so Safari and other native Apple text) floors each glyph origin's device x
+/// to a grid that depends on the device font size: 1/4px at 9-11ppem, 1/3px at 12-16ppem, 1/2px
+/// at 17-33ppem and whole pixels from 34ppem. Vello positions glyphs continuously, so without
+/// this, stems land up to 1/2px away from native ones. Only x is snapped, and only on Apple
+/// platforms; elsewhere glyphs keep their continuous positions.
+#[derive(Clone, Copy)]
+pub(crate) struct GlyphOriginSnap {
+    scale_x: f64,
+    offset_x: f64,
+    positions_per_px: f64,
+}
+
+impl GlyphOriginSnap {
+    const ENABLED: bool = cfg!(any(target_os = "macos", target_os = "ios"));
+
+    pub(crate) fn new(transform: Affine, font_size: f32) -> Option<Self> {
+        if !Self::ENABLED {
+            return None;
+        }
+        Self::core_graphics(transform, font_size)
+    }
+
+    fn core_graphics(transform: Affine, font_size: f32) -> Option<Self> {
+        let [a, b, c, d, e, _] = transform.as_coeffs();
+        let ppem = font_size as f64 * d.abs();
+        if b != 0.0 || c != 0.0 || a <= 0.0 || !ppem.is_finite() || ppem <= 0.0 {
+            return None;
+        }
+        Some(Self {
+            scale_x: a,
+            offset_x: e,
+            // CoreGraphics' grid gets coarser as glyphs grow: n = ceil(100 / (3 * ppem)), at most 5.
+            positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
+        })
+    }
+
+    pub(crate) fn x(self, x: f32) -> f32 {
+        let device_x = self.scale_x * x as f64 + self.offset_x;
+        let snapped = (device_x * self.positions_per_px).floor() / self.positions_per_px;
+        ((snapped - self.offset_x) / self.scale_x) as f32
+    }
+}
+
 enum LayerKind {
     Layer,
     Clip,
@@ -215,6 +260,7 @@ impl PaintScene for VelloCpuScenePainter {
 
         let glyph_caching =
             self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+        let snap = GlyphOriginSnap::new(transform, font_size);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -230,7 +276,7 @@ impl PaintScene for VelloCpuScenePainter {
                     .glyph_transform(glyph_transform.unwrap_or_default())
                     .fill_glyphs(glyphs.map(|g| vello_cpu::Glyph {
                         id: g.id,
-                        x: g.x,
+                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
                         y: g.y,
                     }));
             }
@@ -246,7 +292,7 @@ impl PaintScene for VelloCpuScenePainter {
                     .glyph_transform(glyph_transform.unwrap_or_default())
                     .stroke_glyphs(glyphs.map(|g| vello_cpu::Glyph {
                         id: g.id,
-                        x: g.x,
+                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
                         y: g.y,
                     }));
             }
@@ -420,5 +466,48 @@ mod clip_rule_tests {
     fn scene_replay_preserves_clip_rules() {
         assert_pixels(false, true);
         assert_pixels(true, true);
+    }
+}
+
+#[cfg(test)]
+mod glyph_origin_snap_tests {
+    use super::GlyphOriginSnap;
+    use kurbo::Affine;
+
+    fn snapped_device_x(transform: Affine, font_size: f32, x: f32) -> f64 {
+        let snap = GlyphOriginSnap::core_graphics(transform, font_size).unwrap();
+        transform.as_coeffs()[0] * snap.x(x) as f64 + transform.as_coeffs()[4]
+    }
+
+    #[test]
+    fn grid_depends_on_device_ppem() {
+        for (ppem, step) in [
+            (8.0, 0.2),
+            (11.0, 0.25),
+            (12.0, 1.0 / 3.0),
+            (16.0, 1.0 / 3.0),
+            (17.0, 0.5),
+            (33.0, 0.5),
+            (34.0, 1.0),
+            (72.0, 1.0),
+        ] {
+            let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, ppem).unwrap();
+            assert_eq!(snap.positions_per_px, (1.0f64 / step).round(), "{ppem}ppem");
+        }
+    }
+
+    #[test]
+    fn floors_device_x() {
+        assert_eq!(snapped_device_x(Affine::IDENTITY, 11.0, 10.7), 10.5);
+        assert_eq!(snapped_device_x(Affine::IDENTITY, 16.0, 10.3), 10.0);
+        assert_eq!(snapped_device_x(Affine::IDENTITY, 40.0, 10.9), 10.0);
+        // 8px at 2x is 16 device ppem, so a 1/3 device px grid.
+        let transform = Affine::translate((3.0, 0.0)) * Affine::scale(2.0);
+        assert!((snapped_device_x(transform, 8.0, 5.2) - 13.333333).abs() < 1e-4);
+    }
+
+    #[test]
+    fn skips_rotated_runs() {
+        assert!(GlyphOriginSnap::core_graphics(Affine::rotate(0.3), 16.0).is_none());
     }
 }
