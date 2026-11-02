@@ -22,14 +22,18 @@ const FREETYPE_TEXT: bool = !cfg!(any(
     target_os = "windows"
 ));
 
+/// Whether to override Skia's default text contrast and gamma (everywhere except Apple, where
+/// CoreText font smoothing is used instead).
+const CHROME_TEXT_GAMMA: bool = !cfg!(any(target_os = "macos", target_os = "ios"));
+
 /// Surface properties for every surface we draw into.
 ///
-/// With FreeType, Skia's default text contrast (0.5) and sRGB gamma render text noticeably
-/// lighter and blurrier than Chrome and Firefox. Use the contrast and gamma that Chrome builds
-/// Skia with on Linux (`SK_GAMMA_CONTRAST=0.2`, `SK_GAMMA_EXPONENT=1.2`).
+/// With FreeType and DirectWrite, Skia's default text contrast (0.5) and sRGB gamma render text
+/// noticeably lighter and blurrier than Chrome and Firefox. Use the contrast and gamma that Chrome
+/// builds Skia with (`SK_GAMMA_CONTRAST=0.2`, `SK_GAMMA_EXPONENT=1.2`).
 pub(crate) fn surface_props() -> skia_safe::SurfaceProps {
     let props = skia_safe::SurfaceProps::default();
-    if !FREETYPE_TEXT {
+    if !CHROME_TEXT_GAMMA {
         return props;
     }
     skia_safe::SurfaceProps::new_with_text_properties(
