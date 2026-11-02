@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::ImageCache;
 use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
@@ -78,7 +79,7 @@ pub struct ImageManager<'a> {
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
     pub(crate) encoder: &'a mut CommandEncoder,
-    pub(crate) cache: &'a mut FxHashMap<u64, ImageId>,
+    pub(crate) cache: &'a mut ImageCache,
 }
 
 impl<'a> ImageManager<'a> {
@@ -88,7 +89,7 @@ impl<'a> ImageManager<'a> {
         device: &'a Device,
         queue: &'a Queue,
         encoder: &'a mut CommandEncoder,
-        cache: &'a mut FxHashMap<u64, ImageId>,
+        cache: &'a mut ImageCache,
     ) -> Self {
         Self {
             renderer,
@@ -104,8 +105,8 @@ impl<'a> ImageManager<'a> {
         let peniko_id = image.data.id();
 
         // Try to get ImageId from cache first
-        if let Some(atlas_id) = self.cache.get(&peniko_id) {
-            return *atlas_id;
+        if let Some(atlas_id) = self.cache.get(peniko_id) {
+            return atlas_id;
         };
 
         // Convert ImageData to Pixmap
@@ -123,10 +124,19 @@ impl<'a> ImageManager<'a> {
         );
 
         // Store ImageId in cache
-        self.cache.insert(peniko_id, atlas_id);
+        self.cache
+            .insert(peniko_id, atlas_id, image.width, image.height);
 
         // Return ImageId
         atlas_id
+    }
+
+    /// Evict unused images after encoding the frame's rendering, before submitting the encoder.
+    pub fn finish_frame(&mut self) {
+        for id in self.cache.finish_frame() {
+            self.renderer
+                .destroy_image(self.resources, self.encoder, id);
+        }
     }
 }
 

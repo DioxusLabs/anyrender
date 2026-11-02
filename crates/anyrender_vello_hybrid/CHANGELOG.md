@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Evict unused hybrid renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
+
 ### Added
 
 - Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
