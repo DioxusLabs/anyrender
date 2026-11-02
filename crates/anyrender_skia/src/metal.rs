@@ -128,7 +128,7 @@ impl SkiaBackend for MetalBackend {
                 SurfaceOrigin::TopLeft,
                 ColorType::BGRA8888,
                 None,
-                None,
+                Some(&crate::surface_props()),
             )
             .unwrap()
         };

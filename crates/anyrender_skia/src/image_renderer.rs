@@ -29,7 +29,7 @@ impl ImageRenderer for SkiaImageRenderer {
                 AlphaType::Opaque,
                 None,
             ),
-            surface_props: SurfaceProps::default(),
+            surface_props: crate::surface_props(),
             scene_cache: SkiaSceneCache::default(),
         }
     }

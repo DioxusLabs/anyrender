@@ -260,7 +260,7 @@ impl VulkanBackend {
                 &image_info,
                 None,
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
-                None,
+                Some(&crate::surface_props()),
                 None,
                 None,
             );
@@ -309,7 +309,7 @@ impl VulkanBackend {
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
                 skia_safe::ColorType::BGRA8888,
                 None,
-                None,
+                Some(&crate::surface_props()),
             )
             .unwrap()
         }
@@ -353,7 +353,7 @@ impl VulkanBackend {
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
                 skia_safe::ColorType::BGRA8888,
                 None,
-                None,
+                Some(&crate::surface_props()),
             )
             .unwrap()
         };
