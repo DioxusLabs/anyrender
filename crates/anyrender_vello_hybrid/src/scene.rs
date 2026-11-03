@@ -32,8 +32,8 @@ pub(crate) fn supports_glyph_caching(transform: Affine, glyph_transform: Option<
 /// CoreGraphics (and so Safari and other native Apple text) floors each glyph origin's device x
 /// to a grid that depends on the device font size: 1/4px at 9-11ppem, 1/3px at 12-16ppem, 1/2px
 /// at 17-33ppem and whole pixels from 34ppem. Vello positions glyphs continuously, so without
-/// this, stems land up to 1/2px away from native ones. Only x is snapped, and only on Apple
-/// platforms; elsewhere glyphs keep their continuous positions.
+/// this, stems land up to 1/2px away from native ones. Elsewhere, x is rounded to the nearest
+/// 1/4px, as Skia does for horizontal text (and so Chrome off Apple). Only x is snapped.
 ///
 /// CoreGraphics font smoothing also dilates glyphs upwards only: stems grow by the same amount
 /// on both sides in x, but the bottom edge stays on the baseline and the top grows by twice
@@ -44,17 +44,32 @@ pub(crate) struct GlyphOriginSnap {
     scale_x: f64,
     offset_x: f64,
     positions_per_px: f64,
+    /// Skia rounds to the nearest grid position; CoreGraphics floors.
+    round_x: f64,
     lift_y: f64,
 }
 
 impl GlyphOriginSnap {
-    const ENABLED: bool = cfg!(any(target_os = "macos", target_os = "ios"));
-
     pub(crate) fn new(transform: Affine, font_size: f32, embolden: kurbo::Vec2) -> Option<Self> {
-        if !Self::ENABLED {
+        if cfg!(any(target_os = "macos", target_os = "ios")) {
+            Self::core_graphics(transform, font_size, embolden)
+        } else {
+            Self::skia(transform)
+        }
+    }
+
+    fn skia(transform: Affine) -> Option<Self> {
+        let [a, b, c, _, e, _] = transform.as_coeffs();
+        if b != 0.0 || c != 0.0 || a <= 0.0 {
             return None;
         }
-        Self::core_graphics(transform, font_size, embolden)
+        Some(Self {
+            scale_x: a,
+            offset_x: e,
+            positions_per_px: 4.0,
+            round_x: 0.5,
+            lift_y: 0.0,
+        })
     }
 
     fn core_graphics(transform: Affine, font_size: f32, embolden: kurbo::Vec2) -> Option<Self> {
@@ -68,6 +83,7 @@ impl GlyphOriginSnap {
             offset_x: e,
             // CoreGraphics' grid gets coarser as glyphs grow: n = ceil(100 / (3 * ppem)), at most 5.
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
+            round_x: 0.0,
             // The embolden amount is in device pixels; device y points down.
             lift_y: embolden.y / d,
         })
@@ -75,7 +91,8 @@ impl GlyphOriginSnap {
 
     pub(crate) fn x(self, x: f32) -> f32 {
         let device_x = self.scale_x * x as f64 + self.offset_x;
-        let snapped = (device_x * self.positions_per_px).floor() / self.positions_per_px;
+        let snapped =
+            (device_x * self.positions_per_px + self.round_x).floor() / self.positions_per_px;
         ((snapped - self.offset_x) / self.scale_x) as f32
     }
 
@@ -487,6 +504,20 @@ mod glyph_origin_snap_tests {
         // 8px at 2x is 16 device ppem, so a 1/3 device px grid.
         let transform = Affine::translate((3.0, 0.0)) * Affine::scale(2.0);
         assert!((snapped_device_x(transform, 8.0, 5.2) - 13.333333).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rounds_device_x_to_quarter_px_for_skia() {
+        let device_x = |transform: Affine, x: f32| {
+            let snap = GlyphOriginSnap::skia(transform).unwrap();
+            transform.as_coeffs()[0] * snap.x(x) as f64 + transform.as_coeffs()[4]
+        };
+        assert_eq!(device_x(Affine::IDENTITY, 10.1), 10.0);
+        assert_eq!(device_x(Affine::IDENTITY, 10.2), 10.25);
+        assert_eq!(device_x(Affine::IDENTITY, 10.9), 11.0);
+        let transform = Affine::translate((3.0, 0.0)) * Affine::scale(2.0);
+        assert_eq!(device_x(transform, 5.2), 13.5);
+        assert!(GlyphOriginSnap::skia(Affine::rotate(0.5)).is_none());
     }
 
     #[test]
