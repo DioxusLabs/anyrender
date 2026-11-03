@@ -239,6 +239,26 @@ impl<'s> SurfaceRenderer<'s> {
     fn configure(&self) {
         self.surface
             .configure(&self.device_handle.device, &self.config);
+        #[cfg(target_vendor = "apple")]
+        self.tag_metal_layer_as_srgb();
+    }
+
+    /// wgpu leaves the `CAMetalLayer` colorspace unset for `SurfaceColorSpace::Srgb`,
+    /// so macOS shows the sRGB values we render unconverted in the display's native
+    /// space (Display P3 on most Macs), oversaturating them compared to browsers.
+    #[cfg(target_vendor = "apple")]
+    fn tag_metal_layer_as_srgb(&self) {
+        use objc2_core_graphics::{CGColorSpace, kCGColorSpaceSRGB};
+
+        // SAFETY: the hal surface is only used to set a property on its layer.
+        let Some(hal_surface) = (unsafe { self.surface.as_hal::<wgpu::hal::api::Metal>() }) else {
+            return;
+        };
+        let colorspace = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
+        hal_surface
+            .render_layer()
+            .lock()
+            .setColorspace(colorspace.as_deref());
     }
 
     pub fn clear_surface_texture(&mut self) {
