@@ -2,7 +2,7 @@
 
 use crate::{NonUniformRoundedRect, PaintScene};
 use kurbo::{Affine, BezPath, Shape, Vec2};
-use peniko::{BlendMode, Color, Compose, Fill, Mix};
+use peniko::{Color, Fill};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -85,49 +85,6 @@ impl BoxShadowGeometry {
 
     pub fn is_inset(&self) -> bool {
         self.kind == BoxShadowKind::Inset
-    }
-
-    /// Draw a blurred inset shadow using compositing layers, for backends that can't paint the
-    /// inverse of a blurred rounded rect: fill the box with `brush`, then cut out the blurred hole
-    /// with [`Compose::DestOut`], drawn as an unclipped outset shadow.
-    pub fn draw_inset_with_layers(
-        &self,
-        scene: &mut impl PaintScene,
-        transform: Affine,
-        brush: Color,
-    ) {
-        // An isolated layer (not a clip, which may not be isolated) so that the `DestOut` layer
-        // only cuts the hole out of the shadow, not out of what is underneath it.
-        scene.push_layer(
-            Fill::NonZero,
-            Mix::Normal,
-            1.0,
-            transform,
-            &self.box_shape,
-            None,
-            None,
-        );
-        scene.fill(Fill::NonZero, transform, brush, None, &self.box_shape);
-        scene.push_layer(
-            Fill::NonZero,
-            BlendMode::new(Mix::Normal, Compose::DestOut),
-            1.0,
-            transform,
-            &self.box_shape,
-            None,
-            None,
-        );
-        scene.draw_box_shadow(
-            transform,
-            &self.shadow,
-            Vec2::ZERO,
-            0.0,
-            self.std_dev,
-            Color::BLACK,
-            BoxShadowKind::Outset { clip_to_box: false },
-        );
-        scene.pop_layer();
-        scene.pop_layer();
     }
 
     /// Whether the shadow must be clipped to [`Self::area`].

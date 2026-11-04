@@ -9,10 +9,10 @@ use rustc_hash::FxHashMap;
 use vello_common::{
     TextureId,
     geometry::RectU16,
-    paint::{ImageId, ImageSource, PaintType},
+    paint::{ImageId, ImageSource, PaintType, TextureRegion},
 };
 use vello_gpu::{Renderer, Resources};
-use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
+use wgpu::{CommandEncoder, Texture, TextureView, TextureViewDescriptor};
 use wgpu_context::DeviceHandle;
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
@@ -130,12 +130,12 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
                 PaintType::Image(ImageBrush {
                     image: ImageSource::external_texture(
                         TextureId(brush.image.into_ffi()),
-                        RectU16 {
+                        TextureRegion::Rect(RectU16 {
                             x0: 0,
                             y0: 0,
                             x1: texture.width().min(u16::MAX as u32) as u16,
                             y1: texture.height().min(u16::MAX as u32) as u16,
-                        },
+                        }),
                         true,
                     ),
                     sampler: brush.sampler,
@@ -152,8 +152,6 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
 pub struct ImageManager<'a> {
     pub(crate) renderer: &'a mut Renderer,
     pub(crate) resources: &'a mut Resources,
-    pub(crate) device: &'a Device,
-    pub(crate) queue: &'a Queue,
     pub(crate) encoder: &'a mut CommandEncoder,
     pub(crate) cache: &'a mut ImageCache,
 }
@@ -162,16 +160,12 @@ impl<'a> ImageManager<'a> {
     pub fn new(
         renderer: &'a mut Renderer,
         resources: &'a mut Resources,
-        device: &'a Device,
-        queue: &'a Queue,
         encoder: &'a mut CommandEncoder,
         cache: &'a mut ImageCache,
     ) -> Self {
         Self {
             renderer,
             resources,
-            device,
-            queue,
             encoder,
             cache,
         }
@@ -194,13 +188,9 @@ impl<'a> ImageManager<'a> {
         };
 
         // Upload Pixamp
-        let atlas_id = self.renderer.upload_image(
-            self.resources,
-            self.device,
-            self.queue,
-            self.encoder,
-            &pixmap,
-        );
+        let atlas_id = self
+            .renderer
+            .upload_image(self.resources, self.encoder, &pixmap);
 
         // Store ImageId in cache
         self.cache
@@ -479,25 +469,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             }
             return;
         }
-        if geometry.is_inset() {
-            geometry.draw_inset_with_layers(self, transform, color);
-            return;
-        }
-        // A single fill, so a non-isolated clip anti-aliases the clip edge only once.
-        let clip = geometry.needs_clip();
-        if clip {
-            self.scene.push_clip_path(&geometry.area);
-        }
         // TODO: draw shadows with matching individual radii instead of averaging them
-        self.scene.fill_blurred_rounded_rect(
+        self.scene.fill_blurred_rounded_rect_in(
+            &geometry.area,
             &geometry.shadow.rect,
             geometry.shadow.average_radius() as f32,
             geometry.std_dev as f32,
-            false,
+            geometry.is_inset(),
         );
-        if clip {
-            self.scene.pop_clip();
-        }
     }
 }
 
