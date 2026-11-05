@@ -41,7 +41,7 @@
 
 #![allow(clippy::collapsible_if)]
 
-use kurbo::{Affine, Rect, Shape, Stroke};
+use kurbo::{Affine, Rect, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
@@ -52,6 +52,10 @@ pub mod wasm_send_sync;
 pub use wasm_send_sync::*;
 pub mod types;
 pub use types::*;
+mod shapes;
+pub use shapes::*;
+mod box_shadow;
+pub use box_shadow::*;
 mod null_backend;
 pub use null_backend::*;
 pub mod recording;
@@ -248,14 +252,26 @@ pub trait PaintScene: RenderContext {
         glyphs: impl Iterator<Item = Glyph> + Clone,
     );
 
-    /// Draw a rounded rectangle blurred with a gaussian filter.
+    /// Draw a box shadow cast by `box_shape`, as specified by CSS `box-shadow`.
+    ///
+    /// The shape of the shadow is `box_shape` grown by `spread` (or for an inset shadow, shrunk by
+    /// `spread`), with its corner radii adjusted as specified by CSS (see
+    /// [`NonUniformRoundedRect::spread`]), and translated by `offset`. It is then blurred by a
+    /// gaussian filter with a standard deviation of `std_dev`. A CSS blur radius `b` corresponds
+    /// to a `std_dev` of `b / 2`.
+    ///
+    /// `kind` determines where the shadow is painted: see [`BoxShadowKind`]. Everything is
+    /// transformed by `transform`.
+    #[allow(clippy::too_many_arguments)]
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
-        rect: Rect,
-        brush: Color,
-        radius: f64,
+        box_shape: &NonUniformRoundedRect,
+        offset: Vec2,
+        spread: f64,
         std_dev: f64,
+        brush: Color,
+        kind: BoxShadowKind,
     );
 
     // --- Provided methods
@@ -324,10 +340,12 @@ pub trait PaintScene: RenderContext {
                 ),
                 RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
                     scene_transform * cmd.transform,
-                    cmd.rect,
-                    cmd.brush,
-                    cmd.radius,
+                    &cmd.box_shape,
+                    cmd.offset,
+                    cmd.spread,
                     cmd.std_dev,
+                    cmd.brush,
+                    cmd.kind,
                 ),
             }
         }
