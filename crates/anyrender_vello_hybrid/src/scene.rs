@@ -84,8 +84,8 @@ impl GlyphOriginSnap {
             // CoreGraphics' grid gets coarser as glyphs grow: n = ceil(100 / (3 * ppem)), at most 5.
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
             round_x: 0.0,
-            // The embolden amount is in device pixels; device y points down.
-            lift_y: embolden.y / d,
+            // glifo scales the embolden amount with the transform, so it is in user units.
+            lift_y: embolden.y * d.signum(),
         })
     }
 
@@ -525,9 +525,9 @@ mod glyph_origin_snap_tests {
         let embolden = kurbo::Vec2::new(0.1, 0.3);
         let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, 16.0, embolden).unwrap();
         assert!((snap.y(10.0) - 9.7).abs() < 1e-6);
-        // At 2x, a 0.3 device px lift is 0.15 user units.
+        // The lift is in user units, so at 2x it is 0.6 device px.
         let snap = GlyphOriginSnap::core_graphics(Affine::scale(2.0), 8.0, embolden).unwrap();
-        assert!((snap.y(10.0) - 9.85).abs() < 1e-6);
+        assert!((snap.y(10.0) - 9.7).abs() < 1e-6);
         let snap = GlyphOriginSnap::core_graphics(Affine::IDENTITY, 16.0, kurbo::Vec2::ZERO);
         assert_eq!(snap.unwrap().y(10.0), 10.0);
     }

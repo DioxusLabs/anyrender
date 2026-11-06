@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
+  amount again, matching glifo's emboldening, which scales with the transform.
+
 ### Added
 
 - Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
