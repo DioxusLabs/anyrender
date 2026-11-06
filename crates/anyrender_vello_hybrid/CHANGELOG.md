@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
+  amount again, matching glifo's emboldening, which scales with the transform.
 - Free hybrid renderer images when their source image data is dropped.
 - Evict unused hybrid renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
 
