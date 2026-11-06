@@ -33,7 +33,9 @@ pub(crate) fn supports_glyph_caching(transform: Affine, glyph_transform: Option<
 /// to a grid that depends on the device font size: 1/4px at 9-11ppem, 1/3px at 12-16ppem, 1/2px
 /// at 17-33ppem and whole pixels from 34ppem. Vello positions glyphs continuously, so without
 /// this, stems land up to 1/2px away from native ones. Elsewhere, x is rounded to the nearest
-/// 1/4px, as Skia does for horizontal text (and so Chrome off Apple). Only x is snapped.
+/// 1/4px, as Skia does for horizontal text (and so Chrome off Apple). On Apple, CoreGraphics
+/// also floors the device y of the baseline to a whole pixel (y up, so the baseline moves down
+/// in Vello's y-down device space); off Apple, y is not snapped.
 ///
 /// CoreGraphics font smoothing also dilates glyphs upwards only: stems grow by the same amount
 /// on both sides in x, but the bottom edge stays on the baseline and the top grows by twice
@@ -46,6 +48,8 @@ pub(crate) struct GlyphOriginSnap {
     positions_per_px: f64,
     /// Skia rounds to the nearest grid position; CoreGraphics floors.
     round_x: f64,
+    /// The transform's y scale and offset when device y is snapped, as on Apple.
+    snap_y: Option<(f64, f64)>,
     lift_y: f64,
 }
 
@@ -68,12 +72,13 @@ impl GlyphOriginSnap {
             offset_x: e,
             positions_per_px: 4.0,
             round_x: 0.5,
+            snap_y: None,
             lift_y: 0.0,
         })
     }
 
     fn core_graphics(transform: Affine, font_size: f32, embolden: kurbo::Vec2) -> Option<Self> {
-        let [a, b, c, d, e, _] = transform.as_coeffs();
+        let [a, b, c, d, e, f] = transform.as_coeffs();
         let ppem = font_size as f64 * d.abs();
         if b != 0.0 || c != 0.0 || a <= 0.0 || !ppem.is_finite() || ppem <= 0.0 {
             return None;
@@ -84,6 +89,7 @@ impl GlyphOriginSnap {
             // CoreGraphics' grid gets coarser as glyphs grow: n = ceil(100 / (3 * ppem)), at most 5.
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
             round_x: 0.0,
+            snap_y: Some((d, f)),
             // glifo scales the embolden amount with the transform, so it is in user units.
             lift_y: embolden.y * d.signum(),
         })
@@ -97,7 +103,13 @@ impl GlyphOriginSnap {
     }
 
     pub(crate) fn y(self, y: f32) -> f32 {
-        (y as f64 - self.lift_y) as f32
+        let mut y = y as f64;
+        if let Some((scale_y, offset_y)) = self.snap_y {
+            // CoreGraphics tolerates about 1/1000 device px before moving to the next pixel.
+            let snapped = (scale_y * y + offset_y - 1.0 / 1024.0).ceil();
+            y = (snapped - offset_y) / scale_y;
+        }
+        (y - self.lift_y) as f32
     }
 }
 
@@ -518,6 +530,24 @@ mod glyph_origin_snap_tests {
         let transform = Affine::translate((3.0, 0.0)) * Affine::scale(2.0);
         assert_eq!(device_x(transform, 5.2), 13.5);
         assert!(GlyphOriginSnap::skia(Affine::rotate(0.5)).is_none());
+    }
+
+    #[test]
+    fn snaps_device_y_down_to_whole_px() {
+        let device_y = |transform: Affine, y: f32| {
+            let snap = GlyphOriginSnap::core_graphics(transform, 16.0, kurbo::Vec2::ZERO).unwrap();
+            transform.as_coeffs()[3] * snap.y(y) as f64 + transform.as_coeffs()[5]
+        };
+        assert_eq!(device_y(Affine::IDENTITY, 10.0), 10.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.0005), 10.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.1), 11.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.9), 11.0);
+        // At scale(1.5), a baseline at y = 7 is 10.5 device px down.
+        assert!((device_y(Affine::scale(1.5), 7.0) - 11.0).abs() < 1e-6);
+        let transform = Affine::translate((0.0, 0.25)) * Affine::scale(2.0);
+        assert!((device_y(transform, 5.0) - 11.0).abs() < 1e-6);
+        let snap = GlyphOriginSnap::skia(Affine::IDENTITY).unwrap();
+        assert_eq!(snap.y(10.3), 10.3);
     }
 
     #[test]
