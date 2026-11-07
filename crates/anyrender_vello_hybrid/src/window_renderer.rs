@@ -6,7 +6,7 @@ use futures_channel::oneshot;
 use peniko::Color;
 use rustc_hash::FxHashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use vello_common::TextureId;
 use vello_gpu::{
     ClearSettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
@@ -35,11 +35,61 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 }
 
 struct ActiveRenderState {
-    renderer: VelloHybridRenderer,
-    resources: Resources,
+    device_state: Arc<Mutex<DeviceState>>,
     depth_texture_view: TextureView,
     texture_bindings: FxHashMap<ResourceId, TextureView>,
     render_surface: SurfaceRenderer<'static>,
+}
+
+/// Renderer state for one device, shared by every window that renders with that device.
+struct DeviceState {
+    renderer: VelloHybridRenderer,
+    /// Image and glyph atlases
+    resources: Resources,
+    /// Images uploaded to `resources`
+    cached_images: ImageCache,
+}
+
+struct VelloHybridContextInner {
+    wgpu_context: WGPUContext,
+    devices: Vec<(wgpu::Device, Arc<Mutex<DeviceState>>)>,
+}
+
+/// GPU state that can be shared by several [`VelloHybridWindowRenderer`]s: a wgpu instance,
+/// its device pool and, per device, one renderer with its image and glyph atlases.
+///
+/// Pass clones of the same context to [`VelloHybridWindowRenderer::with_options_and_context`]
+/// so that windows reuse a device and renderer instead of each creating their own. Cloning is
+/// cheap: clones refer to the same context.
+///
+/// The renderer for a device is created with the `render_settings` of the first window that
+/// uses that device.
+///
+/// On wasm, device creation is asynchronous, so windows resumed in the same tick may still
+/// create a device each.
+#[derive(Clone)]
+pub struct VelloHybridContext(Arc<Mutex<VelloHybridContextInner>>);
+
+impl VelloHybridContext {
+    /// Creates a context with a new wgpu instance, using the features and limits from `options`.
+    pub fn new(options: &VelloHybridRendererOptions) -> Self {
+        Self::from_wgpu_context(build_wgpu_context(options))
+    }
+
+    /// Creates a context from an existing [`WGPUContext`], for example one made with
+    /// [`WGPUContext::from_device_handle`] to render with a device the application owns.
+    // wgpu types are not `Send` on wasm, which is single-threaded
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
+    pub fn from_wgpu_context(wgpu_context: WGPUContext) -> Self {
+        Self(Arc::new(Mutex::new(VelloHybridContextInner {
+            wgpu_context,
+            devices: Vec::new(),
+        })))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, VelloHybridContextInner> {
+        self.0.lock().unwrap()
+    }
 }
 
 /// Result of a successful asynchronous resume; both the active state and the
@@ -170,10 +220,9 @@ pub struct VelloHybridWindowRenderer {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
-    wgpu_context: WGPUContext,
+    context: VelloHybridContext,
     scene: VelloHybridScene,
     config: VelloHybridRendererOptions,
-    cached_images: ImageCache,
 }
 impl VelloHybridWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -183,15 +232,24 @@ impl VelloHybridWindowRenderer {
 
     pub fn with_options(config: impl Into<VelloHybridRendererOptions>) -> Self {
         let config = config.into();
+        let context = VelloHybridContext::new(&config);
+        Self::with_options_and_context(config, context)
+    }
+
+    /// Creates a renderer that gets its device and renderer from `context`, so that
+    /// several windows can share them.
+    pub fn with_options_and_context(
+        config: impl Into<VelloHybridRendererOptions>,
+        context: VelloHybridContext,
+    ) -> Self {
+        let config = config.into();
         let render_settings = config.render_settings;
-        let wgpu_context = build_wgpu_context(&config);
         Self {
             render_state: RenderState::Suspended,
             config,
-            wgpu_context,
+            context,
             window_handle: None,
             scene: VelloHybridScene::new_with(0, 0, render_settings.level),
-            cached_images: ImageCache::default(),
         }
     }
 
@@ -279,6 +337,8 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         matches!(self.render_state, RenderState::Pending { .. })
     }
 
+    // wgpu types are not `Send` on wasm, which is single-threaded
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
     fn resume<F: FnOnce() + 'static>(
         &mut self,
         window_handle: Arc<dyn WindowHandle>,
@@ -305,13 +365,15 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let render_settings = self.config.render_settings;
         self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings.level);
 
-        let surface = self
+        let context = self.context.clone();
+        let mut inner = context.lock();
+        let surface = inner
             .wgpu_context
             .create_surface(window_handle)
             .expect("Error creating surface");
-        let instance = self.wgpu_context.instance.clone();
-        let extra_features = self.wgpu_context.extra_features();
-        let override_limits = self.wgpu_context.override_limits();
+        let instance = inner.wgpu_context.instance.clone();
+        let extra_features = inner.wgpu_context.extra_features();
+        let override_limits = inner.wgpu_context.override_limits();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -329,21 +391,29 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             }
         };
         let desired_maximum_frame_latency = self.config.desired_maximum_frame_latency;
-        let existing_device_handle = self
+        let existing_device_handle = inner
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
+        drop(inner);
 
         spawn_init(async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
-                None => DeviceHandle::new_from_compatible_surface(
-                    instance,
-                    Some(&surface),
-                    extra_features,
-                    override_limits,
-                )
-                .await
-                .expect("Error creating DeviceHandle"),
+                None => {
+                    let device_handle = DeviceHandle::new_from_compatible_surface(
+                        instance,
+                        Some(&surface),
+                        extra_features,
+                        override_limits,
+                    )
+                    .await
+                    .expect("Error creating DeviceHandle");
+                    context
+                        .lock()
+                        .wgpu_context
+                        .add_device_handle(device_handle.clone());
+                    device_handle
+                }
             };
 
             let adapter = &device_handle.adapter;
@@ -416,15 +486,43 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             )
             .expect("Error creating SurfaceRenderer");
 
-            let (renderer, resources) = VelloHybridRenderer::new_with(
-                render_surface.device(),
-                &RenderTargetConfig {
-                    format: DEFAULT_TEXTURE_FORMAT,
-                    width: width as u16,
-                    height: height as u16,
-                },
-                render_settings,
-            );
+            let device = render_surface.device();
+            let mut inner = context.lock();
+            let existing_device_state = inner
+                .devices
+                .iter()
+                .find(|(d, _)| d == device)
+                .map(|(_, state)| state.clone());
+            let device_state = existing_device_state.unwrap_or_else(|| {
+                let (renderer, resources) = VelloHybridRenderer::new_with(
+                    device,
+                    &RenderTargetConfig {
+                        format: DEFAULT_TEXTURE_FORMAT,
+                        width: width as u16,
+                        height: height as u16,
+                    },
+                    render_settings,
+                );
+                let max = device
+                    .limits()
+                    .max_texture_dimension_2d
+                    .min(u16::MAX as u32) as u16;
+                let (atlas_width, atlas_height) = render_settings
+                    .memory_settings
+                    .image_atlas_config
+                    .atlas_size;
+                let mut cached_images = ImageCache::default();
+                cached_images
+                    .set_max_image_size((atlas_width.clamp(1, max), atlas_height.clamp(1, max)));
+                let state = Arc::new(Mutex::new(DeviceState {
+                    renderer,
+                    resources,
+                    cached_images,
+                }));
+                inner.devices.push((device.clone(), state.clone()));
+                state
+            });
+            drop(inner);
             let depth_texture_view = VelloHybridRenderer::create_depth_texture_view(
                 render_surface.device(),
                 &RenderSize {
@@ -435,8 +533,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
-                    renderer,
-                    resources,
+                    device_state,
                     depth_texture_view,
                     render_surface,
                     texture_bindings: FxHashMap::default(),
@@ -452,23 +549,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             RenderState::Suspended => false,
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
-                    self.cached_images.clear();
-                    let max = active
-                        .render_surface
-                        .device()
-                        .limits()
-                        .max_texture_dimension_2d
-                        .min(u16::MAX as u32) as u16;
-                    let (width, height) = self
-                        .config
-                        .render_settings
-                        .memory_settings
-                        .image_atlas_config
-                        .atlas_size;
-                    self.cached_images
-                        .set_max_image_size((width.clamp(1, max), height.clamp(1, max)));
-                    let device_handle = active.render_surface.device_handle.clone();
-                    self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
                     true
                 }
@@ -479,7 +559,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
-        self.cached_images.clear();
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
@@ -508,6 +587,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         };
 
         let render_surface = &mut state.render_surface;
+        let mut device_state = state.device_state.lock().unwrap();
+        let DeviceState {
+            renderer,
+            resources,
+            cached_images,
+        } = &mut *device_state;
 
         debug_timer!(timer, feature = "log_frame_times");
 
@@ -519,12 +604,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 });
 
         let image_manager = ImageManager {
-            renderer: &mut state.renderer,
-            resources: &mut state.resources,
+            renderer,
+            resources,
             device: render_surface.device(),
             queue: render_surface.queue(),
             encoder: &mut encoder,
-            cache: &mut self.cached_images,
+            cache: cached_images,
         };
 
         let mut scene_painter = VelloHybridScenePainter {
@@ -558,12 +643,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             render_surface.clear_surface_texture();
             self.scene.reset();
             ImageManager::new(
-                &mut state.renderer,
-                &mut state.resources,
+                renderer,
+                resources,
                 render_surface.device(),
                 render_surface.queue(),
                 &mut encoder,
-                &mut self.cached_images,
+                cached_images,
             )
             .finish_frame();
             render_surface.queue().submit([encoder.finish()]);
@@ -576,11 +661,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view.clone());
         }
 
-        state
-            .renderer
+        renderer
             .render(
                 &self.scene,
-                &mut state.resources,
+                resources,
                 render_surface.device(),
                 render_surface.queue(),
                 &mut encoder,
@@ -595,12 +679,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             )
             .expect("failed to render to texture");
         ImageManager::new(
-            &mut state.renderer,
-            &mut state.resources,
+            renderer,
+            resources,
             render_surface.device(),
             render_surface.queue(),
             &mut encoder,
-            &mut self.cached_images,
+            cached_images,
         )
         .finish_frame();
         render_surface.queue().submit([encoder.finish()]);
@@ -626,3 +710,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         self.scene.reset();
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<VelloHybridWindowRenderer>();
+    assert_send::<VelloHybridContext>();
+};

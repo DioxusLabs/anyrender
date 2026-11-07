@@ -16,3 +16,4 @@ pub use webgl_scene::*;
 pub use window_renderer::*;
 
 pub use wgpu;
+pub use wgpu_context::{DeviceHandle, WGPUContext};

@@ -137,6 +137,35 @@ impl WGPUContext {
         }
     }
 
+    /// Creates a context that renders with an existing device.
+    ///
+    /// The context uses the instance of `device_handle`, and any device it creates later
+    /// (for a surface `device_handle` is not compatible with) gets the same features and limits.
+    pub fn from_device_handle(device_handle: DeviceHandle) -> Self {
+        Self {
+            instance: device_handle.instance.clone(),
+            extra_features: Some(device_handle.device.features()),
+            override_limits: Some(device_handle.device.limits()),
+            device_pool: vec![device_handle],
+        }
+    }
+
+    /// Adds a device handle to the device pool (if it is not already there) and returns its index.
+    ///
+    /// Register a device as soon as it is created, so that renderers resumed before it
+    /// has finished initialising can find it and reuse it.
+    pub fn add_device_handle(&mut self, device_handle: DeviceHandle) -> usize {
+        if let Some(idx) = self
+            .device_pool
+            .iter()
+            .position(|d| d.device == device_handle.device)
+        {
+            return idx;
+        }
+        self.device_pool.push(device_handle);
+        self.device_pool.len() - 1
+    }
+
     pub fn extra_features(&self) -> Option<Features> {
         self.extra_features
     }
@@ -244,7 +273,6 @@ impl WGPUContext {
         compatible_surface: Option<&Surface<'_>>,
     ) -> Result<usize, WgpuContextError> {
         let device_handle = self.create_device_handle(compatible_surface).await?;
-        self.device_pool.push(device_handle);
-        Ok(self.device_pool.len() - 1)
+        Ok(self.add_device_handle(device_handle))
     }
 }

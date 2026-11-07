@@ -6,7 +6,7 @@ use futures_channel::oneshot;
 use peniko::{Color, ImageData};
 use rustc_hash::FxHashMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use vello::{
     AaConfig, AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions,
     Scene as VelloScene,
@@ -37,8 +37,51 @@ fn spawn_init<F: Future<Output = ()>>(f: F) {
 }
 
 struct ActiveRenderState {
-    renderer: VelloRenderer,
+    renderer: Arc<Mutex<VelloRenderer>>,
     render_surface: SurfaceRenderer<'static>,
+}
+
+struct VelloContextInner {
+    wgpu_context: WGPUContext,
+    /// One Vello renderer (shaders, pipelines, buffers and image atlas) per device
+    renderers: Vec<(wgpu::Device, Arc<Mutex<VelloRenderer>>)>,
+}
+
+/// GPU state that can be shared by several [`VelloWindowRenderer`]s: a wgpu instance, its
+/// device pool and one Vello renderer per device.
+///
+/// Pass clones of the same context to [`VelloWindowRenderer::with_options_and_context`] so
+/// that windows reuse a device and renderer instead of each creating their own. Cloning is
+/// cheap: clones refer to the same context.
+///
+/// The renderer for a device is created with the options of the first window that uses that
+/// device (e.g. its `pipeline_cache`).
+///
+/// On wasm, device creation is asynchronous, so windows resumed in the same tick may still
+/// create a device each.
+#[derive(Clone)]
+pub struct VelloContext(Arc<Mutex<VelloContextInner>>);
+
+impl VelloContext {
+    /// Creates a context with a new wgpu instance, using the features and limits from `options`.
+    pub fn new(options: &VelloRendererOptions) -> Self {
+        Self::from_wgpu_context(build_wgpu_context(options))
+    }
+
+    /// Creates a context from an existing [`WGPUContext`], for example one made with
+    /// [`WGPUContext::from_device_handle`] to render with a device the application owns.
+    // wgpu types are not `Send` on wasm, which is single-threaded
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
+    pub fn from_wgpu_context(wgpu_context: WGPUContext) -> Self {
+        Self(Arc::new(Mutex::new(VelloContextInner {
+            wgpu_context,
+            renderers: Vec::new(),
+        })))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, VelloContextInner> {
+        self.0.lock().unwrap()
+    }
 }
 
 /// Result of a successful asynchronous resume; both the active state and the
@@ -161,7 +204,7 @@ pub struct VelloWindowRenderer {
     render_state: RenderState,
     window_handle: Option<Arc<dyn WindowHandle>>,
 
-    wgpu_context: WGPUContext,
+    context: VelloContext,
     scene: VelloScene,
     config: VelloRendererOptions,
 
@@ -177,9 +220,20 @@ impl VelloWindowRenderer {
 
     pub fn with_options(config: impl Into<VelloRendererOptions>) -> Self {
         let config = config.into();
+        let context = VelloContext::new(&config);
+        Self::with_options_and_context(config, context)
+    }
+
+    /// Creates a renderer that gets its device and Vello renderer from `context`, so that
+    /// several windows can share them.
+    pub fn with_options_and_context(
+        config: impl Into<VelloRendererOptions>,
+        context: VelloContext,
+    ) -> Self {
+        let config = config.into();
         Self {
             render_state: RenderState::Suspended,
-            wgpu_context: build_wgpu_context(&config),
+            context,
             config,
             window_handle: None,
             scene: VelloScene::new(),
@@ -206,8 +260,10 @@ impl RenderContext for VelloWindowRenderer {
 
         if let Ok(texture) = resource.downcast::<Texture>() {
             let id = ResourceId::new();
-            self.texture_handles
-                .insert(id, active.renderer.register_texture(*texture));
+            self.texture_handles.insert(
+                id,
+                active.renderer.lock().unwrap().register_texture(*texture),
+            );
             Ok(id)
         } else {
             Err(anyrender::RegisterResourceErrorKind::UnsupportedResourceKind.into())
@@ -220,7 +276,7 @@ impl RenderContext for VelloWindowRenderer {
         };
 
         if let Some(handle) = self.texture_handles.remove(&resource_id) {
-            active.renderer.unregister_texture(handle);
+            active.renderer.lock().unwrap().unregister_texture(handle);
         }
     }
 
@@ -255,6 +311,8 @@ impl WindowRenderer for VelloWindowRenderer {
         matches!(self.render_state, RenderState::Pending { .. })
     }
 
+    // wgpu types are not `Send` on wasm, which is single-threaded
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
     fn resume<F: FnOnce() + 'static>(
         &mut self,
         window_handle: Arc<dyn WindowHandle>,
@@ -276,13 +334,15 @@ impl WindowRenderer for VelloWindowRenderer {
         self.render_state = RenderState::Pending { receiver };
         self.window_handle = Some(window_handle.clone());
 
-        let surface = self
+        let context = self.context.clone();
+        let mut inner = context.lock();
+        let surface = inner
             .wgpu_context
             .create_surface(window_handle)
             .expect("Error creating surface");
-        let instance = self.wgpu_context.instance.clone();
-        let extra_features = self.wgpu_context.extra_features();
-        let override_limits = self.wgpu_context.override_limits();
+        let instance = inner.wgpu_context.instance.clone();
+        let extra_features = inner.wgpu_context.extra_features();
+        let override_limits = inner.wgpu_context.override_limits();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -301,21 +361,29 @@ impl WindowRenderer for VelloWindowRenderer {
         };
         let pipeline_cache = self.config.pipeline_cache.clone();
         let desired_maximum_frame_latency = self.config.desired_maximum_frame_latency;
-        let existing_device_handle = self
+        let existing_device_handle = inner
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
+        drop(inner);
 
         spawn_init(async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
-                None => DeviceHandle::new_from_compatible_surface(
-                    instance,
-                    Some(&surface),
-                    extra_features,
-                    override_limits,
-                )
-                .await
-                .expect("Error creating DeviceHandle"),
+                None => {
+                    let device_handle = DeviceHandle::new_from_compatible_surface(
+                        instance,
+                        Some(&surface),
+                        extra_features,
+                        override_limits,
+                    )
+                    .await
+                    .expect("Error creating DeviceHandle");
+                    context
+                        .lock()
+                        .wgpu_context
+                        .add_device_handle(device_handle.clone());
+                    device_handle
+                }
             };
 
             let adapter = &device_handle.adapter;
@@ -382,16 +450,30 @@ impl WindowRenderer for VelloWindowRenderer {
             )
             .expect("Error creating SurfaceRenderer");
 
-            let renderer = VelloRenderer::new(
-                render_surface.device(),
-                RendererOptions {
-                    antialiasing_support: AaSupport::all(),
-                    use_cpu: false,
-                    num_init_threads: DEFAULT_THREADS,
-                    pipeline_cache,
-                },
-            )
-            .unwrap();
+            let device = render_surface.device();
+            let mut inner = context.lock();
+            let existing_renderer = inner
+                .renderers
+                .iter()
+                .find(|(d, _)| d == device)
+                .map(|(_, renderer)| renderer.clone());
+            let renderer = existing_renderer.unwrap_or_else(|| {
+                let renderer = Arc::new(Mutex::new(
+                    VelloRenderer::new(
+                        device,
+                        RendererOptions {
+                            antialiasing_support: AaSupport::all(),
+                            use_cpu: false,
+                            num_init_threads: DEFAULT_THREADS,
+                            pipeline_cache,
+                        },
+                    )
+                    .unwrap(),
+                ));
+                inner.renderers.push((device.clone(), renderer.clone()));
+                renderer
+            });
+            drop(inner);
 
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
@@ -409,8 +491,6 @@ impl WindowRenderer for VelloWindowRenderer {
             RenderState::Suspended => false,
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
-                    let device_handle = active.render_surface.device_handle.clone();
-                    self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
                     true
                 }
@@ -422,8 +502,9 @@ impl WindowRenderer for VelloWindowRenderer {
     fn suspend(&mut self) {
         if let RenderState::Active(active) = &mut self.render_state {
             // Unregister all textures on suspend
+            let mut renderer = active.renderer.lock().unwrap();
             for (_id, handle) in self.texture_handles.drain() {
-                active.renderer.unregister_texture(handle);
+                renderer.unregister_texture(handle);
             }
         }
         self.render_state = RenderState::Suspended;
@@ -441,13 +522,14 @@ impl WindowRenderer for VelloWindowRenderer {
         };
 
         let render_surface = &mut state.render_surface;
+        let mut renderer = state.renderer.lock().unwrap();
 
         debug_timer!(timer, feature = "log_frame_times");
 
         // Regenerate the vello scene
         draw_fn(&mut VelloScenePainter {
             inner: &mut self.scene,
-            renderer: Some(&mut state.renderer),
+            renderer: Some(&mut renderer),
             device_handle: Some(&render_surface.device_handle),
             texture_handles: Some(&mut self.texture_handles),
         });
@@ -461,11 +543,10 @@ impl WindowRenderer for VelloWindowRenderer {
         };
 
         for handle in self.texture_handles.values() {
-            state.renderer.mark_override_image_dirty(handle);
+            renderer.mark_override_image_dirty(handle);
         }
 
-        state
-            .renderer
+        renderer
             .render_to_texture(
                 render_surface.device(),
                 render_surface.queue(),
@@ -501,3 +582,10 @@ impl WindowRenderer for VelloWindowRenderer {
         self.scene.reset();
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+const _: fn() = || {
+    fn assert_send<T: Send>() {}
+    assert_send::<VelloWindowRenderer>();
+    assert_send::<VelloContext>();
+};
