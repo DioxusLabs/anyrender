@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ImageCache;
+use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
 use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
@@ -14,18 +14,6 @@ use vello_common::{
 use vello_gpu::{Renderer, Resources};
 use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
 use wgpu_context::DeviceHandle;
-
-const DEFAULT_TOLERANCE: f64 = 0.1;
-
-/// Whether a glyph run drawn with the given transforms can use Vello's glyph atlas cache.
-///
-/// Vello only supports caching glyphs that are drawn upright with a uniform scale. It checks
-/// this itself when inserting a glyph into the atlas, but not when looking one up, so a skewed
-/// (e.g. synthetic italic) or rotated run would otherwise be drawn using upright cached glyphs.
-pub(crate) fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) -> bool {
-    let [a, b, c, d, _, _] = (transform * glyph_transform.unwrap_or_default()).as_coeffs();
-    b == 0.0 && c == 0.0 && a == d && a > 0.0
-}
 
 /// Snaps glyph origins to the horizontal subpixel grid of the platform's native text renderer.
 ///
@@ -231,11 +219,6 @@ impl<'a> ImageManager<'a> {
     }
 }
 
-pub(crate) enum LayerKind {
-    Layer,
-    Clip,
-}
-
 pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_gpu::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
@@ -329,7 +312,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let filter = filter.and_then(crate::filters::convert_filter);
+        let filter = filter.and_then(crate::common::convert_filter);
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);

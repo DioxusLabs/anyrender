@@ -9,17 +9,17 @@ use std::future::Future;
 use std::sync::Arc;
 use vello_common::TextureId;
 use vello_gpu::{
-    ClearSettings, RenderSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer,
-    Resources, Scene as VelloHybridScene, TargetInit, TextureBindings,
+    ClearSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer, Resources,
+    Scene as VelloHybridScene, TargetInit, TextureBindings,
 };
 use wgpu::{
-    CommandEncoderDescriptor, CompositeAlphaMode, Features, Limits, PresentMode, Texture,
-    TextureFormat, TextureView, TextureViewDescriptor,
+    CommandEncoderDescriptor, CompositeAlphaMode, Features, PresentMode, Texture, TextureFormat,
+    TextureView, TextureViewDescriptor,
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
 use super::scene::{ImageManager, VelloHybridScenePainter};
-use crate::ImageCache;
+use crate::common::{ImageCache, VelloHybridRendererOptions};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
 /// queue (blocking is not allowed). On native we drive it inline with
@@ -56,113 +56,6 @@ enum RenderState {
         receiver: oneshot::Receiver<InitOutput>,
     },
     Active(ActiveRenderState),
-}
-
-#[derive(Clone)]
-#[non_exhaustive]
-pub struct VelloHybridRendererOptions {
-    pub features: Option<Features>,
-    pub limits: Option<Limits>,
-    pub render_settings: RenderSettings,
-    pub base_color: Color,
-    /// Alpha mode used when compositing the window surface.
-    pub composite_alpha_mode: anyrender::CompositeAlphaMode,
-    /// Maximum number of frames the presentation engine may queue ahead of the
-    /// display. Each queued frame requires a window-sized swapchain surface, so
-    /// lower values reduce memory usage and input latency at the cost of less
-    /// buffering to absorb slow frames.
-    pub desired_maximum_frame_latency: u32,
-    /// Whether to cache rasterized glyphs in Vello's glyph atlas.
-    ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
-    pub glyph_caching: bool,
-}
-
-impl Default for VelloHybridRendererOptions {
-    fn default() -> Self {
-        Self {
-            features: None,
-            limits: None,
-            render_settings: RenderSettings::default(),
-            base_color: Color::WHITE,
-            composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
-            desired_maximum_frame_latency: 1,
-            glyph_caching: false,
-        }
-    }
-}
-
-impl VelloHybridRendererOptions {
-    pub fn new() -> Self {
-        // Within default of RenderSettings there are calls to non const methods so no const for new
-        Self::default()
-    }
-
-    pub const fn features(self, features: Features) -> Self {
-        Self {
-            features: Some(features),
-            ..self
-        }
-    }
-
-    pub const fn limits(self, limits: Limits) -> Self {
-        Self {
-            limits: Some(limits),
-            ..self
-        }
-    }
-
-    pub const fn render_settings(self, render_settings: RenderSettings) -> Self {
-        Self {
-            render_settings,
-            ..self
-        }
-    }
-
-    pub const fn base_color(self, base_color: Color) -> Self {
-        Self { base_color, ..self }
-    }
-
-    pub const fn composite_alpha_mode(
-        self,
-        composite_alpha_mode: anyrender::CompositeAlphaMode,
-    ) -> Self {
-        Self {
-            composite_alpha_mode,
-            ..self
-        }
-    }
-
-    pub const fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
-        Self {
-            desired_maximum_frame_latency,
-            ..self
-        }
-    }
-
-    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
-    ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
-    pub const fn glyph_caching(self, glyph_caching: bool) -> Self {
-        Self {
-            glyph_caching,
-            ..self
-        }
-    }
-}
-
-impl From<anyrender::RendererConfig> for VelloHybridRendererOptions {
-    fn from(config: anyrender::RendererConfig) -> Self {
-        Self {
-            base_color: config.base_color.unwrap_or(Color::WHITE),
-            composite_alpha_mode: config.composite_alpha_mode.unwrap_or_default(),
-            ..Default::default()
-        }
-    }
 }
 
 pub struct VelloHybridWindowRenderer {
