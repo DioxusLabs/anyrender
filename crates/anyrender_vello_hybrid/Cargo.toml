@@ -12,7 +12,6 @@ edition.workspace = true
 log_frame_times = ["debug_timer/enable"]
 webgl = [
   "vello_gpu/webgl",
-  "dep:js-sys",
   "dep:web-sys",
   "dep:wasm-bindgen",
   "dep:raw-window-handle",
@@ -36,7 +35,6 @@ pollster = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = { workspace = true }
-js-sys = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 raw-window-handle = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true, features = [

@@ -274,7 +274,6 @@ dependencies = [
  "debug_timer",
  "futures-channel",
  "glifo",
- "js-sys",
  "kurbo",
  "peniko",
  "pollster",

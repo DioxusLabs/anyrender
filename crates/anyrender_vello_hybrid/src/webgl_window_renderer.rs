@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use anyrender::{PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
-use futures_channel::oneshot;
 use peniko::Color;
 use raw_window_handle::RawWindowHandle;
 use vello_gpu::{
-    RenderSize, Resources, Scene, WebGlRenderer, WebGlRendererInitStatus, WebGlTextureBindings,
+    RenderSize, Resources, Scene, WebGlRenderer, WebGlRendererInit, WebGlRendererInitStatus,
+    WebGlTextureBindings,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::HtmlCanvasElement;
@@ -25,7 +25,9 @@ struct ActiveRenderState {
 enum RenderState {
     Suspended,
     Pending {
-        receiver: oneshot::Receiver<ActiveRenderState>,
+        init: WebGlRendererInit,
+        resources: Resources,
+        canvas: HtmlCanvasElement,
     },
     Active(ActiveRenderState),
 }
@@ -33,9 +35,13 @@ enum RenderState {
 /// A [`WindowRenderer`] that draws to the window's `<canvas>` using Vello GPU's WebGL2 backend.
 ///
 /// Unlike [`VelloHybridWindowRenderer`](crate::VelloHybridWindowRenderer), this does not need
-/// WebGPU, so it works in any browser that supports WebGL2. Shader compilation is polled once per
-/// animation frame, so `resume` does not block the browser's main thread where
-/// `KHR_parallel_shader_compile` is available.
+/// WebGPU, so it works in any browser that supports WebGL2.
+///
+/// `resume` only starts shader compilation and never calls `on_ready`. The renderer stays
+/// [`is_pending`](WindowRenderer::is_pending) until the caller polls
+/// [`complete_resume`](WindowRenderer::complete_resume) (e.g. once per redraw) and it returns
+/// `true`, so the browser's main thread isn't blocked where `KHR_parallel_shader_compile` is
+/// available.
 ///
 /// The wgpu-specific fields of [`VelloHybridRendererOptions`] (`features`, `limits`,
 /// `composite_alpha_mode` and `desired_maximum_frame_latency`) are ignored.
@@ -105,16 +111,6 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, width: u32, height: u32) {
     }
 }
 
-async fn next_animation_frame() {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        web_sys::window()
-            .expect("No global window")
-            .request_animation_frame(&resolve)
-            .expect("Error requesting animation frame");
-    });
-    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
-}
-
 impl RenderContext for VelloHybridWebGlWindowRenderer {}
 
 impl WindowRenderer for VelloHybridWebGlWindowRenderer {
@@ -136,7 +132,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
         window_handle: Arc<dyn WindowHandle>,
         width: u32,
         height: u32,
-        on_ready: F,
+        _on_ready: F,
     ) {
         if !matches!(self.render_state, RenderState::Suspended) {
             return;
@@ -150,43 +146,45 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
             WebGlRenderer::begin_with(&canvas, self.config.render_settings, true)
                 .expect("Error creating WebGL renderer");
 
-        let (sender, receiver) = oneshot::channel();
-        self.render_state = RenderState::Pending { receiver };
-
-        wasm_bindgen_futures::spawn_local(async move {
-            let mut init = init;
-            let renderer = loop {
-                match init.try_finish().expect("Error compiling WebGL shaders") {
-                    WebGlRendererInitStatus::Complete(renderer) => break renderer,
-                    WebGlRendererInitStatus::Pending(pending) => {
-                        init = pending;
-                        next_animation_frame().await;
-                    }
-                }
-            };
-            let _ = sender.send(ActiveRenderState {
-                renderer,
-                resources,
-                canvas,
-            });
-            on_ready();
-        });
+        self.render_state = RenderState::Pending {
+            init,
+            resources,
+            canvas,
+        };
     }
 
     fn complete_resume(&mut self) -> bool {
-        match &mut self.render_state {
-            RenderState::Active(_) => true,
+        match std::mem::replace(&mut self.render_state, RenderState::Suspended) {
+            RenderState::Active(active) => {
+                self.render_state = RenderState::Active(active);
+                true
+            }
             RenderState::Suspended => false,
-            RenderState::Pending { receiver } => match receiver.try_recv() {
-                Ok(Some(active)) => {
-                    let atlas = active.renderer.atlas_info();
+            RenderState::Pending {
+                init,
+                resources,
+                canvas,
+            } => match init.try_finish().expect("Error compiling WebGL shaders") {
+                WebGlRendererInitStatus::Pending(init) => {
+                    self.render_state = RenderState::Pending {
+                        init,
+                        resources,
+                        canvas,
+                    };
+                    false
+                }
+                WebGlRendererInitStatus::Complete(renderer) => {
+                    let atlas = renderer.atlas_info();
                     self.cached_images.clear();
                     self.cached_images
                         .set_max_image_size((atlas.width, atlas.height));
-                    self.render_state = RenderState::Active(active);
+                    self.render_state = RenderState::Active(ActiveRenderState {
+                        renderer,
+                        resources,
+                        canvas,
+                    });
                     true
                 }
-                _ => false,
             },
         }
     }
