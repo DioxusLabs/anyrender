@@ -11,7 +11,7 @@ edition.workspace = true
 [features]
 default = ["text", "image_format_png", "image_format_gif", "image_format_jpeg", "image_format_webp"]
 
-text = ["usvg/text", "usvg/memmap-fonts", "usvg/system-fonts"]
+text = ["usvg/text", "usvg/memmap-fonts", "usvg/system-fonts", "dep:skrifa"]
 
 image = ["dep:image"]
 image_format_png = ["image", "image/png"]
@@ -24,4 +24,5 @@ anyrender = { workspace = true }
 peniko = { workspace = true }
 kurbo = { workspace = true }
 usvg = { workspace = true, default-features = false }
+skrifa = { workspace = true, optional = true }
 image = { workspace = true, default-features = false, optional = true }
