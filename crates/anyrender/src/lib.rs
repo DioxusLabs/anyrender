@@ -121,7 +121,8 @@ pub trait WindowRenderer: RenderContext {
     /// synchronously inside `resume` on native, asynchronously (via
     /// `wasm_bindgen_futures::spawn_local`) on `wasm32-unknown-unknown`. After it
     /// fires, the embedder must call [`complete_resume`](Self::complete_resume) to
-    /// transition the renderer to the active state.
+    /// transition the renderer to the active state. Backends that are polled
+    /// instead don't call `on_ready`; see [`is_pending`](Self::is_pending).
     fn resume<F: FnOnce() + 'static>(
         &mut self,
         window: Arc<dyn WindowHandle>,
@@ -142,9 +143,14 @@ pub trait WindowRenderer: RenderContext {
     fn suspend(&mut self);
     fn is_active(&self) -> bool;
 
-    /// Returns `true` while an asynchronous resume is in flight (after `resume`
-    /// but before `complete_resume` has succeeded). Defaults to `false` for
-    /// backends with synchronous initialization.
+    /// Returns `true` while a resume is in flight (after `resume` but before
+    /// `complete_resume` has succeeded). Defaults to `false` for backends with
+    /// synchronous initialization.
+    ///
+    /// Some backends (e.g. WebGL, whose shaders compile in the background) do
+    /// their remaining setup inside `complete_resume` and don't call `on_ready`.
+    /// While this returns `true`, the embedder should keep calling
+    /// `complete_resume` (e.g. once per redraw) until it returns `true`.
     fn is_pending(&self) -> bool {
         false
     }
