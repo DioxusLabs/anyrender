@@ -6,13 +6,11 @@ use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
 use vello_common::paint::PaintType;
 
-use crate::ImageCache;
+use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
 use peniko::ImageBrush;
 use vello_common::paint::{ImageId, ImageSource};
 
 use std::sync::Arc;
-
-const DEFAULT_TOLERANCE: f64 = 0.1;
 
 pub struct WebGlImageManager<'a> {
     pub(crate) renderer: &'a mut vello_gpu::WebGlRenderer,
@@ -66,11 +64,6 @@ impl<'a> WebGlImageManager<'a> {
         }
         result
     }
-}
-
-enum LayerKind {
-    Layer,
-    Clip,
 }
 
 pub struct WebGlScenePainter<'s> {
@@ -145,7 +138,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let filter = filter.and_then(crate::filters::convert_filter);
+        let filter = filter.and_then(crate::common::convert_filter);
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);
@@ -240,7 +233,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_transform(transform);
 
         let glyph_caching =
-            self.glyph_caching && crate::scene::supports_glyph_caching(transform, glyph_transform);
+            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {

@@ -13,7 +13,8 @@ use vello_gpu::{
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::HtmlCanvasElement;
 
-use crate::{ImageCache, VelloHybridRendererOptions, WebGlImageManager, WebGlScenePainter};
+use super::scene::{WebGlImageManager, WebGlScenePainter};
+use crate::common::{ImageCache, VelloHybridRendererOptions};
 
 struct ActiveRenderState {
     renderer: WebGlRenderer,
