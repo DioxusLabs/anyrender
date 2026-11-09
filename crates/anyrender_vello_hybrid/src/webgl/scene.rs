@@ -239,8 +239,8 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
-        let glyph_caching =
-            self.glyph_caching && crate::scene::supports_glyph_caching(transform, glyph_transform);
+        let glyph_caching = self.glyph_caching
+            && crate::wgpu_backend::supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {

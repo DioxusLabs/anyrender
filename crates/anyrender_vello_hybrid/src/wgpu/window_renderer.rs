@@ -18,7 +18,8 @@ use wgpu::{
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use crate::{ImageCache, VelloHybridScenePainter, scene::ImageManager};
+use super::scene::{ImageManager, VelloHybridScenePainter};
+use crate::ImageCache;
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
 /// queue (blocking is not allowed). On native we drive it inline with
