@@ -3,6 +3,7 @@
 
 //! Simple helpers for managing wgpu state and surfaces.
 
+use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
@@ -23,8 +24,12 @@ pub use error::WgpuContextError;
 pub use surface_renderer::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration};
 pub use util::block_on_wgpu;
 
-type DeviceCreatorFn =
-    dyn Fn(&Adapter, &DeviceDescriptor<'_>) -> Option<(Device, Queue)> + Send + Sync;
+/// The error a [`DeviceCreator`] returns when it can't create a device.
+pub type DeviceCreatorError = Box<dyn Error + Send + Sync>;
+
+type DeviceCreatorFn = dyn Fn(&Adapter, &DeviceDescriptor<'_>) -> Result<(Device, Queue), DeviceCreatorError>
+    + Send
+    + Sync;
 
 /// A hook that creates the `Device` and `Queue` in place of [`Adapter::request_device`].
 ///
@@ -33,13 +38,17 @@ type DeviceCreatorFn =
 ///
 /// The callback receives the descriptor that would otherwise be passed to
 /// [`Adapter::request_device`], so it should request at least its `required_features`
-/// and `required_limits`. Returning `None` falls back to [`Adapter::request_device`].
+/// and `required_limits`. If it returns an error, the error is logged with `log::warn!`
+/// and the device is created with [`Adapter::request_device`] instead.
 #[derive(Clone)]
 pub struct DeviceCreator(Arc<DeviceCreatorFn>);
 
 impl DeviceCreator {
     pub fn new(
-        create_device: impl Fn(&Adapter, &DeviceDescriptor<'_>) -> Option<(Device, Queue)>
+        create_device: impl Fn(
+            &Adapter,
+            &DeviceDescriptor<'_>,
+        ) -> Result<(Device, Queue), DeviceCreatorError>
         + Send
         + Sync
         + 'static,
@@ -47,12 +56,12 @@ impl DeviceCreator {
         Self(Arc::new(create_device))
     }
 
-    /// Calls the hook, returning `None` if it declined to create a device.
+    /// Calls the hook.
     pub fn create_device(
         &self,
         adapter: &Adapter,
         descriptor: &DeviceDescriptor<'_>,
-    ) -> Option<(Device, Queue)> {
+    ) -> Result<(Device, Queue), DeviceCreatorError> {
         (self.0)(adapter, descriptor)
     }
 }
@@ -126,7 +135,16 @@ impl DeviceHandle {
             trace: wgpu::Trace::default(),
             experimental_features: wgpu::ExperimentalFeatures::default(),
         };
-        let custom_device = device_creator.and_then(|c| c.create_device(&adapter, &descripter));
+        let custom_device = device_creator.and_then(|creator| {
+            creator
+                .create_device(&adapter, &descripter)
+                .inspect_err(|err| {
+                    log::warn!(
+                        "DeviceCreator failed, falling back to Adapter::request_device: {err}"
+                    )
+                })
+                .ok()
+        });
         let (device, queue) = match custom_device {
             Some(device_and_queue) => device_and_queue,
             None => adapter.request_device(&descripter).await?,
