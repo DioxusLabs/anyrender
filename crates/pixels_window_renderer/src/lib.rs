@@ -2,12 +2,15 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    ImageRenderer, RenderContext, WindowHandle, WindowRenderer, WindowRendererContext,
+};
 use debug_timer::debug_timer;
 use pixels::{
     Pixels, PixelsBuilder, SurfaceTexture,
     wgpu::{Color, CompositeAlphaMode},
 };
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 // Simple struct to hold the state of the renderer
@@ -74,6 +77,42 @@ impl From<anyrender::RendererConfig> for PixelsRendererOptions {
             };
         }
         options.composite_alpha_mode(config.composite_alpha_mode.unwrap_or_default())
+    }
+}
+
+/// Creates [`PixelsWindowRenderer`]s that all use the same options. This backend has no state to share
+/// between windows.
+pub struct PixelsWindowRendererContext<Renderer: ImageRenderer> {
+    options: PixelsRendererOptions,
+    renderer: PhantomData<fn() -> Renderer>,
+}
+
+impl<Renderer: ImageRenderer> PixelsWindowRendererContext<Renderer> {
+    pub fn new(options: impl Into<PixelsRendererOptions>) -> Self {
+        Self {
+            options: options.into(),
+            renderer: PhantomData,
+        }
+    }
+}
+
+impl<Renderer: ImageRenderer> Default for PixelsWindowRendererContext<Renderer> {
+    fn default() -> Self {
+        Self::new(PixelsRendererOptions::default())
+    }
+}
+
+impl<Renderer: ImageRenderer> Clone for PixelsWindowRendererContext<Renderer> {
+    fn clone(&self) -> Self {
+        Self::new(self.options.clone())
+    }
+}
+
+impl<Renderer: ImageRenderer> WindowRendererContext for PixelsWindowRendererContext<Renderer> {
+    type Renderer = PixelsWindowRenderer<Renderer>;
+
+    fn create_renderer(&self) -> PixelsWindowRenderer<Renderer> {
+        PixelsWindowRenderer::with_options(self.options.clone())
     }
 }
 

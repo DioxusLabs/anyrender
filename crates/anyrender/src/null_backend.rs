@@ -1,6 +1,9 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use crate::{
+    Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer,
+    WindowRendererContext,
+};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -11,6 +14,18 @@ pub struct NullWindowRenderer {
 impl NullWindowRenderer {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// Creates [`NullWindowRenderer`]s.
+#[derive(Copy, Clone, Default)]
+pub struct NullWindowRendererContext;
+
+impl WindowRendererContext for NullWindowRendererContext {
+    type Renderer = NullWindowRenderer;
+
+    fn create_renderer(&self) -> NullWindowRenderer {
+        NullWindowRenderer::new()
     }
 }
 

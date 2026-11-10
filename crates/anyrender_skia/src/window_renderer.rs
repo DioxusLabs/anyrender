@@ -1,4 +1,4 @@
-use anyrender::{RenderContext, WindowRenderer};
+use anyrender::{RenderContext, WindowRenderer, WindowRendererContext};
 use debug_timer::debug_timer;
 use skia_safe::{Color, Surface, graphics};
 use std::any::Any;
@@ -236,7 +236,34 @@ impl SkiaWindowRenderer {
     }
 }
 
-impl SkiaWindowRenderer {}
+/// Creates [`SkiaWindowRenderer`]s that all use the same options.
+///
+/// Each window still creates its own Skia GPU context: sharing one between windows is not
+/// implemented yet.
+#[derive(Clone, Default)]
+pub struct SkiaContext {
+    options: SkiaRendererOptions,
+}
+
+impl SkiaContext {
+    pub fn new(options: impl Into<SkiaRendererOptions>) -> Self {
+        Self {
+            options: options.into(),
+        }
+    }
+
+    pub fn options(&self) -> &SkiaRendererOptions {
+        &self.options
+    }
+}
+
+impl WindowRendererContext for SkiaContext {
+    type Renderer = SkiaWindowRenderer;
+
+    fn create_renderer(&self) -> SkiaWindowRenderer {
+        SkiaWindowRenderer::with_options(self.options.clone())
+    }
+}
 
 impl RenderContext for SkiaWindowRenderer {}
 impl WindowRenderer for SkiaWindowRenderer {
@@ -379,6 +406,10 @@ pub mod raster {
         PixelsWindowRenderer<crate::image_renderer::SkiaImageRenderer>;
     #[cfg(feature = "pixels_window_renderer")]
     pub type SkiaRasterRendererOptions = PixelsRendererOptions;
+    #[cfg(feature = "pixels_window_renderer")]
+    pub type SkiaRasterContext = pixels_window_renderer::PixelsWindowRendererContext<
+        crate::image_renderer::SkiaImageRenderer,
+    >;
 
     #[cfg(all(
         feature = "softbuffer_window_renderer",
@@ -391,6 +422,13 @@ pub mod raster {
         not(feature = "pixels_window_renderer")
     ))]
     pub type SkiaRasterRendererOptions = SoftbufferRendererOptions;
+    #[cfg(all(
+        feature = "softbuffer_window_renderer",
+        not(feature = "pixels_window_renderer")
+    ))]
+    pub type SkiaRasterContext = softbuffer_window_renderer::SoftbufferWindowRendererContext<
+        crate::image_renderer::SkiaImageRenderer,
+    >;
 }
 
 #[cfg(test)]

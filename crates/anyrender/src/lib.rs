@@ -162,6 +162,18 @@ pub trait WindowRenderer: RenderContext {
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }
 
+/// Creates [`WindowRenderer`]s for one backend and holds the state they share, such as a GPU
+/// device and renderer.
+///
+/// Create one context per application and a renderer per window from it, so that windows
+/// share that state instead of each creating their own. Contexts are cheap to clone.
+pub trait WindowRendererContext {
+    type Renderer: WindowRenderer;
+
+    /// Creates a renderer for a new window.
+    fn create_renderer(&self) -> Self::Renderer;
+}
+
 /// Abstraction for rendering a scene to an image buffer.
 ///
 /// Buffers hold RGBA8 pixels. Whether they are premultiplied depends on the backend:
