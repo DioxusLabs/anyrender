@@ -1,6 +1,7 @@
 use peniko::Color;
 use vello_gpu::RenderSettings;
 use wgpu::{Features, Limits};
+use wgpu_context::DeviceCreator;
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -22,6 +23,9 @@ pub struct VelloHybridRendererOptions {
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub glyph_caching: bool,
+    /// Creates the wgpu device in place of `Adapter::request_device`, e.g. to enable
+    /// hardware video decoding. See [`DeviceCreator`].
+    pub device_creator: Option<DeviceCreator>,
 }
 
 impl Default for VelloHybridRendererOptions {
@@ -34,6 +38,7 @@ impl Default for VelloHybridRendererOptions {
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
             glyph_caching: false,
+            device_creator: None,
         }
     }
 }
@@ -44,42 +49,39 @@ impl VelloHybridRendererOptions {
         Self::default()
     }
 
-    pub const fn features(self, features: Features) -> Self {
+    pub fn features(self, features: Features) -> Self {
         Self {
             features: Some(features),
             ..self
         }
     }
 
-    pub const fn limits(self, limits: Limits) -> Self {
+    pub fn limits(self, limits: Limits) -> Self {
         Self {
             limits: Some(limits),
             ..self
         }
     }
 
-    pub const fn render_settings(self, render_settings: RenderSettings) -> Self {
+    pub fn render_settings(self, render_settings: RenderSettings) -> Self {
         Self {
             render_settings,
             ..self
         }
     }
 
-    pub const fn base_color(self, base_color: Color) -> Self {
+    pub fn base_color(self, base_color: Color) -> Self {
         Self { base_color, ..self }
     }
 
-    pub const fn composite_alpha_mode(
-        self,
-        composite_alpha_mode: anyrender::CompositeAlphaMode,
-    ) -> Self {
+    pub fn composite_alpha_mode(self, composite_alpha_mode: anyrender::CompositeAlphaMode) -> Self {
         Self {
             composite_alpha_mode,
             ..self
         }
     }
 
-    pub const fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
+    pub fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
         Self {
             desired_maximum_frame_latency,
             ..self
@@ -91,9 +93,16 @@ impl VelloHybridRendererOptions {
     /// Defaults to `false`.
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
-    pub const fn glyph_caching(self, glyph_caching: bool) -> Self {
+    pub fn glyph_caching(self, glyph_caching: bool) -> Self {
         Self {
             glyph_caching,
+            ..self
+        }
+    }
+
+    pub fn device_creator(self, device_creator: DeviceCreator) -> Self {
+        Self {
+            device_creator: Some(device_creator),
             ..self
         }
     }

@@ -45,7 +45,7 @@ enum RenderState {
 /// available.
 ///
 /// The wgpu-specific fields of [`VelloHybridRendererOptions`] (`features`, `limits`,
-/// `composite_alpha_mode` and `desired_maximum_frame_latency`) are ignored.
+/// `composite_alpha_mode`, `desired_maximum_frame_latency` and `device_creator`) are ignored.
 ///
 /// Custom resources and WebGL context loss are not yet supported.
 pub struct VelloHybridWebGlWindowRenderer {
