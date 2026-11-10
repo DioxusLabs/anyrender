@@ -12,6 +12,7 @@ pub use common::{ImageCache, VelloHybridRendererOptions};
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use webgl::*;
 pub use wgpu_backend::*;
+pub use wgpu_context::{DeviceCreator, DeviceCreatorError};
 
 pub use wgpu;
 pub use wgpu_context::{DeviceHandle, WGPUContext};
