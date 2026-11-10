@@ -3,6 +3,7 @@
 
 //! Simple helpers for managing wgpu state and surfaces.
 
+use std::sync::{Arc, Mutex, MutexGuard};
 use wgpu::{
     Adapter, Device, Features, Instance, Limits, MemoryHints, Queue, Surface, SurfaceTarget,
 };
@@ -92,6 +93,43 @@ impl DeviceHandle {
     }
 }
 
+/// A [`WGPUContext`] that several renderer contexts can share (for example a Vello and a
+/// vello_hybrid context), so that they use the same instance and device pool. Cloning is
+/// cheap: clones refer to the same context.
+#[derive(Clone)]
+pub struct SharedWGPUContext(Arc<Mutex<WGPUContext>>);
+
+impl SharedWGPUContext {
+    // wgpu types are not `Send` on wasm, which is single-threaded
+    #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
+    pub fn new(wgpu_context: WGPUContext) -> Self {
+        Self(Arc::new(Mutex::new(wgpu_context)))
+    }
+
+    pub fn lock(&self) -> MutexGuard<'_, WGPUContext> {
+        self.0.lock().unwrap()
+    }
+}
+
+impl Default for SharedWGPUContext {
+    fn default() -> Self {
+        Self::new(WGPUContext::new())
+    }
+}
+
+impl From<WGPUContext> for SharedWGPUContext {
+    fn from(wgpu_context: WGPUContext) -> Self {
+        Self::new(wgpu_context)
+    }
+}
+
+impl From<DeviceHandle> for SharedWGPUContext {
+    /// See [`WGPUContext::from_device_handle`].
+    fn from(device_handle: DeviceHandle) -> Self {
+        Self::new(WGPUContext::from_device_handle(device_handle))
+    }
+}
+
 /// Simple render context that maintains wgpu state for rendering the pipeline.
 pub struct WGPUContext {
     /// A WGPU `Instance`. This only needs to be created once per application.
@@ -108,6 +146,13 @@ pub struct WGPUContext {
 impl Default for WGPUContext {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<DeviceHandle> for WGPUContext {
+    /// See [`WGPUContext::from_device_handle`].
+    fn from(device_handle: DeviceHandle) -> Self {
+        Self::from_device_handle(device_handle)
     }
 }
 
@@ -135,6 +180,35 @@ impl WGPUContext {
             extra_features,
             override_limits,
         }
+    }
+
+    /// Creates a context that renders with an existing device.
+    ///
+    /// The context uses the instance of `device_handle`, and any device it creates later
+    /// (for a surface `device_handle` is not compatible with) gets the same features and limits.
+    pub fn from_device_handle(device_handle: DeviceHandle) -> Self {
+        Self {
+            instance: device_handle.instance.clone(),
+            extra_features: Some(device_handle.device.features()),
+            override_limits: Some(device_handle.device.limits()),
+            device_pool: vec![device_handle],
+        }
+    }
+
+    /// Adds a device handle to the device pool (if it is not already there) and returns its index.
+    ///
+    /// Register a device as soon as it is created, so that renderers resumed before it
+    /// has finished initialising can find it and reuse it.
+    pub fn add_device_handle(&mut self, device_handle: DeviceHandle) -> usize {
+        if let Some(idx) = self
+            .device_pool
+            .iter()
+            .position(|d| d.device == device_handle.device)
+        {
+            return idx;
+        }
+        self.device_pool.push(device_handle);
+        self.device_pool.len() - 1
     }
 
     pub fn extra_features(&self) -> Option<Features> {
@@ -244,7 +318,6 @@ impl WGPUContext {
         compatible_surface: Option<&Surface<'_>>,
     ) -> Result<usize, WgpuContextError> {
         let device_handle = self.create_device_handle(compatible_surface).await?;
-        self.device_pool.push(device_handle);
-        Ok(self.device_pool.len() - 1)
+        Ok(self.add_device_handle(device_handle))
     }
 }
