@@ -236,6 +236,8 @@ impl WGPUContext {
     ///
     /// The context uses the instance of `device_handle`, and any device it creates later
     /// (for a surface `device_handle` is not compatible with) gets the same features and limits.
+    /// Chain [`WGPUContext::with_device_creator`] to create those later devices with a
+    /// [`DeviceCreator`] too.
     pub fn from_device_handle(device_handle: DeviceHandle) -> Self {
         Self {
             instance: device_handle.instance.clone(),

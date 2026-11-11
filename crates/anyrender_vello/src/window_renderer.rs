@@ -57,13 +57,18 @@ struct VelloContextInner {
 /// The renderer for a device is created with the options of the first window that uses that
 /// device (e.g. its `pipeline_cache`).
 ///
+/// The context decides how devices are created: the features, limits and
+/// [`DeviceCreator`](wgpu_context::DeviceCreator) of its [`WGPUContext`] apply to every device it
+/// creates, whichever window triggers it.
+///
 /// On wasm, device creation is asynchronous, so windows resumed in the same tick may still
 /// create a device each.
 #[derive(Clone)]
 pub struct VelloContext(Arc<Mutex<VelloContextInner>>);
 
 impl VelloContext {
-    /// Creates a context with a new wgpu instance, using the features and limits from `options`.
+    /// Creates a context with a new wgpu instance, using the features, limits and
+    /// `device_creator` from `options`.
     pub fn new(options: &VelloRendererOptions) -> Self {
         Self::from_wgpu_context(build_wgpu_context(options))
     }
@@ -119,6 +124,9 @@ pub struct VelloRendererOptions {
     pub desired_maximum_frame_latency: u32,
     /// Creates the wgpu device in place of `Adapter::request_device`, e.g. to enable
     /// hardware video decoding. See [`DeviceCreator`].
+    ///
+    /// Like `features` and `limits`, this is ignored by `with_options_and_context`: a shared
+    /// `VelloContext` creates devices with the settings it was created with.
     pub device_creator: Option<DeviceCreator>,
 }
 
@@ -237,6 +245,10 @@ impl VelloWindowRenderer {
 
     /// Creates a renderer that gets its device and Vello renderer from `context`, so that
     /// several windows can share them.
+    ///
+    /// Devices are created by `context`, so the `features`, `limits` and `device_creator` of
+    /// `config` are ignored: set them when creating the context (with `new` or
+    /// [`WGPUContext::with_device_creator`]).
     pub fn with_options_and_context(
         config: impl Into<VelloRendererOptions>,
         context: VelloContext,
@@ -603,3 +615,18 @@ const _: fn() = || {
     assert_send::<VelloWindowRenderer>();
     assert_send::<VelloContext>();
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_takes_device_creator_from_options() {
+        let creator = DeviceCreator::new(|_, _| Err("unused".into()));
+        let context = VelloContext::new(&VelloRendererOptions::new().device_creator(creator));
+        assert!(context.lock().wgpu_context.device_creator().is_some());
+
+        let context = VelloContext::new(&VelloRendererOptions::new());
+        assert!(context.lock().wgpu_context.device_creator().is_none());
+    }
+}

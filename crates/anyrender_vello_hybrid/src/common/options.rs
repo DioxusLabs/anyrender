@@ -25,6 +25,9 @@ pub struct VelloHybridRendererOptions {
     pub glyph_caching: bool,
     /// Creates the wgpu device in place of `Adapter::request_device`, e.g. to enable
     /// hardware video decoding. See [`DeviceCreator`].
+    ///
+    /// Like `features` and `limits`, this is ignored by `with_options_and_context`: a shared
+    /// `VelloHybridContext` creates devices with the settings it was created with.
     pub device_creator: Option<DeviceCreator>,
 }
 

@@ -66,13 +66,18 @@ struct VelloHybridContextInner {
 /// The renderer for a device is created with the `render_settings` of the first window that
 /// uses that device.
 ///
+/// The context decides how devices are created: the features, limits and
+/// [`DeviceCreator`](wgpu_context::DeviceCreator) of its [`WGPUContext`] apply to every device it
+/// creates, whichever window triggers it.
+///
 /// On wasm, device creation is asynchronous, so windows resumed in the same tick may still
 /// create a device each.
 #[derive(Clone)]
 pub struct VelloHybridContext(Arc<Mutex<VelloHybridContextInner>>);
 
 impl VelloHybridContext {
-    /// Creates a context with a new wgpu instance, using the features and limits from `options`.
+    /// Creates a context with a new wgpu instance, using the features, limits and
+    /// `device_creator` from `options`.
     pub fn new(options: &VelloHybridRendererOptions) -> Self {
         Self::from_wgpu_context(build_wgpu_context(options))
     }
@@ -132,6 +137,10 @@ impl VelloHybridWindowRenderer {
 
     /// Creates a renderer that gets its device and renderer from `context`, so that
     /// several windows can share them.
+    ///
+    /// Devices are created by `context`, so the `features`, `limits` and `device_creator` of
+    /// `config` are ignored: set them when creating the context (with `new` or
+    /// [`WGPUContext::with_device_creator`]).
     pub fn with_options_and_context(
         config: impl Into<VelloHybridRendererOptions>,
         context: VelloHybridContext,
@@ -614,3 +623,20 @@ const _: fn() = || {
     assert_send::<VelloHybridWindowRenderer>();
     assert_send::<VelloHybridContext>();
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu_context::DeviceCreator;
+
+    #[test]
+    fn context_takes_device_creator_from_options() {
+        let creator = DeviceCreator::new(|_, _| Err("unused".into()));
+        let context =
+            VelloHybridContext::new(&VelloHybridRendererOptions::new().device_creator(creator));
+        assert!(context.lock().wgpu_context.device_creator().is_some());
+
+        let context = VelloHybridContext::new(&VelloHybridRendererOptions::new());
+        assert!(context.lock().wgpu_context.device_creator().is_none());
+    }
+}
