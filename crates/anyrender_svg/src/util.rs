@@ -4,7 +4,7 @@
 use anyrender::{Paint, PaintScene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
-use peniko::{Color, Fill, Mix};
+use peniko::{BlendMode, Color, Compose, Fill, Mix};
 
 #[cfg(feature = "image")]
 use peniko::{Blob, ImageBrush};
@@ -43,8 +43,9 @@ pub(crate) fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
     conv_stroke
 }
 
-pub(crate) fn to_mix(blend_mode: usvg::BlendMode) -> Mix {
-    match blend_mode {
+pub(crate) fn to_blend_mode(blend_mode: usvg::BlendMode) -> BlendMode {
+    let mix = match blend_mode {
+        usvg::BlendMode::PlusLighter => return BlendMode::new(Mix::Normal, Compose::PlusLighter),
         usvg::BlendMode::Normal => Mix::Normal,
         usvg::BlendMode::Multiply => Mix::Multiply,
         usvg::BlendMode::Screen => Mix::Screen,
@@ -61,7 +62,8 @@ pub(crate) fn to_mix(blend_mode: usvg::BlendMode) -> Mix {
         usvg::BlendMode::Saturation => Mix::Saturation,
         usvg::BlendMode::Color => Mix::Color,
         usvg::BlendMode::Luminosity => Mix::Luminosity,
-    }
+    };
+    BlendMode::new(mix, Compose::SrcOver)
 }
 
 pub(crate) fn to_bez_path(path: &usvg::Path) -> BezPath {
@@ -239,7 +241,9 @@ fn to_extend(spread_method: usvg::SpreadMethod) -> peniko::Extend {
 /// Error handler function for [`super::append_tree_with`] which draws a transparent red box
 /// instead of unsupported SVG features
 pub(crate) fn default_error_handler<S: PaintScene>(scene: &mut S, node: &usvg::Node) {
-    let bb = node.bounding_box();
+    let Some(bb) = node.bounding_box() else {
+        return;
+    };
     let rect = Rect {
         x0: bb.left() as f64,
         y0: bb.top() as f64,
