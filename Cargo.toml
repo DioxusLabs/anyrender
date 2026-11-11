@@ -54,15 +54,15 @@ linebender_resource_handle = "0.1"
 peniko = "0.6"
 kurbo = "0.13.1"
 color = "0.3"
-glifo = { version = "0.4", features = ["png"] }
-vello = { version = "0.11", features = ["wgpu"] }
-vello_cpu = { version = "0.3", default-features = false, features = [
+glifo = { version = "0.5", features = ["png"] }
+vello = { version = "0.12", features = ["wgpu"] }
+vello_cpu = { version = "0.4", default-features = false, features = [
   "std",
   "text",
   "u8_pipeline",
 ] }
-vello_gpu = { version = "0.3" }
-vello_common = { version = "0.3" }
+vello_gpu = { version = "0.4" }
+vello_common = { version = "0.4" }
 
 # Rendering
 wgpu = "30"

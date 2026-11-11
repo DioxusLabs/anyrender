@@ -1,14 +1,14 @@
 //! A per-renderer cache of converted images.
 //!
 //! Converting a [`peniko::ImageData`] to a vello_cpu `Pixmap` (format swizzle +
-//! alpha premultiplication) is expensive, so converted images are registered in
-//! the vello_cpu image registry once and subsequent draws reference them by
-//! [`ImageId`].
+//! alpha premultiplication) is expensive, so converted images are cached once
+//! and subsequent draws reference the shared `Arc<Pixmap>`.
 
 use peniko::WeakBlob;
 use std::collections::HashMap;
-use vello_common::paint::{ImageId, ImageSource};
-use vello_cpu::Resources;
+use std::sync::Arc;
+use vello_common::paint::ImageSource;
+use vello_cpu::Pixmap;
 
 use crate::image_convert::convert_image;
 
@@ -34,8 +34,7 @@ impl Default for ImageCacheConfig {
 }
 
 struct Entry {
-    image_id: ImageId,
-    may_have_transparency: bool,
+    pixmap: Arc<Pixmap>,
     bytes: usize,
     last_used: u64,
     /// Weak handle to the source data. When the embedder drops the last strong
@@ -61,37 +60,31 @@ impl ImageCache {
         }
     }
 
-    /// Look up the converted image for `image`, converting and registering it
-    /// in `resources` on a cache miss.
-    pub(crate) fn get_or_register(
-        &mut self,
-        resources: &mut Resources,
-        image: &peniko::ImageData,
-    ) -> ImageSource {
+    /// Look up the converted image for `image`, converting it on a cache miss.
+    pub(crate) fn get_or_register(&mut self, image: &peniko::ImageData) -> ImageSource {
         let serial = self.serial;
         let total_bytes = &mut self.total_bytes;
         let entry = self.entries.entry(image.data.id()).or_insert_with(|| {
             let pixmap = convert_image(image);
-            let may_have_transparency = pixmap.may_have_transparency();
             let bytes = pixmap.data().len() * 4;
             *total_bytes += bytes;
             Entry {
-                image_id: resources.register_image(pixmap),
-                may_have_transparency,
+                pixmap,
                 bytes,
                 last_used: serial,
                 source: image.data.downgrade(),
             }
         });
         entry.last_used = serial;
-        ImageSource::opaque_id_with_transparency_hint(entry.image_id, entry.may_have_transparency)
+        ImageSource::Pixmap(entry.pixmap.clone())
     }
 
     /// Advance the frame counter and evict stale entries.
     ///
-    /// Must be called once per frame, after rendering (so that ids referenced
-    /// by the just-rendered scene are not destroyed before being resolved).
-    pub(crate) fn maintain(&mut self, resources: &mut Resources) {
+    /// Must be called once per frame, after rendering (so that pixmaps
+    /// referenced by the just-rendered scene are not dropped while still in
+    /// use).
+    pub(crate) fn maintain(&mut self) {
         self.serial += 1;
         let over_budget = self.total_bytes > self.config.max_bytes;
         if !over_budget && !self.serial.is_multiple_of(self.config.prune_interval) {
@@ -107,7 +100,6 @@ impl ImageCache {
             let keep = entry.source.upgrade().is_some() && serial - entry.last_used <= max_age;
             if !keep {
                 *total_bytes -= entry.bytes;
-                resources.destroy_image(entry.image_id);
             }
             keep
         });
@@ -124,15 +116,12 @@ impl ImageCache {
             let Some(key) = key else { break };
             let entry = self.entries.remove(&key).unwrap();
             self.total_bytes -= entry.bytes;
-            resources.destroy_image(entry.image_id);
         }
     }
 
-    /// Drop all cached conversions and their registry entries.
-    pub(crate) fn clear(&mut self, resources: &mut Resources) {
-        for (_, entry) in self.entries.drain() {
-            resources.destroy_image(entry.image_id);
-        }
+    /// Drop all cached conversions.
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
         self.total_bytes = 0;
     }
 }
@@ -141,7 +130,6 @@ impl ImageCache {
 mod tests {
     use super::*;
     use peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
-    use std::sync::Arc;
 
     fn image(pixels: &[[u8; 4]]) -> ImageData {
         ImageData {
@@ -154,19 +142,18 @@ mod tests {
     }
 
     #[test]
-    fn cache_hit_reuses_registered_image() {
+    fn cache_hit_reuses_converted_image() {
         let mut cache = ImageCache::new(ImageCacheConfig::default());
-        let mut resources = Resources::new();
         let img = image(&[[0, 0, 0, 255]]);
-        let a = cache.get_or_register(&mut resources, &img);
-        let b = cache.get_or_register(&mut resources, &img);
-        let ImageSource::OpaqueId { id: id_a, .. } = a else {
-            panic!("expected OpaqueId");
+        let a = cache.get_or_register(&img);
+        let b = cache.get_or_register(&img);
+        let ImageSource::Pixmap(pix_a) = a else {
+            panic!("expected Pixmap");
         };
-        let ImageSource::OpaqueId { id: id_b, .. } = b else {
-            panic!("expected OpaqueId");
+        let ImageSource::Pixmap(pix_b) = b else {
+            panic!("expected Pixmap");
         };
-        assert_eq!(id_a, id_b);
+        assert!(Arc::ptr_eq(&pix_a, &pix_b));
         assert_eq!(cache.entries.len(), 1);
     }
 
@@ -176,16 +163,12 @@ mod tests {
             prune_interval: 1,
             ..Default::default()
         });
-        let mut resources = Resources::new();
         let img = image(&[[0, 0, 0, 255]]);
-        let ImageSource::OpaqueId { id, .. } = cache.get_or_register(&mut resources, &img) else {
-            panic!("expected OpaqueId");
-        };
+        cache.get_or_register(&img);
         drop(img);
-        cache.maintain(&mut resources);
+        cache.maintain();
         assert!(cache.entries.is_empty());
         assert_eq!(cache.total_bytes, 0);
-        assert!(resources.resolve_image(id).is_none());
     }
 
     #[test]
@@ -195,14 +178,13 @@ mod tests {
             prune_interval: 1,
             ..Default::default()
         });
-        let mut resources = Resources::new();
         let img = image(&[[0, 0, 0, 255]]);
-        cache.get_or_register(&mut resources, &img);
+        cache.get_or_register(&img);
         for _ in 0..2 {
-            cache.maintain(&mut resources);
+            cache.maintain();
         }
         assert_eq!(cache.entries.len(), 1);
-        cache.maintain(&mut resources);
+        cache.maintain();
         assert!(cache.entries.is_empty());
     }
 
@@ -212,27 +194,23 @@ mod tests {
             max_bytes: 4,
             ..Default::default()
         });
-        let mut resources = Resources::new();
         let old = image(&[[0, 0, 0, 255]]);
         let new = image(&[[1, 1, 1, 255]]);
-        cache.get_or_register(&mut resources, &old);
-        cache.maintain(&mut resources);
-        cache.get_or_register(&mut resources, &new);
-        cache.maintain(&mut resources);
+        cache.get_or_register(&old);
+        cache.maintain();
+        cache.get_or_register(&new);
+        cache.maintain();
         assert_eq!(cache.entries.len(), 1);
         assert!(cache.entries.contains_key(&new.data.id()));
     }
 
     #[test]
-    fn clear_destroys_registry_entries() {
+    fn clear_drops_cached_pixmaps() {
         let mut cache = ImageCache::new(ImageCacheConfig::default());
-        let mut resources = Resources::new();
         let img = image(&[[0, 0, 0, 255]]);
-        let ImageSource::OpaqueId { id, .. } = cache.get_or_register(&mut resources, &img) else {
-            panic!("expected OpaqueId");
-        };
-        cache.clear(&mut resources);
+        cache.get_or_register(&img);
+        cache.clear();
         assert!(cache.entries.is_empty());
-        assert!(resources.resolve_image(id).is_none());
+        assert_eq!(cache.total_bytes, 0);
     }
 }

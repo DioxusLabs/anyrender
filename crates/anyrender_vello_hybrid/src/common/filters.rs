@@ -21,7 +21,8 @@ pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimi
     Some(match effect {
         FilterEffect::Flood(color) => FilterPrimitive::Flood { color: *color },
         FilterEffect::GaussianBlur(blur) => FilterPrimitive::GaussianBlur {
-            std_deviation: blur.std_deviation,
+            std_deviation_x: blur.std_deviation,
+            std_deviation_y: blur.std_deviation,
             edge_mode: convert_edge_mode(blur.edge_mode),
         },
         FilterEffect::DropShadow(shadow) => FilterPrimitive::DropShadow {

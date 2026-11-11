@@ -7,8 +7,14 @@ use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
 use vello_common::paint::PaintType;
 
 use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
+use anyrender::ResourceId;
 use peniko::ImageBrush;
-use vello_common::paint::{ImageId, ImageSource};
+use vello_common::TextureId;
+use vello_common::paint::{ImageSource, TextureRegion};
+use vello_gpu::{
+    WebGlDataTransferOperation, WebGlError, WebGlOperation, WebGlResourceKind, WebGlTextureBindings,
+};
+use web_sys::WebGl2RenderingContext;
 
 use std::sync::Arc;
 
@@ -16,6 +22,7 @@ pub struct WebGlImageManager<'a> {
     pub(crate) renderer: &'a mut vello_gpu::WebGlRenderer,
     pub(crate) resources: &'a mut vello_gpu::Resources,
     pub(crate) cache: &'a mut ImageCache,
+    pub(crate) texture_bindings: &'a mut WebGlTextureBindings,
 }
 
 impl<'a> WebGlImageManager<'a> {
@@ -23,46 +30,100 @@ impl<'a> WebGlImageManager<'a> {
         renderer: &'a mut vello_gpu::WebGlRenderer,
         resources: &'a mut vello_gpu::Resources,
         cache: &'a mut ImageCache,
+        texture_bindings: &'a mut WebGlTextureBindings,
     ) -> Self {
         Self {
             renderer,
             resources,
             cache,
+            texture_bindings,
         }
     }
 
+    /// Upload `image` to its own texture and bind it for rendering, returning
+    /// its [`TextureId`] and transparency hint.
     pub(crate) fn upload_image(
         &mut self,
         image: &peniko::ImageData,
-    ) -> Result<Option<ImageId>, vello_gpu::WebGlError> {
+    ) -> Result<Option<(TextureId, bool)>, WebGlError> {
         if !self.cache.fits(image.width, image.height) {
             return Ok(None);
         }
         let peniko_id = image.data.id();
 
-        if let Some(atlas_id) = self.cache.get(peniko_id) {
-            return Ok(Some(atlas_id));
+        if let Some(texture_id) = self.cache.get(peniko_id) {
+            // Cached textures keep their original transparency hint; always
+            // returning `true` is correct but conservative.
+            return Ok(Some((texture_id, true)));
         }
 
         let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
             unreachable!();
         };
+        let may_have_transparency = pixmap.may_have_transparency();
 
-        let atlas_id = self.renderer.upload_image(self.resources, &pixmap)?;
+        let gl = self.renderer.gl_context();
+        let texture = gl.create_texture().ok_or(WebGlError::OperationFailed {
+            operation: WebGlOperation::ResourceCreation(WebGlResourceKind::Texture),
+            message: None,
+        })?;
+        gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+        gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
+        // The pixmap data is already premultiplied.
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_FLIP_Y_WEBGL, 0);
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+            WebGl2RenderingContext::TEXTURE_2D,
+            0,
+            WebGl2RenderingContext::RGBA8 as i32,
+            i32::from(pixmap.width()),
+            i32::from(pixmap.height()),
+            0,
+            WebGl2RenderingContext::RGBA,
+            WebGl2RenderingContext::UNSIGNED_BYTE,
+            Some(pixmap.data_as_u8_slice()),
+        )
+        .map_err(|e| WebGlError::OperationFailed {
+            operation: WebGlOperation::DataTransfer(WebGlDataTransferOperation::TextureUpload),
+            message: e.as_string(),
+        })?;
+        gl.tex_parameteri(
+            WebGl2RenderingContext::TEXTURE_2D,
+            WebGl2RenderingContext::TEXTURE_MIN_FILTER,
+            WebGl2RenderingContext::LINEAR as i32,
+        );
+        gl.tex_parameteri(
+            WebGl2RenderingContext::TEXTURE_2D,
+            WebGl2RenderingContext::TEXTURE_MAG_FILTER,
+            WebGl2RenderingContext::LINEAR as i32,
+        );
+        gl.tex_parameteri(
+            WebGl2RenderingContext::TEXTURE_2D,
+            WebGl2RenderingContext::TEXTURE_WRAP_S,
+            WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameteri(
+            WebGl2RenderingContext::TEXTURE_2D,
+            WebGl2RenderingContext::TEXTURE_WRAP_T,
+            WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+        );
+
+        let texture_id = TextureId(ResourceId::new().into_ffi());
+        self.texture_bindings
+            .insert(texture_id, texture, pixmap.width(), pixmap.height());
         self.cache
-            .insert(&image.data, atlas_id, image.width, image.height);
-        Ok(Some(atlas_id))
+            .insert(&image.data, texture_id, image.width, image.height);
+        Ok(Some((texture_id, may_have_transparency)))
     }
 
     /// Evict unused images after rendering a frame, including skipped frames.
-    pub fn finish_frame(&mut self) -> Result<(), vello_gpu::WebGlError> {
-        let mut result = Ok(());
+    pub fn finish_frame(&mut self) -> Result<(), WebGlError> {
         for id in self.cache.finish_frame() {
-            if let Err(error) = self.renderer.destroy_image(self.resources, id) {
-                result = Err(error);
+            if let Some(texture) = self.texture_bindings.remove(id) {
+                self.renderer.gl_context().delete_texture(Some(&texture));
             }
         }
-        result
+        Ok(())
     }
 }
 
@@ -108,15 +169,17 @@ impl WebGlScenePainter<'_> {
     }
 
     fn convert_image_paint(&mut self, image_brush: peniko::ImageBrushRef<'_>) -> PaintType {
-        let Ok(Some(image_id)) = self.image_manager.upload_image(image_brush.image) else {
+        let Ok(Some((texture_id, may_have_transparency))) =
+            self.image_manager.upload_image(image_brush.image)
+        else {
             return PaintType::Solid(Color::TRANSPARENT);
         };
         PaintType::Image(ImageBrush {
-            image: ImageSource::OpaqueId {
-                id: image_id,
-                // TODO: optimize opaque case
-                may_have_transparency: true,
-            },
+            image: ImageSource::external_texture(
+                texture_id,
+                TextureRegion::Full,
+                may_have_transparency,
+            ),
             sampler: image_brush.sampler,
         })
     }
@@ -284,6 +347,6 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(PaintType::Solid(color));
         self.scene.reset_paint_transform();
         self.scene
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
     }
 }
