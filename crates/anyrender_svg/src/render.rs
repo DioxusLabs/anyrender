@@ -20,7 +20,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             usvg::Node::Group(g) => {
                 let alpha = g.opacity().get();
                 let is_fully_opaque = alpha >= 1.0;
-                let mix = util::to_mix(g.blend_mode());
+                let blend_mode = util::to_blend_mode(g.blend_mode());
 
                 // Support clip-path with a single path
                 let clip_path = g
@@ -36,10 +36,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                                 Some(usvg::FillRule::EvenOdd) => Fill::EvenOdd,
                                 _ => Fill::NonZero,
                             },
-                            BlendMode {
-                                mix,
-                                compose: peniko::Compose::SrcOver,
-                            },
+                            blend_mode,
                             alpha,
                             global_transform * transform,
                             &local_path,
@@ -51,12 +48,15 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     }
                     // Else if there is blending to be done then push a layer with a rectangular clip
                     #[allow(deprecated)]
-                    _ if mix != peniko::Mix::Normal || !is_fully_opaque => {
+                    _ if blend_mode != BlendMode::default() || !is_fully_opaque => {
                         // Use the layer bounding box as the clip path. It is in the group's
                         // content coordinate space, so map it to canvas space and outset it
                         // by 2px on each side (like resvg) so anti-aliased pixels at the
                         // layer edge aren't clipped.
-                        let bounding_box = g.layer_bounding_box();
+                        // A group without a layer bounding box has nothing to draw.
+                        let Some(bounding_box) = g.layer_bounding_box() else {
+                            continue;
+                        };
                         let rect = kurbo::Rect::from_origin_size(
                             (bounding_box.x() as f64, bounding_box.y() as f64),
                             (bounding_box.width() as f64, bounding_box.height() as f64),
@@ -66,10 +66,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             .inflate(2.0, 2.0);
                         scene.push_layer(
                             Fill::NonZero,
-                            BlendMode {
-                                mix,
-                                compose: peniko::Compose::SrcOver,
-                            },
+                            blend_mode,
                             alpha,
                             Affine::IDENTITY,
                             &rect,
