@@ -189,11 +189,8 @@ impl<'a> ImageManager<'a> {
         let peniko_id = image.data.id();
 
         // Try to get TextureId from cache first
-        if let Some(texture_id) = self.cache.get(peniko_id) {
-            // Cached textures keep their original transparency hint; the hint
-            // only affects sampling optimizations, so always returning `true`
-            // is correct but conservative.
-            return Some((texture_id, true));
+        if let Some(cached) = self.cache.get(peniko_id) {
+            return Some(cached);
         };
 
         // Convert ImageData to Pixmap
@@ -244,8 +241,13 @@ impl<'a> ImageManager<'a> {
             texture.create_view(&TextureViewDescriptor::default()),
         );
         let texture_id = TextureId(resource_id.into_ffi());
-        self.cache
-            .insert(&image.data, texture_id, image.width, image.height);
+        self.cache.insert(
+            &image.data,
+            texture_id,
+            may_have_transparency,
+            image.width,
+            image.height,
+        );
 
         Some((texture_id, may_have_transparency))
     }

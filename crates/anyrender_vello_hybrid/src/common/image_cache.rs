@@ -8,6 +8,7 @@ const UNUSED_IMAGE_BUDGET: u64 = 64 * 1024 * 1024;
 struct CachedImage {
     blob: WeakBlob<u8>,
     texture_id: TextureId,
+    may_have_transparency: bool,
     bytes: u64,
     last_used: u64,
 }
@@ -48,16 +49,18 @@ impl ImageCache {
         self.frame = 0;
     }
 
-    pub(crate) fn get(&mut self, id: u64) -> Option<TextureId> {
+    /// Returns the cached image's texture and transparency hint.
+    pub(crate) fn get(&mut self, id: u64) -> Option<(TextureId, bool)> {
         let entry = self.entries.get_mut(&id)?;
         entry.last_used = self.frame;
-        Some(entry.texture_id)
+        Some((entry.texture_id, entry.may_have_transparency))
     }
 
     pub(crate) fn insert(
         &mut self,
         blob: &Blob<u8>,
         texture_id: TextureId,
+        may_have_transparency: bool,
         width: u32,
         height: u32,
     ) {
@@ -66,6 +69,7 @@ impl ImageCache {
             CachedImage {
                 blob: blob.downgrade(),
                 texture_id,
+                may_have_transparency,
                 bytes: u64::from(width) * u64::from(height) * 4,
                 last_used: self.frame,
             },
@@ -161,9 +165,9 @@ mod tests {
     fn current_images_are_kept_even_over_budget() {
         let mut cache = ImageCache::default();
         let blob = Blob::from(vec![0]);
-        cache.insert(&blob, TextureId(1), 100, 100);
+        cache.insert(&blob, TextureId(1), true, 100, 100);
         assert!(cache.evict(0).is_empty());
-        assert_eq!(cache.get(blob.id()), Some(TextureId(1)));
+        assert_eq!(cache.get(blob.id()), Some((TextureId(1), true)));
         assert!(cache.evict(0).is_empty());
     }
 
@@ -172,21 +176,21 @@ mod tests {
         let mut cache = ImageCache::default();
         let first = Blob::from(vec![0]);
         let second = Blob::from(vec![0]);
-        cache.insert(&first, TextureId(1), 2, 2);
-        cache.insert(&second, TextureId(2), 2, 2);
+        cache.insert(&first, TextureId(1), true, 2, 2);
+        cache.insert(&second, TextureId(2), true, 2, 2);
         cache.evict(32);
         cache.get(second.id());
         cache.evict(32);
         assert_eq!(cache.evict(16), vec![TextureId(1)]);
         assert_eq!(cache.get(first.id()), None);
-        assert_eq!(cache.get(second.id()), Some(TextureId(2)));
+        assert_eq!(cache.get(second.id()), Some((TextureId(2), true)));
     }
 
     #[test]
     fn clear_invalidates_ids_and_resets_frame() {
         let mut cache = ImageCache::default();
         let blob = Blob::from(vec![0]);
-        cache.insert(&blob, TextureId(1), 1, 1);
+        cache.insert(&blob, TextureId(1), true, 1, 1);
         cache.evict(4);
         cache.clear();
         assert_eq!(cache.get(blob.id()), None);
@@ -198,11 +202,11 @@ mod tests {
         let mut cache = ImageCache::default();
         let first = Blob::from(vec![0]);
         let second = Blob::from(vec![0]);
-        cache.insert(&first, TextureId(1), 10, 10);
-        cache.insert(&second, TextureId(2), 1, 1);
+        cache.insert(&first, TextureId(1), true, 10, 10);
+        cache.insert(&second, TextureId(2), true, 1, 1);
         cache.evict(4);
         assert_eq!(cache.evict(4), vec![TextureId(1)]);
-        assert_eq!(cache.get(second.id()), Some(TextureId(2)));
+        assert_eq!(cache.get(second.id()), Some((TextureId(2), true)));
     }
 
     #[test]
@@ -211,7 +215,7 @@ mod tests {
         let blob = Blob::from(vec![0]);
         let id = blob.id();
         let weak = blob.downgrade();
-        cache.insert(&blob, TextureId(1), 1, 1);
+        cache.insert(&blob, TextureId(1), true, 1, 1);
         assert_eq!(blob.strong_count(), 1);
         assert!(cache.finish_frame().is_empty());
         drop(blob);
@@ -225,7 +229,7 @@ mod tests {
     fn dropped_current_blob_is_evicted_after_rendering() {
         let mut cache = ImageCache::default();
         let blob = Blob::from(vec![0]);
-        cache.insert(&blob, TextureId(1), 1, 1);
+        cache.insert(&blob, TextureId(1), true, 1, 1);
         drop(blob);
         assert_eq!(cache.finish_frame(), vec![TextureId(1)]);
         assert!(cache.entries.is_empty());
@@ -236,11 +240,11 @@ mod tests {
         let mut cache = ImageCache::default();
         let blob = Blob::from(vec![0]);
         let clone = blob.clone();
-        cache.insert(&blob, TextureId(1), 1, 1);
+        cache.insert(&blob, TextureId(1), true, 1, 1);
         cache.finish_frame();
         drop(blob);
         assert!(cache.finish_frame().is_empty());
-        assert_eq!(cache.get(clone.id()), Some(TextureId(1)));
+        assert_eq!(cache.get(clone.id()), Some((TextureId(1), true)));
         drop(clone);
         assert_eq!(cache.finish_frame(), vec![TextureId(1)]);
     }

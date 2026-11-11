@@ -51,10 +51,8 @@ impl<'a> WebGlImageManager<'a> {
         }
         let peniko_id = image.data.id();
 
-        if let Some(texture_id) = self.cache.get(peniko_id) {
-            // Cached textures keep their original transparency hint; always
-            // returning `true` is correct but conservative.
-            return Ok(Some((texture_id, true)));
+        if let Some(cached) = self.cache.get(peniko_id) {
+            return Ok(Some(cached));
         }
 
         let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
@@ -111,8 +109,13 @@ impl<'a> WebGlImageManager<'a> {
         let texture_id = TextureId(ResourceId::new().into_ffi());
         self.texture_bindings
             .insert(texture_id, texture, pixmap.width(), pixmap.height());
-        self.cache
-            .insert(&image.data, texture_id, image.width, image.height);
+        self.cache.insert(
+            &image.data,
+            texture_id,
+            may_have_transparency,
+            image.width,
+            image.height,
+        );
         Ok(Some((texture_id, may_have_transparency)))
     }
 
