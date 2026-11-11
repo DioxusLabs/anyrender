@@ -1,5 +1,3 @@
-//! Additional shapes that backends can recognise and draw efficiently
-
 use kurbo::{
     Arc, ArcAppendIter, Ellipse, PathEl, Point, Rect, RoundedRect, RoundedRectRadii, Shape, Vec2,
 };
