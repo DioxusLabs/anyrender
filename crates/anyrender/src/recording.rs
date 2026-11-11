@@ -4,7 +4,7 @@ use crate::{
     BoxShadowKind, Filter, Glyph, NonUniformRoundedRect, NormalizedCoord, Paint, PaintRef,
     PaintScene, RenderContext,
 };
-use kurbo::{Affine, BezPath, Shape, Stroke, Vec2};
+use kurbo::{Affine, BezPath, PathEl, Point, Rect, RoundedRect, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
 
 #[cfg(feature = "serde")]
@@ -63,8 +63,7 @@ pub struct LayerCommand {
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
-    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
-    pub clip: BezPath, // TODO: more shape options
+    pub clip: RecordedShape,
     pub filter: Option<Arc<Filter>>,
     pub backdrop_filter: Option<Arc<Filter>>,
 }
@@ -78,8 +77,7 @@ pub struct ClipCommand {
     #[cfg_attr(feature = "serde", serde(default))]
     pub fill: Fill,
     pub transform: Affine,
-    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
-    pub clip: BezPath, // TODO: more shape options
+    pub clip: RecordedShape,
 }
 
 /// Strokes a shape using the specified style and brush.
@@ -90,8 +88,7 @@ pub struct StrokeCommand<Brush = Paint> {
     pub transform: Affine,
     pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
-    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
-    pub shape: BezPath, // TODO: more shape options
+    pub shape: RecordedShape,
 }
 
 /// Fills a shape using the specified style and brush.
@@ -102,8 +99,7 @@ pub struct FillCommand<Brush = Paint> {
     pub transform: Affine,
     pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
-    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
-    pub shape: BezPath, // TODO: more shape options
+    pub shape: RecordedShape,
 }
 
 /// Draws a run of glyphs
@@ -135,6 +131,126 @@ pub struct BoxShadowCommand {
     pub std_dev: f64,
     pub color: Color,
     pub kind: BoxShadowKind,
+}
+
+/// A shape stored in a recorded command.
+///
+/// Rects and rounded rects are kept as-is (rather than being converted to paths) so that backends
+/// can still use their fast paths for them when the recording is replayed.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
+pub enum RecordedShape {
+    Rect(Rect),
+    RoundedRect(RoundedRect),
+    Path(#[cfg_attr(feature = "serde", serde(with = "svg_path"))] BezPath),
+}
+
+impl RecordedShape {
+    /// Record `shape`, converting it to a path unless it is a rect or rounded rect.
+    pub fn from_shape(shape: &impl Shape, tolerance: f64) -> Self {
+        if let Some(rect) = shape.as_rect() {
+            Self::Rect(rect)
+        } else if let Some(rounded_rect) = shape.as_rounded_rect() {
+            Self::RoundedRect(rounded_rect)
+        } else {
+            Self::Path(shape.into_path(tolerance))
+        }
+    }
+}
+
+impl From<BezPath> for RecordedShape {
+    fn from(path: BezPath) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<Rect> for RecordedShape {
+    fn from(rect: Rect) -> Self {
+        Self::Rect(rect)
+    }
+}
+
+impl From<RoundedRect> for RecordedShape {
+    fn from(rounded_rect: RoundedRect) -> Self {
+        Self::RoundedRect(rounded_rect)
+    }
+}
+
+/// Iterator over the path elements of a [`RecordedShape`].
+#[allow(clippy::large_enum_variant, reason = "short-lived iterator")]
+pub enum RecordedShapePathIter<'a> {
+    Rect(<Rect as Shape>::PathElementsIter<'a>),
+    RoundedRect(<RoundedRect as Shape>::PathElementsIter<'a>),
+    Path(<BezPath as Shape>::PathElementsIter<'a>),
+}
+
+impl Iterator for RecordedShapePathIter<'_> {
+    type Item = PathEl;
+
+    fn next(&mut self) -> Option<PathEl> {
+        match self {
+            Self::Rect(iter) => iter.next(),
+            Self::RoundedRect(iter) => iter.next(),
+            Self::Path(iter) => iter.next(),
+        }
+    }
+}
+
+macro_rules! delegate {
+    ($self:ident, $shape:ident => $expr:expr) => {
+        match $self {
+            RecordedShape::Rect($shape) => $expr,
+            RecordedShape::RoundedRect($shape) => $expr,
+            RecordedShape::Path($shape) => $expr,
+        }
+    };
+}
+
+impl Shape for RecordedShape {
+    type PathElementsIter<'iter> = RecordedShapePathIter<'iter>;
+
+    fn path_elements(&self, tolerance: f64) -> Self::PathElementsIter<'_> {
+        match self {
+            Self::Rect(rect) => RecordedShapePathIter::Rect(rect.path_elements(tolerance)),
+            Self::RoundedRect(rounded_rect) => {
+                RecordedShapePathIter::RoundedRect(rounded_rect.path_elements(tolerance))
+            }
+            Self::Path(path) => RecordedShapePathIter::Path(path.path_elements(tolerance)),
+        }
+    }
+
+    fn area(&self) -> f64 {
+        delegate!(self, shape => shape.area())
+    }
+
+    fn perimeter(&self, accuracy: f64) -> f64 {
+        delegate!(self, shape => shape.perimeter(accuracy))
+    }
+
+    fn winding(&self, pt: Point) -> i32 {
+        delegate!(self, shape => shape.winding(pt))
+    }
+
+    fn bounding_box(&self) -> Rect {
+        delegate!(self, shape => shape.bounding_box())
+    }
+
+    fn to_path(&self, tolerance: f64) -> BezPath {
+        delegate!(self, shape => shape.to_path(tolerance))
+    }
+
+    fn as_rect(&self) -> Option<Rect> {
+        delegate!(self, shape => shape.as_rect())
+    }
+
+    fn as_rounded_rect(&self) -> Option<RoundedRect> {
+        delegate!(self, shape => shape.as_rounded_rect())
+    }
+
+    fn as_path_slice(&self) -> Option<&[PathEl]> {
+        delegate!(self, shape => shape.as_path_slice())
+    }
 }
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
@@ -196,7 +312,7 @@ impl PaintScene for Scene {
         backdrop_filter: Option<Arc<Filter>>,
     ) {
         let blend = blend.into();
-        let clip = clip.into_path(self.tolerance);
+        let clip = RecordedShape::from_shape(clip, self.tolerance);
         let layer = LayerCommand {
             fill,
             blend,
@@ -210,7 +326,7 @@ impl PaintScene for Scene {
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
-        let clip = clip.into_path(self.tolerance);
+        let clip = RecordedShape::from_shape(clip, self.tolerance);
         let layer = ClipCommand {
             fill,
             transform,
@@ -231,7 +347,7 @@ impl PaintScene for Scene {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let shape = shape.into_path(self.tolerance);
+        let shape = RecordedShape::from_shape(shape, self.tolerance);
         let brush = self.convert_paint(paint_ref.into());
         let stroke = StrokeCommand {
             style: style.clone(),
@@ -251,7 +367,7 @@ impl PaintScene for Scene {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let shape = shape.into_path(self.tolerance);
+        let shape = RecordedShape::from_shape(shape, self.tolerance);
         let brush = self.convert_paint(paint.into());
         let fill = FillCommand {
             fill: style,
