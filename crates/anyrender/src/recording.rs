@@ -129,7 +129,7 @@ pub struct BoxShadowCommand {
     pub offset: Vec2,
     pub spread: f64,
     pub std_dev: f64,
-    pub brush: Color,
+    pub color: Color,
     pub kind: BoxShadowKind,
 }
 
@@ -417,7 +417,7 @@ impl PaintScene for Scene {
         offset: Vec2,
         spread: f64,
         std_dev: f64,
-        brush: Color,
+        color: Color,
         kind: BoxShadowKind,
     ) {
         let box_shadow = BoxShadowCommand {
@@ -426,7 +426,7 @@ impl PaintScene for Scene {
             offset,
             spread,
             std_dev,
-            brush,
+            color,
             kind,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));

@@ -161,7 +161,7 @@ impl PaintScene for NullScenePainter {
         _offset: kurbo::Vec2,
         _spread: f64,
         _std_dev: f64,
-        _brush: peniko::Color,
+        _color: peniko::Color,
         _kind: crate::BoxShadowKind,
     ) {
     }

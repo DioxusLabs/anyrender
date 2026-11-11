@@ -115,7 +115,7 @@ impl BoxShadowGeometry {
     ///
     /// Backends that have a cheaper non-isolated clip than [`PaintScene::push_clip_layer`] can
     /// use [`Self::unblurred_path`] instead: there is only one fill inside of the clip.
-    pub fn draw_unblurred(&self, scene: &mut impl PaintScene, transform: Affine, brush: Color) {
+    pub fn draw_unblurred(&self, scene: &mut impl PaintScene, transform: Affine, color: Color) {
         let clip = self.needs_clip();
         if clip {
             scene.push_clip_layer(Fill::NonZero, transform, &self.area);
@@ -123,7 +123,7 @@ impl BoxShadowGeometry {
         scene.fill(
             Fill::NonZero,
             transform,
-            brush,
+            color,
             None,
             &self.unblurred_path(),
         );

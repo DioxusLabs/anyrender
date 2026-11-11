@@ -574,7 +574,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         offset: kurbo::Vec2,
         spread: f64,
         std_dev: f64,
-        brush: peniko::Color,
+        color: peniko::Color,
         kind: anyrender::BoxShadowKind,
     ) {
         let geometry = anyrender::BoxShadowGeometry::new(box_shape, offset, spread, std_dev, kind);
@@ -595,7 +595,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         }
 
         self.reset_paint();
-        self.set_paint_brush(brush, None);
+        self.set_paint_brush(color, None);
         self.cache.paint.set_style(PaintStyle::Fill);
         if geometry.std_dev > 0.0 {
             self.cache.paint.set_mask_filter(

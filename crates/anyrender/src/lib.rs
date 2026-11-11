@@ -276,7 +276,7 @@ pub trait PaintScene: RenderContext {
         offset: Vec2,
         spread: f64,
         std_dev: f64,
-        brush: Color,
+        color: Color,
         kind: BoxShadowKind,
     );
 
@@ -350,7 +350,7 @@ pub trait PaintScene: RenderContext {
                     cmd.offset,
                     cmd.spread,
                     cmd.std_dev,
-                    cmd.brush,
+                    cmd.color,
                     cmd.kind,
                 ),
             }
