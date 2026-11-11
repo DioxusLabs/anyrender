@@ -4,13 +4,11 @@ use anyrender::{
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
 use peniko::Color;
-use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
-use vello_common::TextureId;
 use vello_gpu::{
     RenderOptions, RenderSize, RenderTarget, RenderTargetConfig, Renderer as VelloHybridRenderer,
-    Resources, Scene as VelloHybridScene, TextureBindings,
+    Resources, Scene as VelloHybridScene,
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, PresentMode, Texture, TextureFormat,
@@ -18,7 +16,7 @@ use wgpu::{
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use super::scene::{ImageManager, VelloHybridScenePainter};
+use super::scene::{ExternalTextures, ImageManager, VelloHybridScenePainter};
 use crate::common::{ImageCache, VelloHybridRendererOptions};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
@@ -39,7 +37,7 @@ struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     resources: Resources,
     depth_texture_view: TextureView,
-    texture_bindings: FxHashMap<ResourceId, TextureView>,
+    texture_bindings: ExternalTextures,
     render_surface: SurfaceRenderer<'static>,
 }
 
@@ -155,7 +153,7 @@ impl RenderContext for VelloHybridWindowRenderer {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
-        state.texture_bindings.remove(&resource_id);
+        state.texture_bindings.remove(resource_id);
     }
 }
 
@@ -332,7 +330,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     resources,
                     depth_texture_view,
                     render_surface,
-                    texture_bindings: FxHashMap::default(),
+                    texture_bindings: ExternalTextures::default(),
                 },
             });
             on_ready();
@@ -451,12 +449,6 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             return;
         };
 
-        // Construct Vello Hybrid TextureBindings
-        let mut texture_bindings = TextureBindings::new();
-        for (resource_id, texture_view) in state.texture_bindings.iter() {
-            texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view.clone());
-        }
-
         state
             .renderer
             .render(
@@ -467,7 +459,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     view: &texture_view,
                     depth_view: Some(&state.depth_texture_view),
                 },
-                &texture_bindings,
+                state.texture_bindings.bindings(),
                 RenderOptions::default(),
             )
             .expect("failed to render to texture");

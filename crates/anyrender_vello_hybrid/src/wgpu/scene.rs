@@ -5,13 +5,12 @@ use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderCont
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use vello_common::{
     TextureId,
-    geometry::RectU16,
-    paint::{ImageSource, PaintType},
+    paint::{ImageSource, PaintType, TextureRegion},
 };
-use vello_gpu::Resources;
+use vello_gpu::{Resources, TextureBindings};
 use wgpu::{
     Device, Extent3d, Origin3d, Queue, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
     TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
@@ -123,35 +122,57 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
             PaintType::Image(ImageBrush {
                 image: ImageSource::external_texture(
                     texture_id,
-                    vello_common::paint::TextureRegion::Full,
+                    TextureRegion::Full,
                     may_have_transparency,
                 ),
                 sampler: image_brush.sampler,
             })
         }
 
-        Paint::Resource(brush) => match texture_bindings.get(&brush.image) {
-            Some(texture_view) => {
-                let texture = texture_view.texture();
-                PaintType::Image(ImageBrush {
-                    image: ImageSource::external_texture(
-                        TextureId(brush.image.into_ffi()),
-                        vello_common::paint::TextureRegion::Rect(RectU16 {
-                            x0: 0,
-                            y0: 0,
-                            x1: texture.width().min(u16::MAX as u32) as u16,
-                            y1: texture.height().min(u16::MAX as u32) as u16,
-                        }),
-                        true,
-                    ),
-                    sampler: brush.sampler,
-                })
-            }
-            None => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-        },
+        Paint::Resource(brush) if texture_bindings.contains(brush.image) => {
+            PaintType::Image(ImageBrush {
+                image: ImageSource::external_texture(
+                    TextureId(brush.image.into_ffi()),
+                    TextureRegion::Full,
+                    true,
+                ),
+                sampler: brush.sampler,
+            })
+        }
+        Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
 
         // TODO: custom paint
         Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
+    }
+}
+
+/// Textures bound for rendering (uploaded images and registered custom
+/// resources), kept in a persistent [`TextureBindings`] keyed by
+/// `TextureId(resource_id.into_ffi())`.
+#[derive(Debug, Default)]
+pub struct ExternalTextures {
+    bindings: TextureBindings,
+    ids: FxHashSet<ResourceId>,
+}
+
+impl ExternalTextures {
+    pub fn insert(&mut self, id: ResourceId, view: TextureView) {
+        self.ids.insert(id);
+        self.bindings.insert(TextureId(id.into_ffi()), view);
+    }
+
+    pub fn remove(&mut self, id: ResourceId) {
+        if self.ids.remove(&id) {
+            self.bindings.remove(TextureId(id.into_ffi()));
+        }
+    }
+
+    pub fn contains(&self, id: ResourceId) -> bool {
+        self.ids.contains(&id)
+    }
+
+    pub fn bindings(&self) -> &TextureBindings {
+        &self.bindings
     }
 }
 
@@ -160,7 +181,7 @@ pub struct ImageManager<'a> {
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
     pub(crate) cache: &'a mut ImageCache,
-    pub(crate) texture_bindings: &'a mut FxHashMap<ResourceId, TextureView>,
+    pub(crate) texture_bindings: &'a mut ExternalTextures,
 }
 
 impl<'a> ImageManager<'a> {
@@ -169,7 +190,7 @@ impl<'a> ImageManager<'a> {
         device: &'a Device,
         queue: &'a Queue,
         cache: &'a mut ImageCache,
-        texture_bindings: &'a mut FxHashMap<ResourceId, TextureView>,
+        texture_bindings: &'a mut ExternalTextures,
     ) -> Self {
         Self {
             resources,
@@ -256,7 +277,7 @@ impl<'a> ImageManager<'a> {
     pub fn finish_frame(&mut self) {
         for id in self.cache.finish_frame() {
             // Dropping the binding drops the last handle to the texture.
-            self.texture_bindings.remove(&ResourceId::from_ffi(id.0));
+            self.texture_bindings.remove(ResourceId::from_ffi(id.0));
         }
     }
 }
@@ -330,7 +351,7 @@ impl RenderContext for VelloHybridScenePainter<'_> {
     }
 
     fn unregister_resource(&mut self, resource_id: ResourceId) {
-        self.image_manager.texture_bindings.remove(&resource_id);
+        self.image_manager.texture_bindings.remove(resource_id);
     }
 
     fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
