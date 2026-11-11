@@ -5,14 +5,17 @@ use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderCont
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use vello_common::{
     TextureId,
-    geometry::RectU16,
-    paint::{ImageId, ImageSource, PaintType},
+    paint::{ImageSource, PaintType, TextureRegion},
 };
-use vello_gpu::{Renderer, Resources};
-use wgpu::{CommandEncoder, Device, Queue, Texture, TextureView, TextureViewDescriptor};
+use vello_gpu::{Resources, TextureBindings};
+use wgpu::{
+    Device, Extent3d, Origin3d, Queue, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
+    TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+    TextureViewDescriptor,
+};
 use wgpu_context::DeviceHandle;
 
 /// Snaps glyph origins to the horizontal subpixel grid of the platform's native text renderer.
@@ -104,117 +107,177 @@ impl GlyphOriginSnap {
 fn anyrender_paint_to_vello_hybrid_paint<'a>(
     paint: PaintRef<'a>,
     image_manager: &mut ImageManager<'_>,
-    texture_bindings: &FxHashMap<ResourceId, TextureView>,
 ) -> PaintType {
+    let texture_bindings = &*image_manager.texture_bindings;
     match paint {
         Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
         Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
 
         Paint::Image(image_brush) => {
-            let Some(image_id) = image_manager.upload_image(image_brush.image) else {
+            let Some((texture_id, may_have_transparency)) =
+                image_manager.upload_image(image_brush.image)
+            else {
                 return PaintType::Solid(Color::TRANSPARENT);
             };
             PaintType::Image(ImageBrush {
-                image: ImageSource::OpaqueId {
-                    id: image_id,
-                    // TODO: optimize opaque case
-                    may_have_transparency: true,
-                },
+                image: ImageSource::external_texture(
+                    texture_id,
+                    TextureRegion::Full,
+                    may_have_transparency,
+                ),
                 sampler: image_brush.sampler,
             })
         }
 
-        Paint::Resource(brush) => match texture_bindings.get(&brush.image) {
-            Some(texture_view) => {
-                let texture = texture_view.texture();
-                PaintType::Image(ImageBrush {
-                    image: ImageSource::external_texture(
-                        TextureId(brush.image.into_ffi()),
-                        RectU16 {
-                            x0: 0,
-                            y0: 0,
-                            x1: texture.width().min(u16::MAX as u32) as u16,
-                            y1: texture.height().min(u16::MAX as u32) as u16,
-                        },
-                        true,
-                    ),
-                    sampler: brush.sampler,
-                })
-            }
-            None => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-        },
+        Paint::Resource(brush) if texture_bindings.contains(brush.image) => {
+            PaintType::Image(ImageBrush {
+                image: ImageSource::external_texture(
+                    TextureId(brush.image.into_ffi()),
+                    TextureRegion::Full,
+                    true,
+                ),
+                sampler: brush.sampler,
+            })
+        }
+        Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
 
         // TODO: custom paint
         Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
     }
 }
 
+/// Textures bound for rendering (uploaded images and registered custom
+/// resources), kept in a persistent [`TextureBindings`] keyed by
+/// `TextureId(resource_id.into_ffi())`.
+#[derive(Debug, Default)]
+pub struct ExternalTextures {
+    bindings: TextureBindings,
+    ids: FxHashSet<ResourceId>,
+}
+
+impl ExternalTextures {
+    pub fn insert(&mut self, id: ResourceId, view: TextureView) {
+        self.ids.insert(id);
+        self.bindings.insert(TextureId(id.into_ffi()), view);
+    }
+
+    pub fn remove(&mut self, id: ResourceId) {
+        if self.ids.remove(&id) {
+            self.bindings.remove(TextureId(id.into_ffi()));
+        }
+    }
+
+    pub fn contains(&self, id: ResourceId) -> bool {
+        self.ids.contains(&id)
+    }
+
+    pub fn bindings(&self) -> &TextureBindings {
+        &self.bindings
+    }
+}
+
 pub struct ImageManager<'a> {
-    pub(crate) renderer: &'a mut Renderer,
     pub(crate) resources: &'a mut Resources,
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
-    pub(crate) encoder: &'a mut CommandEncoder,
     pub(crate) cache: &'a mut ImageCache,
+    pub(crate) texture_bindings: &'a mut ExternalTextures,
 }
 
 impl<'a> ImageManager<'a> {
     pub fn new(
-        renderer: &'a mut Renderer,
         resources: &'a mut Resources,
         device: &'a Device,
         queue: &'a Queue,
-        encoder: &'a mut CommandEncoder,
         cache: &'a mut ImageCache,
+        texture_bindings: &'a mut ExternalTextures,
     ) -> Self {
         Self {
-            renderer,
             resources,
             device,
             queue,
-            encoder,
             cache,
+            texture_bindings,
         }
     }
 
-    pub(crate) fn upload_image(&mut self, image: &ImageData) -> Option<ImageId> {
+    /// Upload `image` to its own texture and bind it for rendering, returning
+    /// its [`TextureId`] and transparency hint.
+    pub(crate) fn upload_image(&mut self, image: &ImageData) -> Option<(TextureId, bool)> {
         if !self.cache.fits(image.width, image.height) {
             return None;
         }
         let peniko_id = image.data.id();
 
-        // Try to get ImageId from cache first
-        if let Some(atlas_id) = self.cache.get(peniko_id) {
-            return Some(atlas_id);
+        // Try to get TextureId from cache first
+        if let Some(cached) = self.cache.get(peniko_id) {
+            return Some(cached);
         };
 
         // Convert ImageData to Pixmap
         let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
-            unreachable!(); // ImageSource::from_peniko_image_data always return a Pixmap
+            unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
         };
+        let may_have_transparency = pixmap.may_have_transparency();
 
-        // Upload Pixamp
-        let atlas_id = self.renderer.upload_image(
-            self.resources,
-            self.device,
-            self.queue,
-            self.encoder,
-            &pixmap,
+        // Upload the pixmap to its own texture.
+        let texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("AnyRender uploaded image"),
+            size: Extent3d {
+                width: u32::from(pixmap.width()),
+                height: u32::from(pixmap.height()),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            pixmap.data_as_u8_slice(),
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * u32::from(pixmap.width())),
+                rows_per_image: Some(u32::from(pixmap.height())),
+            },
+            Extent3d {
+                width: u32::from(pixmap.width()),
+                height: u32::from(pixmap.height()),
+                depth_or_array_layers: 1,
+            },
         );
 
-        // Store ImageId in cache
-        self.cache
-            .insert(&image.data, atlas_id, image.width, image.height);
+        // Bind the texture and remember the TextureId in the cache.
+        let resource_id = ResourceId::new();
+        self.texture_bindings.insert(
+            resource_id,
+            texture.create_view(&TextureViewDescriptor::default()),
+        );
+        let texture_id = TextureId(resource_id.into_ffi());
+        self.cache.insert(
+            &image.data,
+            texture_id,
+            may_have_transparency,
+            image.width,
+            image.height,
+        );
 
-        // Return ImageId
-        Some(atlas_id)
+        Some((texture_id, may_have_transparency))
     }
 
-    /// Evict unused images after encoding the frame's rendering, before submitting the encoder.
+    /// Evict unused images after encoding the frame's rendering.
     pub fn finish_frame(&mut self) {
         for id in self.cache.finish_frame() {
-            self.renderer
-                .destroy_image(self.resources, self.encoder, id);
+            // Dropping the binding drops the last handle to the texture.
+            self.texture_bindings.remove(ResourceId::from_ffi(id.0));
         }
     }
 }
@@ -223,7 +286,6 @@ pub struct VelloHybridScenePainter<'s> {
     pub(crate) scene: &'s mut vello_gpu::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
     pub(crate) image_manager: ImageManager<'s>,
-    pub(crate) texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
     pub(crate) device_handle: &'s DeviceHandle,
     pub(crate) glyph_caching: bool,
 }
@@ -232,14 +294,12 @@ impl VelloHybridScenePainter<'_> {
     pub fn new<'s>(
         scene: &'s mut vello_gpu::Scene,
         image_manager: ImageManager<'s>,
-        texture_bindings: &'s mut FxHashMap<ResourceId, TextureView>,
         device_handle: &'s DeviceHandle,
     ) -> VelloHybridScenePainter<'s> {
         VelloHybridScenePainter {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
-            texture_bindings,
             device_handle,
             glyph_caching: false,
         }
@@ -256,7 +316,7 @@ impl VelloHybridScenePainter<'_> {
     }
 
     fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
-        anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager, self.texture_bindings)
+        anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager)
     }
 }
 
@@ -270,14 +330,16 @@ impl RenderContext for VelloHybridScenePainter<'_> {
             Ok(texture) => {
                 let id = ResourceId::new();
                 let texture_view = texture.create_view(&TextureViewDescriptor::default());
-                self.texture_bindings.insert(id, texture_view);
+                self.image_manager.texture_bindings.insert(id, texture_view);
                 Ok(id)
             }
             Err(resource) => {
                 // Else try to downcast as TextureView
                 if let Ok(texture_view) = resource.downcast::<TextureView>() {
                     let id = ResourceId::new();
-                    self.texture_bindings.insert(id, *texture_view);
+                    self.image_manager
+                        .texture_bindings
+                        .insert(id, *texture_view);
                     Ok(id)
                 }
                 // Else return error
@@ -289,7 +351,7 @@ impl RenderContext for VelloHybridScenePainter<'_> {
     }
 
     fn unregister_resource(&mut self, resource_id: ResourceId) {
-        self.texture_bindings.remove(&resource_id);
+        self.image_manager.texture_bindings.remove(resource_id);
     }
 
     fn renderer_specific_context(&self) -> Option<Box<dyn std::any::Any>> {
@@ -459,7 +521,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_paint(PaintType::Solid(color));
         self.scene.reset_paint_transform();
         self.scene
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
     }
 }
 

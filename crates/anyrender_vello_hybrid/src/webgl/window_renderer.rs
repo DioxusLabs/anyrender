@@ -7,11 +7,11 @@ use debug_timer::debug_timer;
 use peniko::Color;
 use raw_window_handle::RawWindowHandle;
 use vello_gpu::{
-    RenderSize, Resources, Scene, WebGlRenderer, WebGlRendererInit, WebGlRendererInitStatus,
-    WebGlTextureBindings,
+    RenderSize, Resources, Scene, WebGlRenderOptions, WebGlRenderTarget, WebGlRenderer,
+    WebGlRendererInit, WebGlRendererInitStatus, WebGlTextureBindings,
 };
 use wasm_bindgen::{JsCast, JsValue};
-use web_sys::HtmlCanvasElement;
+use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
 
 use super::scene::{WebGlImageManager, WebGlScenePainter};
 use crate::common::{ImageCache, VelloHybridRendererOptions};
@@ -66,7 +66,7 @@ impl VelloHybridWebGlWindowRenderer {
         let config = config.into();
         Self {
             render_state: RenderState::Suspended,
-            scene: Scene::new_with(0, 0, config.render_settings.level),
+            scene: Scene::new_with(0, 0, config.render_settings.level()),
             config,
             cached_images: ImageCache::default(),
             texture_bindings: WebGlTextureBindings::new(),
@@ -144,7 +144,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
         self.scene.reset_and_resize(width as u16, height as u16);
 
         let (init, resources) =
-            WebGlRenderer::begin_with(&canvas, self.config.render_settings, true)
+            WebGlRenderer::begin_with(&canvas, self.config.render_settings.clone(), true)
                 .expect("Error creating WebGL renderer");
 
         self.render_state = RenderState::Pending {
@@ -175,10 +175,15 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
                     false
                 }
                 WebGlRendererInitStatus::Complete(renderer) => {
-                    let atlas = renderer.atlas_info();
+                    let gl = renderer.gl_context();
+                    let max = gl
+                        .get_parameter(WebGl2RenderingContext::MAX_TEXTURE_SIZE)
+                        .ok()
+                        .and_then(|v| v.as_f64())
+                        .map(|v| v as u16)
+                        .unwrap_or(2048);
                     self.cached_images.clear();
-                    self.cached_images
-                        .set_max_image_size((atlas.width, atlas.height));
+                    self.cached_images.set_max_image_size((max, max));
                     self.render_state = RenderState::Active(ActiveRenderState {
                         renderer,
                         resources,
@@ -227,6 +232,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
             &mut state.renderer,
             &mut state.resources,
             &mut self.cached_images,
+            &mut self.texture_bindings,
         );
         let mut scene_painter = WebGlScenePainter::new(&mut self.scene, image_manager)
             .with_glyph_caching(self.config.glyph_caching);
@@ -242,20 +248,23 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
         draw_fn(&mut scene_painter);
         timer.record_time("cmd");
 
+        let mut options = WebGlRenderOptions::default();
+        options.clear_color = Color::TRANSPARENT;
         state
             .renderer
             .render(
                 &self.scene,
                 &mut state.resources,
-                &render_size,
+                WebGlRenderTarget::DrawingBuffer,
                 &self.texture_bindings,
-                Color::TRANSPARENT,
+                options,
             )
             .expect("failed to render to canvas");
         WebGlImageManager::new(
             &mut state.renderer,
             &mut state.resources,
             &mut self.cached_images,
+            &mut self.texture_bindings,
         )
         .finish_frame()
         .expect("failed to evict images");
