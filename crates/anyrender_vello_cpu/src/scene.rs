@@ -148,9 +148,7 @@ impl VelloCpuScenePainter {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
             Paint::Image(image) => PaintType::Image(ImageBrush {
-                image: self
-                    .image_cache
-                    .get_or_register(&mut self.resources, image.image),
+                image: self.image_cache.get_or_register(image.image),
                 sampler: image.sampler,
             }),
             // TODO: custom paint
@@ -163,12 +161,12 @@ impl VelloCpuScenePainter {
     ///
     /// Should be called once per frame, after rendering.
     pub fn maintain(&mut self) {
-        self.image_cache.maintain(&mut self.resources);
+        self.image_cache.maintain();
     }
 
     /// Drop all cached image conversions.
     pub fn clear_image_cache(&mut self) {
-        self.image_cache.clear(&mut self.resources);
+        self.image_cache.clear();
     }
 
     pub fn finish(mut self) -> Pixmap {
@@ -351,7 +349,7 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_paint(PaintType::Solid(color));
         self.render_ctx.reset_paint_transform();
         self.render_ctx
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, false);
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32);
     }
 }
 

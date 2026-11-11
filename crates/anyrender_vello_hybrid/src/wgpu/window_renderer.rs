@@ -4,13 +4,11 @@ use anyrender::{
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
 use peniko::Color;
-use rustc_hash::FxHashMap;
 use std::future::Future;
 use std::sync::Arc;
-use vello_common::TextureId;
 use vello_gpu::{
-    ClearSettings, RenderSize, RenderTargetConfig, Renderer as VelloHybridRenderer, Resources,
-    Scene as VelloHybridScene, TargetInit, TextureBindings,
+    RenderOptions, RenderSize, RenderTarget, RenderTargetConfig, Renderer as VelloHybridRenderer,
+    Resources, Scene as VelloHybridScene,
 };
 use wgpu::{
     CommandEncoderDescriptor, CompositeAlphaMode, Features, PresentMode, Texture, TextureFormat,
@@ -18,7 +16,7 @@ use wgpu::{
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use super::scene::{ImageManager, VelloHybridScenePainter};
+use super::scene::{ExternalTextures, ImageManager, VelloHybridScenePainter};
 use crate::common::{ImageCache, VelloHybridRendererOptions};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
@@ -39,7 +37,7 @@ struct ActiveRenderState {
     renderer: VelloHybridRenderer,
     resources: Resources,
     depth_texture_view: TextureView,
-    texture_bindings: FxHashMap<ResourceId, TextureView>,
+    texture_bindings: ExternalTextures,
     render_surface: SurfaceRenderer<'static>,
 }
 
@@ -77,14 +75,14 @@ impl VelloHybridWindowRenderer {
 
     pub fn with_options(config: impl Into<VelloHybridRendererOptions>) -> Self {
         let config = config.into();
-        let render_settings = config.render_settings;
+        let render_settings = config.render_settings.clone();
         let wgpu_context = build_wgpu_context(&config);
         Self {
             render_state: RenderState::Suspended,
             config,
             wgpu_context,
             window_handle: None,
-            scene: VelloHybridScene::new_with(0, 0, render_settings.level),
+            scene: VelloHybridScene::new_with(0, 0, render_settings.level()),
             cached_images: ImageCache::default(),
         }
     }
@@ -155,7 +153,7 @@ impl RenderContext for VelloHybridWindowRenderer {
         let RenderState::Active(state) = &mut self.render_state else {
             return;
         };
-        state.texture_bindings.remove(&resource_id);
+        state.texture_bindings.remove(resource_id);
     }
 }
 
@@ -196,8 +194,9 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
         // Reset the scene to the new dimensions before init kicks off, so callers that
         // query scene size (e.g. `set_size`) see consistent state.
-        let render_settings = self.config.render_settings;
-        self.scene = VelloHybridScene::new_with(width as u16, height as u16, render_settings.level);
+        let render_settings = self.config.render_settings.clone();
+        self.scene =
+            VelloHybridScene::new_with(width as u16, height as u16, render_settings.level());
 
         let surface = self
             .wgpu_context
@@ -312,6 +311,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
 
             let (renderer, resources) = VelloHybridRenderer::new_with(
                 render_surface.device(),
+                render_surface.queue(),
                 &RenderTargetConfig {
                     format: DEFAULT_TEXTURE_FORMAT,
                     width: width as u16,
@@ -319,13 +319,10 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 },
                 render_settings,
             );
-            let depth_texture_view = VelloHybridRenderer::create_depth_texture_view(
-                render_surface.device(),
-                &RenderSize {
-                    width: width as u16,
-                    height: height as u16,
-                },
-            );
+            let depth_texture_view = renderer.create_depth_texture_view(&RenderSize {
+                width: width as u16,
+                height: height as u16,
+            });
 
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
@@ -333,7 +330,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     resources,
                     depth_texture_view,
                     render_surface,
-                    texture_bindings: FxHashMap::default(),
+                    texture_bindings: ExternalTextures::default(),
                 },
             });
             on_ready();
@@ -353,14 +350,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                         .limits()
                         .max_texture_dimension_2d
                         .min(u16::MAX as u32) as u16;
-                    let (width, height) = self
-                        .config
-                        .render_settings
-                        .memory_settings
-                        .image_atlas_config
-                        .atlas_size;
-                    self.cached_images
-                        .set_max_image_size((width.clamp(1, max), height.clamp(1, max)));
+                    self.cached_images.set_max_image_size((max, max));
                     let device_handle = active.render_surface.device_handle.clone();
                     self.wgpu_context.device_pool.push(device_handle);
                     self.render_state = RenderState::Active(active);
@@ -381,17 +371,15 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             self.scene = VelloHybridScene::new_with(
                 width as u16,
                 height as u16,
-                self.config.render_settings.level,
+                self.config.render_settings.level(),
             );
             if let RenderState::Active(active) = &mut self.render_state {
                 active.render_surface.resize(width, height);
-                active.depth_texture_view = VelloHybridRenderer::create_depth_texture_view(
-                    active.render_surface.device(),
-                    &RenderSize {
+                active.depth_texture_view =
+                    active.renderer.create_depth_texture_view(&RenderSize {
                         width: width as u16,
                         height: height as u16,
-                    },
-                );
+                    });
             };
         }
     }
@@ -413,19 +401,17 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                 });
 
         let image_manager = ImageManager {
-            renderer: &mut state.renderer,
             resources: &mut state.resources,
             device: render_surface.device(),
             queue: render_surface.queue(),
-            encoder: &mut encoder,
             cache: &mut self.cached_images,
+            texture_bindings: &mut state.texture_bindings,
         };
 
         let mut scene_painter = VelloHybridScenePainter {
             scene: &mut self.scene,
             layer_stack: Vec::new(),
             image_manager,
-            texture_bindings: &mut state.texture_bindings,
             device_handle: &render_surface.device_handle,
             glyph_caching: self.config.glyph_caching,
         };
@@ -452,49 +438,37 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             render_surface.clear_surface_texture();
             self.scene.reset();
             ImageManager::new(
-                &mut state.renderer,
                 &mut state.resources,
                 render_surface.device(),
                 render_surface.queue(),
-                &mut encoder,
                 &mut self.cached_images,
+                &mut state.texture_bindings,
             )
             .finish_frame();
             render_surface.queue().submit([encoder.finish()]);
             return;
         };
 
-        // Construct Vello Hybrid TextureBindings
-        let mut texture_bindings = TextureBindings::new();
-        for (resource_id, texture_view) in state.texture_bindings.iter() {
-            texture_bindings.insert(TextureId(resource_id.into_ffi()), texture_view.clone());
-        }
-
         state
             .renderer
             .render(
                 &self.scene,
                 &mut state.resources,
-                render_surface.device(),
-                render_surface.queue(),
                 &mut encoder,
-                &RenderSize {
-                    width: render_surface.config.width as u16,
-                    height: render_surface.config.height as u16,
+                RenderTarget {
+                    view: &texture_view,
+                    depth_view: Some(&state.depth_texture_view),
                 },
-                &texture_view,
-                Some(&state.depth_texture_view),
-                &texture_bindings,
-                TargetInit::Clear(ClearSettings::default()),
+                state.texture_bindings.bindings(),
+                RenderOptions::default(),
             )
             .expect("failed to render to texture");
         ImageManager::new(
-            &mut state.renderer,
             &mut state.resources,
             render_surface.device(),
             render_surface.queue(),
-            &mut encoder,
             &mut self.cached_images,
+            &mut state.texture_bindings,
         )
         .finish_frame();
         render_surface.queue().submit([encoder.finish()]);
