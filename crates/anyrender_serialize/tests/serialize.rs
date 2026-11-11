@@ -101,7 +101,7 @@ fn test_all_command_types_roundtrip() {
         4.0,
         3.0,
         Color::from_rgba8(0, 0, 0, 100),
-        anyrender::BoxShadowKind::Outset { clip_to_box: true },
+        anyrender::BoxShadowKind::Outset,
     );
     // Inset box shadow
     scene.draw_box_shadow(

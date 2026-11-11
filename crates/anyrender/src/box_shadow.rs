@@ -11,15 +11,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BoxShadowKind {
-    /// A shadow cast outside of the box (a CSS outer shadow, cast by the border box).
-    Outset {
-        /// Only paint the shadow outside of the box, as CSS specifies.
-        ///
-        /// If the box will be painted opaquely on top of the shadow, setting this to `false`
-        /// avoids clipping the shadow, and the faint seam that can appear where the shadow's and
-        /// the box's anti-aliased edges meet.
-        clip_to_box: bool,
-    },
+    /// A shadow cast outside of the box (a CSS outer shadow, cast by the border box). It is only
+    /// painted outside of the box, as CSS specifies.
+    Outset,
+    /// Like [`Self::Outset`], but also painted underneath the box.
+    ///
+    /// If the box will be painted opaquely on top of the shadow, this avoids clipping the shadow,
+    /// and the faint seam that can appear where the shadow's and the box's anti-aliased edges
+    /// meet.
+    OutsetUnclipped,
     /// A shadow cast inside of the box (a CSS `inset` shadow, cast by the padding box). It is only
     /// painted inside of the box.
     Inset,
@@ -30,6 +30,7 @@ const TOLERANCE: f64 = 0.1;
 /// The geometry of a box shadow, computed from the arguments of [`PaintScene::draw_box_shadow`].
 ///
 /// This is intended for use by backends.
+#[doc(hidden)]
 #[derive(Clone, Debug)]
 pub struct BoxShadowGeometry {
     /// The shape of the shadow before it is blurred: the box spread by the shadow's spread (or
@@ -55,15 +56,15 @@ impl BoxShadowGeometry {
     ) -> Self {
         let std_dev = std_dev.max(0.0);
         let mut shadow = match kind {
-            BoxShadowKind::Outset { .. } => box_shape.spread(spread),
+            BoxShadowKind::Outset | BoxShadowKind::OutsetUnclipped => box_shape.spread(spread),
             BoxShadowKind::Inset => box_shape.spread(-spread),
         };
         shadow.rect = shadow.rect + offset;
         let area = match kind {
-            BoxShadowKind::Outset { clip_to_box } => {
+            BoxShadowKind::Outset | BoxShadowKind::OutsetUnclipped => {
                 // Beyond 3 standard deviations the blurred shadow is effectively transparent.
                 let extent = shadow.rect.inflate(3.0 * std_dev, 3.0 * std_dev);
-                if clip_to_box && extent.overlaps(box_shape.rect) {
+                if kind == BoxShadowKind::Outset && extent.overlaps(box_shape.rect) {
                     // The box, reversed so that it is cut out of the extent.
                     let mut area = extent.union(box_shape.rect).to_path(TOLERANCE);
                     area.extend(box_shape.to_path(TOLERANCE).reverse_subpaths());
@@ -89,7 +90,7 @@ impl BoxShadowGeometry {
 
     /// Whether the shadow must be clipped to [`Self::area`].
     pub fn needs_clip(&self) -> bool {
-        !matches!(self.kind, BoxShadowKind::Outset { clip_to_box: false })
+        self.kind != BoxShadowKind::OutsetUnclipped
     }
 
     /// The path to fill (inside a clip of [`Self::area`] if [`Self::needs_clip`]) to draw the
@@ -153,7 +154,7 @@ mod tests {
 
     #[test]
     fn outset_area_excludes_box() {
-        let kind = BoxShadowKind::Outset { clip_to_box: true };
+        let kind = BoxShadowKind::Outset;
         let geometry = BoxShadowGeometry::new(&box_shape(), Vec2::new(5.0, 5.0), 2.0, 4.0, kind);
         assert_eq!(geometry.shadow.rect, Rect::new(3.0, 3.0, 107.0, 57.0));
         assert_eq!(geometry.area.winding(Point::new(50.0, 25.0)), 0);
@@ -162,7 +163,7 @@ mod tests {
         assert_ne!(geometry.area.winding(Point::new(115.0, 60.0)), 0);
         assert_eq!(geometry.area.winding(Point::new(125.0, 60.0)), 0);
 
-        let kind = BoxShadowKind::Outset { clip_to_box: false };
+        let kind = BoxShadowKind::OutsetUnclipped;
         let geometry = BoxShadowGeometry::new(&box_shape(), Vec2::new(5.0, 5.0), 2.0, 4.0, kind);
         assert_ne!(geometry.area.winding(Point::new(50.0, 25.0)), 0);
     }

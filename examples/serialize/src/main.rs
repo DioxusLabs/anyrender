@@ -80,7 +80,7 @@ fn create_demo_scene() -> Scene {
         0.0,
         8.0,
         Color::from_rgba8(0, 0, 0, 60),
-        anyrender::BoxShadowKind::Outset { clip_to_box: false },
+        anyrender::BoxShadowKind::OutsetUnclipped,
     );
 
     // Card background

@@ -652,7 +652,7 @@ mod box_shadow_tests {
 
     #[test]
     fn unblurred_outset_shadow_is_clipped_to_outside_of_box() {
-        let kind = BoxShadowKind::Outset { clip_to_box: true };
+        let kind = BoxShadowKind::Outset;
         let buffer = render_unblurred(
             Rect::new(20.0, 20.0, 60.0, 60.0),
             Vec2::new(10.0, 10.0),
@@ -664,7 +664,7 @@ mod box_shadow_tests {
         assert_eq!(alpha(&buffer, 15, 15), 0);
         assert_eq!(alpha(&buffer, 75, 75), 0);
 
-        let kind = BoxShadowKind::Outset { clip_to_box: false };
+        let kind = BoxShadowKind::OutsetUnclipped;
         let buffer = render_unblurred(Rect::new(20.0, 20.0, 60.0, 60.0), Vec2::ZERO, 0.0, kind);
         assert_eq!(alpha(&buffer, 40, 40), 255);
     }
@@ -693,7 +693,7 @@ mod box_shadow_tests {
         assert_eq!(alpha(&inset, 50, 50), 0);
         assert_eq!(alpha(&inset, 15, 50), 0);
 
-        let outset = render(BoxShadowKind::Outset { clip_to_box: true });
+        let outset = render(BoxShadowKind::Outset);
         assert!(alpha(&outset, 15, 50) > 250);
         assert_eq!(alpha(&outset, 50, 50), 0);
         assert_eq!(alpha(&outset, 2, 50), 0);

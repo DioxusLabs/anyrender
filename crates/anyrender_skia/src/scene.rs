@@ -583,11 +583,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.save();
         self.set_matrix(transform);
         match kind {
-            anyrender::BoxShadowKind::Outset { clip_to_box: true } => {
+            anyrender::BoxShadowKind::Outset => {
                 self.inner
                     .clip_rrect(box_rrect, skia_safe::ClipOp::Difference, true);
             }
-            anyrender::BoxShadowKind::Outset { clip_to_box: false } => {}
+            anyrender::BoxShadowKind::OutsetUnclipped => {}
             anyrender::BoxShadowKind::Inset => {
                 self.inner
                     .clip_rrect(box_rrect, skia_safe::ClipOp::Intersect, true);
