@@ -226,6 +226,7 @@ name = "anyrender_svg"
 version = "0.15.0"
 dependencies = [
  "anyrender",
+ "anyrender_vello_cpu",
  "image",
  "kurbo",
  "peniko",

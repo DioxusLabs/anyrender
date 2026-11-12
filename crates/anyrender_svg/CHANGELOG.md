@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Keep the `<image>` placement for nested groups and raster images inside embedded SVG images.
 - Draw the red placeholder for unsupported elements at the element's position, including the transform passed to `render_svg_tree`.
+- Interpolate gradient stops unpremultiplied, as SVG requires (and resvg does). A transparent white stop no longer fades through black.
 
 ### Fixed
 
