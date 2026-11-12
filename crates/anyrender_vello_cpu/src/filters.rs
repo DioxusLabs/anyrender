@@ -7,13 +7,10 @@ use anyrender::{
 use vello_common::filter_effects::FilterPrimitive;
 
 pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter_effects::Filter> {
-    let nodes = filter.nodes();
-    if nodes.is_empty() {
-        return None;
-    }
-
     // Vello CPU only supports single-node filters at the moment
-    let node = &filter.nodes()[0];
+    let [node] = filter.nodes() else {
+        return None;
+    };
     let primitive = convert_filter_effect(&node.effect)?;
     Some(vello_common::filter_effects::Filter::from_primitive(
         primitive,

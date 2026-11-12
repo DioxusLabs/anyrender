@@ -3,8 +3,13 @@
 
 use crate::util;
 use anyrender::PaintScene;
+use anyrender::filters::{
+    Filter, FilterEffect, FilterInput, FilterInputs, FilterSource,
+    color_transformation::ColorMatrix, composite::CompositeOperator,
+};
 use kurbo::{Affine, BezPath};
-use peniko::{BlendMode, Fill};
+use peniko::{BlendMode, Compose, Fill, Mix};
+use std::sync::Arc;
 use usvg::{Node, Path};
 
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
@@ -21,6 +26,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 let alpha = g.opacity().get();
                 let is_fully_opaque = alpha >= 1.0;
                 let blend_mode = util::to_blend_mode(g.blend_mode());
+                let group_transform = global_transform * transform;
 
                 // Support clip-path with a single path
                 let clip_path = g
@@ -38,7 +44,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             },
                             blend_mode,
                             alpha,
-                            global_transform * transform,
+                            group_transform,
                             &local_path,
                             None,
                             None,
@@ -47,8 +53,12 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         true
                     }
                     // Else if there is blending to be done then push a layer with a rectangular clip
+                    // A mask also needs an isolated layer for it to be applied to
                     #[allow(deprecated)]
-                    _ if blend_mode != BlendMode::default() || !is_fully_opaque => {
+                    _ if blend_mode != BlendMode::default()
+                        || !is_fully_opaque
+                        || g.mask().is_some() =>
+                    {
                         // Use the layer bounding box as the clip path. It is in the group's
                         // content coordinate space, so map it to canvas space and outset it
                         // by 2px on each side (like resvg) so anti-aliased pixels at the
@@ -57,12 +67,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         let Some(bounding_box) = g.layer_bounding_box() else {
                             continue;
                         };
-                        let rect = kurbo::Rect::from_origin_size(
-                            (bounding_box.x() as f64, bounding_box.y() as f64),
-                            (bounding_box.width() as f64, bounding_box.height() as f64),
-                        );
-                        let rect = (global_transform * transform)
-                            .transform_rect_bbox(rect)
+                        let rect = group_transform
+                            .transform_rect_bbox(util::to_rect(bounding_box))
                             .inflate(2.0, 2.0);
                         scene.push_layer(
                             Fill::NonZero,
@@ -81,6 +87,16 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 };
 
                 render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+
+                // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
+                if let Some(bounding_box) = g.layer_bounding_box() {
+                    let bounds = group_transform
+                        .transform_rect_bbox(util::to_rect(bounding_box))
+                        .inflate(2.0, 2.0);
+                    for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
+                        apply_mask(scene, mask, group_transform, bounds, error_handler);
+                    }
+                }
 
                 if did_push_layer {
                     scene.pop_layer();
@@ -156,6 +172,69 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             }
         }
     }
+}
+
+/// Multiply the content drawn so far in the current layer by `mask`.
+///
+/// The mask's content is drawn into a layer that is composited with `DestIn`. `bounds` must cover
+/// all of the content to be masked, as content outside of it is left untouched. Luminance masks
+/// convert that layer to alpha with a filter, so backends without filter support treat them as
+/// alpha masks.
+fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+    scene: &mut S,
+    mask: &usvg::Mask,
+    transform: Affine,
+    bounds: kurbo::Rect,
+    error_handler: &mut F,
+) {
+    let filter = match mask.kind() {
+        usvg::MaskType::Alpha => None,
+        usvg::MaskType::Luminance => Some(Arc::new(luminance_to_alpha())),
+    };
+    scene.push_layer(
+        Fill::NonZero,
+        BlendMode::new(Mix::Normal, Compose::DestIn),
+        1.0,
+        Affine::IDENTITY,
+        &bounds,
+        filter,
+        None,
+    );
+    // Content outside of the mask's rect is masked out
+    scene.push_clip_layer(Fill::NonZero, transform, &util::to_rect(mask.rect()));
+    render_group(
+        scene,
+        mask.root(),
+        Affine::IDENTITY,
+        transform,
+        error_handler,
+    );
+    scene.pop_layer();
+    scene.pop_layer();
+}
+
+/// A filter that outputs the luminance of its (unpremultiplied) input multiplied by its alpha
+/// as alpha, as specified for luminance masks.
+fn luminance_to_alpha() -> Filter {
+    #[rustfmt::skip]
+    let matrix = ColorMatrix([
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.2125, 0.7154, 0.0721, 0.0, 0.0,
+    ]);
+    let source = FilterInput::Source(FilterSource::SourceGraphic);
+    let mut filter = Filter::empty();
+    let luminance = filter.add(
+        FilterEffect::ColorMatrix(matrix),
+        FilterInputs::single(source.clone()),
+    );
+    let output = filter.add(
+        FilterEffect::Composite(CompositeOperator::In),
+        FilterInputs::dual(FilterInput::Result(luminance), source),
+    );
+    filter.set_output(output);
+    filter
 }
 
 fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(

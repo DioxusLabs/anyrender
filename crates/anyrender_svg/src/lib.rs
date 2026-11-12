@@ -3,8 +3,8 @@
 
 //! Render an SVG into any impl of [`anyrender::PaintScene`].
 //!
-//! This currently lacks support for some important SVG features. Known missing features include: masking, filter effects, group backgrounds
-//! path shape-rendering, and patterns.
+//! This currently lacks support for some important SVG features. Known missing features include: filter effects, group backgrounds
+//! path shape-rendering, and patterns. Luminance masks are rendered as alpha masks by backends without filter support.
 
 // LINEBENDER LINT SET - lib.rs - v1
 // See https://linebender.org/wiki/canonical-lints/
@@ -87,8 +87,8 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyrender::recording::{RenderCommand, Scene};
-    use peniko::Fill;
+    use anyrender::recording::{LayerCommand, RenderCommand, Scene};
+    use peniko::{BlendMode, Compose, Fill, Mix};
 
     fn clip_rule(clip_attrs: &str, path_attrs: &str) -> Fill {
         let svg = format!(
@@ -141,5 +141,54 @@ mod tests {
             clip_rule("", r#"fill-rule="nonzero" clip-rule="evenodd""#),
             Fill::EvenOdd
         );
+    }
+
+    fn mask_layers(mask_attrs: &str) -> Vec<LayerCommand> {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <defs><mask id="mask" {mask_attrs}>
+                    <circle cx="50" cy="50" r="40" fill="white"/>
+                </mask></defs>
+                <rect width="100" height="100" mask="url(#mask)"/>
+            </svg>"##
+        );
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, &svg, Affine::IDENTITY).unwrap();
+        scene
+            .commands
+            .into_iter()
+            .filter_map(|command| match command {
+                RenderCommand::PushLayer(layer) => Some(layer),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn is_mask_layer(layer: &LayerCommand) -> bool {
+        layer.blend == BlendMode::new(Mix::Normal, Compose::DestIn)
+    }
+
+    #[test]
+    fn alpha_mask_is_applied_without_filter() {
+        let layers = mask_layers(r#"style="mask-type:alpha""#);
+        let masks: Vec<_> = layers.iter().filter(|l| is_mask_layer(l)).collect();
+        assert_eq!(masks.len(), 1);
+        assert!(masks[0].filter.is_none());
+    }
+
+    #[test]
+    fn luminance_mask_is_applied_with_filter() {
+        let layers = mask_layers("");
+        let masks: Vec<_> = layers.iter().filter(|l| is_mask_layer(l)).collect();
+        assert_eq!(masks.len(), 1);
+        assert!(masks[0].filter.is_some());
+    }
+
+    #[test]
+    fn mask_layer_is_isolated() {
+        let layers = mask_layers(r#"style="mask-type:alpha""#);
+        assert_eq!(layers.len(), 2);
+        assert!(!is_mask_layer(&layers[0]));
+        assert!(is_mask_layer(&layers[1]));
     }
 }
