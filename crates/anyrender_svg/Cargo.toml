@@ -25,3 +25,6 @@ peniko = { workspace = true }
 kurbo = { workspace = true }
 usvg = { workspace = true, default-features = false }
 image = { workspace = true, default-features = false, optional = true }
+
+[dev-dependencies]
+anyrender_vello_cpu = { workspace = true }

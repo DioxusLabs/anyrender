@@ -4,7 +4,7 @@
 use anyrender::{Paint, PaintScene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
-use peniko::{BlendMode, Color, Compose, Fill, Mix};
+use peniko::{BlendMode, Color, Compose, Fill, InterpolationAlphaSpace, Mix};
 
 #[cfg(feature = "image")]
 use peniko::{Blob, ImageBrush};
@@ -193,7 +193,8 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
             let transform = Affine::new(arr);
             let gradient = peniko::Gradient::new_linear(start, end)
                 .with_stops(stops.as_slice())
-                .with_extend(to_extend(gr.spread_method()));
+                .with_extend(to_extend(gr.spread_method()))
+                .with_interpolation_alpha_space(InterpolationAlphaSpace::Unpremultiplied);
             Some((Paint::Gradient(gradient), transform))
         }
         usvg::Paint::RadialGradient(gr) => {
@@ -232,7 +233,8 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
                 end_radius,
             )
             .with_stops(stops.as_slice())
-            .with_extend(to_extend(gr.spread_method()));
+            .with_extend(to_extend(gr.spread_method()))
+            .with_interpolation_alpha_space(InterpolationAlphaSpace::Unpremultiplied);
             Some((Paint::Gradient(gradient), transform))
         }
         usvg::Paint::Pattern(_) => None,

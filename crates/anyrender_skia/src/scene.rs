@@ -1034,7 +1034,7 @@ mod sk_peniko {
     use peniko::color::{AlphaColor, ColorSpaceTag, HueDirection, Srgb};
     use peniko::{
         BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageBrush, ImageData,
-        ImageFormat, Mix,
+        ImageFormat, InterpolationAlphaSpace, Mix,
     };
     use peniko::{Fill, color::DynamicColor};
     use skia_safe::AlphaType as SkAlphaType;
@@ -1102,6 +1102,16 @@ mod sk_peniko {
         )
     }
 
+    fn in_premul_from_alpha_space(
+        alpha_space: InterpolationAlphaSpace,
+    ) -> skia_safe::gradient_shader::interpolation::InPremul {
+        use skia_safe::gradient_shader::interpolation::InPremul;
+        match alpha_space {
+            InterpolationAlphaSpace::Premultiplied => InPremul::Yes,
+            InterpolationAlphaSpace::Unpremultiplied => InPremul::No,
+        }
+    }
+
     pub(super) fn shader_from_gradient(
         gradient: &Gradient,
         brush_transform: Option<kurbo::Affine>,
@@ -1128,7 +1138,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
@@ -1165,7 +1175,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
@@ -1216,7 +1226,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
