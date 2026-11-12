@@ -96,45 +96,45 @@ impl RenderContext for NullScenePainter {}
 impl PaintScene for NullScenePainter {
     fn reset(&mut self) {}
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         _fill: peniko::Fill,
-        _blend: impl Into<peniko::BlendMode>,
+        _blend: peniko::BlendMode,
         _alpha: f32,
         _transform: kurbo::Affine,
-        _clip: &impl kurbo::Shape,
+        _clip: crate::PaintShape<'_>,
         _filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
     }
 
-    fn push_clip_layer(
+    fn push_clip_layer_shape(
         &mut self,
         _fill: peniko::Fill,
         _transform: kurbo::Affine,
-        _clip: &impl kurbo::Shape,
+        _clip: crate::PaintShape<'_>,
     ) {
     }
 
     fn pop_layer(&mut self) {}
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         _style: &kurbo::Stroke,
         _transform: kurbo::Affine,
-        _brush: impl Into<crate::PaintRef<'a>>,
+        _brush: crate::PaintRef<'_>,
         _brush_transform: Option<kurbo::Affine>,
-        _shape: &impl kurbo::Shape,
+        _shape: crate::PaintShape<'_>,
     ) {
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         _style: peniko::Fill,
         _transform: kurbo::Affine,
-        _brush: impl Into<crate::PaintRef<'a>>,
+        _brush: crate::PaintRef<'_>,
         _brush_transform: Option<kurbo::Affine>,
-        _shape: &impl kurbo::Shape,
+        _shape: crate::PaintShape<'_>,
     ) {
     }
 

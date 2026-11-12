@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     BoxShadowKind, Filter, Glyph, NonUniformRoundedRect, NormalizedCoord, Paint, PaintRef,
-    PaintScene, RenderContext,
+    PaintScene, PaintShape, RenderContext,
 };
-use kurbo::{Affine, BezPath, Shape, Stroke, Vec2};
+use kurbo::{Affine, BezPath, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
 
 #[cfg(feature = "serde")]
@@ -185,18 +185,17 @@ impl PaintScene for Scene {
         self.commands.clear()
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let blend = blend.into();
-        let clip = clip.into_path(self.tolerance);
+        let clip = clip.into_bez_path(self.tolerance);
         let layer = LayerCommand {
             fill,
             blend,
@@ -209,8 +208,8 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PushLayer(layer));
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
-        let clip = clip.into_path(self.tolerance);
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
+        let clip = clip.into_bez_path(self.tolerance);
         let layer = ClipCommand {
             fill,
             transform,
@@ -223,16 +222,16 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PopLayer);
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        paint_ref: impl Into<PaintRef<'a>>,
+        paint_ref: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
-        let shape = shape.into_path(self.tolerance);
-        let brush = self.convert_paint(paint_ref.into());
+        let shape = shape.into_bez_path(self.tolerance);
+        let brush = self.convert_paint(paint_ref);
         let stroke = StrokeCommand {
             style: style.clone(),
             transform,
@@ -243,16 +242,16 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::Stroke(stroke));
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
-        let shape = shape.into_path(self.tolerance);
-        let brush = self.convert_paint(paint.into());
+        let shape = shape.into_bez_path(self.tolerance);
+        let brush = self.convert_paint(paint);
         let fill = FillCommand {
             fill: style,
             transform,

@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
 use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
-use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
+use anyrender::{
+    Filter, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape, RenderContext, ResourceId,
+};
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Shape, Stroke};
+use kurbo::{Affine, Diagonal2, Stroke};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
 use rustc_hash::FxHashSet;
 use vello_common::{
@@ -364,13 +366,13 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.reset();
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
@@ -378,25 +380,25 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);
-        if let Some(rect) = clip.as_rect() {
-            self.scene.push_clip_rect(&rect);
+        if let PaintShape::Rect(rect) = clip {
+            self.scene.push_clip_rect(rect);
         } else {
             self.scene
-                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_path(&clip.into_bez_path(DEFAULT_TOLERANCE));
         }
         self.scene
-            .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+            .push_layer(None, Some(blend), Some(alpha), None, filter);
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Clip);
-        if let Some(rect) = clip.as_rect() {
-            self.scene.push_clip_rect(&rect);
+        if let PaintShape::Rect(rect) = clip {
+            self.scene.push_clip_rect(rect);
         } else {
             self.scene
-                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_path(&clip.into_bez_path(DEFAULT_TOLERANCE));
         }
     }
 
@@ -412,41 +414,43 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
-        let paint = self.convert_paint(paint.into());
+        let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.scene
+            .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint = self.convert_paint(paint.into());
+        let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        if let Some(rect) = shape.as_rect() {
-            self.scene.fill_rect(&rect);
+        if let PaintShape::Rect(rect) = shape {
+            self.scene.fill_rect(rect);
         } else {
-            self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+            self.scene
+                .fill_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
     }
 

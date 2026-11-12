@@ -7,7 +7,7 @@ use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
 use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
-use anyrender::{PaintScene, RenderContext};
+use anyrender::{PaintScene, PaintShape, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
     BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Data, Font, FontArguments,
@@ -113,16 +113,24 @@ impl SkiaScenePainter<'_> {
         self.inner.concat(&sk_kurbo::matrix_from_affine(transform));
     }
 
-    fn clip(&self, fill: peniko::Fill, shape: &impl kurbo::Shape) {
-        if let Some(rect) = shape.as_rect() {
-            self.inner.clip_rect(sk_kurbo::rect_from(rect), None, true);
-        } else if let Some(rrect) = shape.as_rounded_rect() {
-            self.inner
-                .clip_rrect(sk_kurbo::rrect_from(rrect), None, true);
-        } else {
-            let mut path = sk_kurbo::path_from_shape(shape);
-            path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
-            self.inner.clip_path(&path, None, true);
+    fn clip(&self, fill: peniko::Fill, shape: PaintShape<'_>) {
+        match shape {
+            PaintShape::Rect(rect) => {
+                self.inner.clip_rect(sk_kurbo::rect_from(*rect), None, true);
+            }
+            PaintShape::RoundedRect(rrect) => {
+                self.inner
+                    .clip_rrect(sk_kurbo::rrect_from(*rrect), None, true);
+            }
+            PaintShape::NonUniformRoundedRect(rrect) => {
+                self.inner
+                    .clip_rrect(sk_kurbo::rrect_from_non_uniform(rrect), None, true);
+            }
+            shape => {
+                let mut path = sk_kurbo::path_from_shape(&shape);
+                path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
+                self.inner.clip_path(&path, None, true);
+            }
         }
     }
 
@@ -207,39 +215,48 @@ impl SkiaScenePainter<'_> {
         }
     }
 
-    fn draw_shape(&mut self, shape: &impl kurbo::Shape) {
+    fn draw_shape(&mut self, shape: PaintShape<'_>) {
         self.draw_shape_with_fill(shape, None);
     }
-
     fn draw_shape_with_fill(
         &mut self,
-        shape: &impl kurbo::Shape,
+        shape: PaintShape<'_>,
         fill: impl Into<Option<peniko::Fill>>,
     ) {
-        if let Some(rect) = shape.as_rect() {
-            self.inner
-                .draw_rect(sk_kurbo::rect_from(rect), &self.cache.paint);
-        } else if let Some(rrect) = shape.as_rounded_rect() {
-            self.inner
-                .draw_rrect(sk_kurbo::rrect_from(rrect), &self.cache.paint);
-        } else if let Some(line) = shape.as_line() {
-            self.inner.draw_line(
-                (line.p0.x as f32, line.p0.y as f32),
-                (line.p1.x as f32, line.p1.y as f32),
-                &self.cache.paint,
-            );
-        } else if let Some(circle) = shape.as_circle() {
-            self.inner.draw_circle(
-                (circle.center.x as f32, circle.center.y as f32),
-                circle.radius as f32,
-                &self.cache.paint,
-            );
-        } else {
-            let mut path = sk_kurbo::path_from_shape(shape);
-            if let Some(fill) = fill.into() {
-                path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
+        match shape {
+            PaintShape::Rect(rect) => {
+                self.inner
+                    .draw_rect(sk_kurbo::rect_from(*rect), &self.cache.paint);
             }
-            self.inner.draw_path(&path, &self.cache.paint);
+            PaintShape::RoundedRect(rrect) => {
+                self.inner
+                    .draw_rrect(sk_kurbo::rrect_from(*rrect), &self.cache.paint);
+            }
+            PaintShape::NonUniformRoundedRect(rrect) => {
+                self.inner
+                    .draw_rrect(sk_kurbo::rrect_from_non_uniform(rrect), &self.cache.paint);
+            }
+            PaintShape::Line(line) => {
+                self.inner.draw_line(
+                    (line.p0.x as f32, line.p0.y as f32),
+                    (line.p1.x as f32, line.p1.y as f32),
+                    &self.cache.paint,
+                );
+            }
+            PaintShape::Circle(circle) => {
+                self.inner.draw_circle(
+                    (circle.center.x as f32, circle.center.y as f32),
+                    circle.radius as f32,
+                    &self.cache.paint,
+                );
+            }
+            shape => {
+                let mut path = sk_kurbo::path_from_shape(&shape);
+                if let Some(fill) = fill.into() {
+                    path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
+                }
+                self.inner.draw_path(&path, &self.cache.paint);
+            }
         }
     }
 
@@ -427,18 +444,16 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.clear(Color::WHITE);
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: peniko::Fill,
-        blend: impl Into<peniko::BlendMode>,
+        blend: peniko::BlendMode,
         alpha: f32,
         transform: kurbo::Affine,
-        clip: &impl kurbo::Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let blend: peniko::BlendMode = blend.into();
-
         self.reset_paint();
         self.set_paint_alpha(alpha);
         self.set_paint_blend_mode(blend);
@@ -461,11 +476,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.save_layer(&save_layer_rec);
     }
 
-    fn push_clip_layer(
+    fn push_clip_layer_shape(
         &mut self,
         fill: peniko::Fill,
         transform: kurbo::Affine,
-        clip: &impl kurbo::Shape,
+        clip: PaintShape<'_>,
     ) {
         self.inner.save(); // we need to do two saves because of pop_layer
 
@@ -479,13 +494,13 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.restore();
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &kurbo::Stroke,
         transform: kurbo::Affine,
-        brush: impl Into<anyrender::PaintRef<'a>>,
+        brush: anyrender::PaintRef<'_>,
         brush_transform: Option<kurbo::Affine>,
-        shape: &impl kurbo::Shape,
+        shape: PaintShape<'_>,
     ) {
         self.set_matrix(transform);
 
@@ -495,13 +510,13 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.draw_shape(shape);
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: peniko::Fill,
         transform: kurbo::Affine,
-        brush: impl Into<anyrender::PaintRef<'a>>,
+        brush: anyrender::PaintRef<'_>,
         brush_transform: Option<kurbo::Affine>,
-        shape: &impl kurbo::Shape,
+        shape: PaintShape<'_>,
     ) {
         self.set_matrix(transform);
 

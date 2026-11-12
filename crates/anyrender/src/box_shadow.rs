@@ -120,13 +120,7 @@ impl BoxShadowGeometry {
         if clip {
             scene.push_clip_layer(Fill::NonZero, transform, &self.area);
         }
-        scene.fill(
-            Fill::NonZero,
-            transform,
-            color,
-            None,
-            &self.unblurred_path(),
-        );
+        scene.fill(Fill::NonZero, transform, color, None, self.unblurred_path());
         if clip {
             scene.pop_layer();
         }
