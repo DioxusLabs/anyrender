@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use crate::{Filter, Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
-use kurbo::{Affine, BezPath, Rect, Shape, Stroke};
+use crate::{
+    BoxShadowKind, Filter, Glyph, NonUniformRoundedRect, NormalizedCoord, Paint, PaintRef,
+    PaintScene, RenderContext,
+};
+use kurbo::{Affine, BezPath, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
 
 #[cfg(feature = "serde")]
@@ -121,15 +124,17 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
     pub glyphs: Vec<Glyph>,
 }
 
-/// Draw a box shadow around a box
+/// Draw a box shadow cast by a box
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BoxShadowCommand {
     pub transform: Affine,
-    pub rect: Rect,
-    pub brush: Color,
-    pub radius: f64,
+    pub box_shape: NonUniformRoundedRect,
+    pub offset: Vec2,
+    pub spread: f64,
     pub std_dev: f64,
+    pub color: Color,
+    pub kind: BoxShadowKind,
 }
 
 /// A recording of a Scene or Scene Fragment stored as plain data types that can be stored
@@ -292,17 +297,21 @@ impl PaintScene for Scene {
     fn draw_box_shadow(
         &mut self,
         transform: Affine,
-        rect: Rect,
-        brush: Color,
-        radius: f64,
+        box_shape: &NonUniformRoundedRect,
+        offset: Vec2,
+        spread: f64,
         std_dev: f64,
+        color: Color,
+        kind: BoxShadowKind,
     ) {
         let box_shadow = BoxShadowCommand {
             transform,
-            rect,
-            brush,
-            radius,
+            box_shape: *box_shape,
+            offset,
+            spread,
             std_dev,
+            color,
+            kind,
         };
         self.commands.push(RenderCommand::BoxShadow(box_shadow));
     }
