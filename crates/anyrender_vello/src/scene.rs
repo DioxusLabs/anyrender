@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
-use kurbo::{Affine, Shape, Stroke};
-use peniko::{BlendMode, BrushRef, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
+use anyrender::{
+    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+};
+use kurbo::{Affine, Rect, Shape, Stroke};
+use peniko::{
+    BlendMode, BrushRef, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef,
+};
 use rustc_hash::FxHashMap;
 use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
@@ -81,6 +85,31 @@ impl PaintScene for VelloScenePainter<'_, '_> {
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         self.inner.push_clip_layer(fill, transform, clip);
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+
+        // Everything outside of the clip is masked out
+        let everything = Rect::new(-1e6, -1e6, 1e6, 1e6);
+        self.inner
+            .push_layer(Fill::NonZero, blend, 1.0, Affine::IDENTITY, &everything);
+        self.inner.fill(fill, transform, Color::BLACK, None, clip);
+        self.inner.pop_layer();
+
+        match mode {
+            MaskMode::Alpha => self.inner.push_layer(fill, blend, 1.0, transform, clip),
+            MaskMode::Luminance => {
+                self.inner
+                    .push_luminance_mask_layer(fill, 1.0, transform, clip);
+            }
+        }
     }
 
     fn pop_layer(&mut self) {

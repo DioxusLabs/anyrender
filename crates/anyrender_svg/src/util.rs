@@ -21,6 +21,15 @@ pub(crate) fn to_affine(ts: &usvg::Transform) -> Affine {
     Affine::new([sx, ky, kx, sy, tx, ty].map(|&x| f64::from(x)))
 }
 
+pub(crate) fn to_rect(rect: usvg::NonZeroRect) -> Rect {
+    Rect::new(
+        rect.left() as f64,
+        rect.top() as f64,
+        rect.right() as f64,
+        rect.bottom() as f64,
+    )
+}
+
 pub(crate) fn to_stroke(stroke: &usvg::Stroke) -> Stroke {
     let mut conv_stroke = Stroke::new(stroke.width().get() as f64)
         .with_caps(match stroke.linecap() {

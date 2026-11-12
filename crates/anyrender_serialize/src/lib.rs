@@ -194,6 +194,9 @@ impl ResourceCollector {
             RenderCommand::PushClipLayer(clip) => {
                 SerializableRenderCommand::PushClipLayer(clip.clone())
             }
+            RenderCommand::PushMaskLayer(mask) => {
+                SerializableRenderCommand::PushMaskLayer(mask.clone())
+            }
             RenderCommand::PopLayer => SerializableRenderCommand::PopLayer,
             RenderCommand::Stroke(stroke) => SerializableRenderCommand::Stroke(StrokeCommand {
                 style: stroke.style.clone(),
@@ -284,6 +287,9 @@ impl ResourceReconstructor {
             SerializableRenderCommand::PushLayer(layer) => RenderCommand::PushLayer(layer.clone()),
             SerializableRenderCommand::PushClipLayer(clip) => {
                 RenderCommand::PushClipLayer(clip.clone())
+            }
+            SerializableRenderCommand::PushMaskLayer(mask) => {
+                RenderCommand::PushMaskLayer(mask.clone())
             }
             SerializableRenderCommand::PopLayer => RenderCommand::PopLayer,
             SerializableRenderCommand::Stroke(stroke) => RenderCommand::Stroke(StrokeCommand {
