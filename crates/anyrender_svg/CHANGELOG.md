@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Support for SVG masks. Backends without luminance mask support render luminance masks as alpha masks.
+- Support for SVG filter effects, translated into AnyRender `Filter` graphs. How faithfully they are applied depends on the backend.
 
 ### Fixed
 
