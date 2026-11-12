@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BoxShadowKind, Filter, Glyph, NonUniformRoundedRect, NormalizedCoord, Paint, PaintRef,
-    PaintScene, RenderContext,
+    BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect, NormalizedCoord, Paint,
+    PaintRef, PaintScene, RenderContext,
 };
 use kurbo::{Affine, BezPath, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
@@ -23,6 +23,9 @@ pub enum RenderCommand<Font = FontData, Brush = Paint> {
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
     PushClipLayer(ClipCommand),
+    /// Pushes a new mask layer clipped by the specified shape.
+    /// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+    PushMaskLayer(MaskLayerCommand),
     /// Pops the current layer.
     PopLayer,
     /// Strokes a shape using the specified style and brush.
@@ -41,6 +44,7 @@ impl RenderCommand {
         match &mut self {
             RenderCommand::PushLayer(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::PushClipLayer(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::PushMaskLayer(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::PopLayer => {}
             RenderCommand::Stroke(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::Fill(cmd) => cmd.transform = transform * cmd.transform,
@@ -77,6 +81,20 @@ pub struct LayerCommand {
 pub struct ClipCommand {
     #[cfg_attr(feature = "serde", serde(default))]
     pub fill: Fill,
+    pub transform: Affine,
+    #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
+    pub clip: BezPath, // TODO: more shape options
+}
+
+/// Pushes a new mask layer clipped by the specified shape.
+/// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+/// However, the transforms are not saved or modified by the layer stack.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MaskLayerCommand {
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fill: Fill,
+    pub mode: MaskMode,
     pub transform: Affine,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
@@ -217,6 +235,23 @@ impl PaintScene for Scene {
             clip,
         };
         self.commands.push(RenderCommand::PushClipLayer(layer));
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        let clip = clip.into_path(self.tolerance);
+        let layer = MaskLayerCommand {
+            fill,
+            mode,
+            transform,
+            clip,
+        };
+        self.commands.push(RenderCommand::PushMaskLayer(layer));
     }
 
     fn pop_layer(&mut self) {

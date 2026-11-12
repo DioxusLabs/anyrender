@@ -1,9 +1,11 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_gpu::Scene`].
 
-use anyrender::{Filter, Glyph, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use anyrender::{
+    Filter, Glyph, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, StyleRef};
+use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 use vello_common::paint::PaintType;
 
 use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
@@ -216,6 +218,18 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         self.scene
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        _mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        // Luminance masks aren't supported yet, so they are treated as alpha masks
+        let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+        self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {

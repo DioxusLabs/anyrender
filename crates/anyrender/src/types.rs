@@ -10,6 +10,19 @@ use crate::ResourceId;
 
 pub type NormalizedCoord = i16;
 
+/// How the content of a mask layer is converted to a mask. See [`PaintScene::push_mask_layer`].
+///
+/// [`PaintScene::push_mask_layer`]: crate::PaintScene::push_mask_layer
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum MaskMode {
+    /// The mask is the alpha of the mask content.
+    #[default]
+    Alpha,
+    /// The mask is the luminance of the mask content multiplied by its alpha.
+    Luminance,
+}
+
 /// A positioned glyph.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

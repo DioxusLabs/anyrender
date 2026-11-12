@@ -2,14 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::util;
-use anyrender::PaintScene;
-use anyrender::filters::{
-    Filter, FilterEffect, FilterInput, FilterInputs, FilterSource,
-    color_transformation::ColorMatrix, composite::CompositeOperator,
-};
+use anyrender::{MaskMode, PaintScene};
 use kurbo::{Affine, BezPath};
-use peniko::{BlendMode, Compose, Fill, Mix};
-use std::sync::Arc;
+use peniko::{BlendMode, Fill};
 use usvg::{Node, Path};
 
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
@@ -176,10 +171,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 
 /// Multiply the content drawn so far in the current layer by `mask`.
 ///
-/// The mask's content is drawn into a layer that is composited with `DestIn`. `bounds` must cover
-/// all of the content to be masked, as content outside of it is left untouched. Luminance masks
-/// convert that layer to alpha with a filter, so backends without filter support treat them as
-/// alpha masks.
+/// The mask's content is drawn into a mask layer. `bounds` must cover all of the content to be
+/// masked, as content outside of it is left untouched.
 fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene: &mut S,
     mask: &usvg::Mask,
@@ -187,19 +180,11 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     bounds: kurbo::Rect,
     error_handler: &mut F,
 ) {
-    let filter = match mask.kind() {
-        usvg::MaskType::Alpha => None,
-        usvg::MaskType::Luminance => Some(Arc::new(luminance_to_alpha())),
+    let mode = match mask.kind() {
+        usvg::MaskType::Alpha => MaskMode::Alpha,
+        usvg::MaskType::Luminance => MaskMode::Luminance,
     };
-    scene.push_layer(
-        Fill::NonZero,
-        BlendMode::new(Mix::Normal, Compose::DestIn),
-        1.0,
-        Affine::IDENTITY,
-        &bounds,
-        filter,
-        None,
-    );
+    scene.push_mask_layer(Fill::NonZero, mode, Affine::IDENTITY, &bounds);
     // Content outside of the mask's rect is masked out
     scene.push_clip_layer(Fill::NonZero, transform, &util::to_rect(mask.rect()));
     render_group(
@@ -211,29 +196,6 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     );
     scene.pop_layer();
     scene.pop_layer();
-}
-
-/// A filter that outputs the luminance of its (unpremultiplied) input multiplied by its alpha
-/// as alpha, as specified for luminance masks.
-fn luminance_to_alpha() -> Filter {
-    #[rustfmt::skip]
-    let matrix = ColorMatrix([
-        0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 0.0, 0.0,
-        0.2125, 0.7154, 0.0721, 0.0, 0.0,
-    ]);
-    let source = FilterInput::Source(FilterSource::SourceGraphic);
-    let mut filter = Filter::empty();
-    let luminance = filter.add(
-        FilterEffect::ColorMatrix(matrix),
-        FilterInputs::single(source.clone()),
-    );
-    filter.add(
-        FilterEffect::Composite(CompositeOperator::In),
-        FilterInputs::dual(FilterInput::Result(luminance), source),
-    );
-    filter
 }
 
 fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(

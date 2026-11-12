@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
-use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId};
+use anyrender::{
+    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, ImageData, StyleRef};
+use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef};
 use rustc_hash::FxHashSet;
 use vello_common::{
     TextureId,
@@ -386,6 +388,18 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
         self.scene
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        _mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        // Luminance masks aren't supported yet, so they are treated as alpha masks
+        let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+        self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {

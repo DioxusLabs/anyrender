@@ -10,9 +10,9 @@ use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
-    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Data, Font, FontArguments,
-    FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle,
-    PathEffect, Point, Point3, RRect, Shader, Typeface,
+    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorFilter, ColorSpace, Data, Font,
+    FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
+    PaintJoin, PaintStyle, PathEffect, Point, Point3, RRect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -459,6 +459,28 @@ impl PaintScene for SkiaScenePainter<'_> {
         }
 
         self.inner.save_layer(&save_layer_rec);
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: peniko::Fill,
+        mode: anyrender::MaskMode,
+        transform: kurbo::Affine,
+        clip: &impl kurbo::Shape,
+    ) {
+        self.reset_paint();
+        self.cache.paint.set_blend_mode(SkBlendMode::DstIn);
+        if mode == anyrender::MaskMode::Luminance {
+            self.cache.paint.set_color_filter(ColorFilter::luma());
+        }
+
+        self.inner.save();
+
+        self.set_matrix(transform);
+        self.clip(fill, clip);
+
+        self.inner
+            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
     }
 
     fn push_clip_layer(

@@ -218,6 +218,13 @@ pub trait PaintScene: RenderContext {
     /// However, the transforms are not saved or modified by the layer stack.
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape);
 
+    /// Pushes a new mask layer clipped by the specified shape.
+    /// Content drawn until the layer is popped is used as a mask for the content drawn before it
+    /// in the enclosing layer, converted to a mask according to `mode`. Content of the enclosing
+    /// layer outside of the clip shape is not affected.
+    /// However, the transforms are not saved or modified by the layer stack.
+    fn push_mask_layer(&mut self, fill: Fill, mode: MaskMode, transform: Affine, clip: &impl Shape);
+
     /// Pops the current layer.
     fn pop_layer(&mut self);
 
@@ -298,6 +305,12 @@ pub trait PaintScene: RenderContext {
                 RenderCommand::PushClipLayer(cmd) => {
                     self.push_clip_layer(cmd.fill, scene_transform * cmd.transform, &cmd.clip)
                 }
+                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer(
+                    cmd.fill,
+                    cmd.mode,
+                    scene_transform * cmd.transform,
+                    &cmd.clip,
+                ),
                 RenderCommand::PopLayer => self.pop_layer(),
                 RenderCommand::Stroke(cmd) => self.stroke(
                     &cmd.style,

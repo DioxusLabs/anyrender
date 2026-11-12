@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use anyrender::{Filter, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use anyrender::{Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Shape, Stroke};
-use peniko::{BlendMode, Color, Fill, FontData, ImageBrush, StyleRef};
+use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
 use vello_cpu::{PaintType, Pixmap};
 
 use crate::image_cache::{ImageCache, ImageCacheConfig};
@@ -214,6 +214,18 @@ impl PaintScene for VelloCpuScenePainter {
             None,
             filter,
         );
+    }
+
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        _mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        // Luminance masks aren't supported yet, so they are treated as alpha masks
+        let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+        self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
