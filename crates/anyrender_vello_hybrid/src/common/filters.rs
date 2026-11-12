@@ -4,21 +4,31 @@ use anyrender::filters::{EdgeMode, Filter, FilterEffect, FilterInput, FilterSour
 use vello_common::filter_effects::FilterPrimitive;
 
 pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter_effects::Filter> {
-    // Vello Hybrid only supports single-node filters that read the source graphic. Converting
-    // just the first node of a larger graph would render the wrong result, so skip the filter.
-    let [node] = filter.nodes() else {
-        return None;
-    };
-    if !matches!(
-        node.inputs.primary,
-        None | Some(FilterInput::Source(FilterSource::SourceGraphic))
-    ) {
+    // Vello Hybrid only supports single-node filters. For a linear chain (each node reads the
+    // previous node's result, like a CSS filter list) apply the first node rather than nothing.
+    // Skip other graphs, where the first node alone renders something unrelated to the output.
+    let nodes = filter.nodes();
+    let node = nodes.first()?;
+    if !is_linear_chain(&filter) {
         return None;
     }
     let primitive = convert_filter_effect(&node.effect)?;
     Some(vello_common::filter_effects::Filter::from_primitive(
         primitive,
     ))
+}
+
+fn is_linear_chain(filter: &Filter) -> bool {
+    let nodes = filter.nodes();
+    filter.output().0 as usize + 1 == nodes.len()
+        && nodes.iter().enumerate().all(|(i, node)| {
+            node.inputs.secondary.is_none()
+                && match &node.inputs.primary {
+                    None | Some(FilterInput::Source(FilterSource::SourceGraphic)) => i == 0,
+                    Some(FilterInput::Result(id)) => id.0 as usize + 1 == i,
+                    Some(FilterInput::Source(_)) => false,
+                }
+        })
 }
 
 pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimitive> {
