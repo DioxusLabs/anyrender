@@ -82,8 +82,7 @@ impl Filter {
     /// Use this for direct access to low-level SVG filter operations.
     pub fn single(primitive: FilterEffect) -> Self {
         let mut graph = Self::empty();
-        let filter_id = graph.add(primitive, FilterInputs::NONE);
-        graph.set_output(filter_id);
+        graph.add(primitive, FilterInputs::NONE);
         graph
     }
 
@@ -98,9 +97,7 @@ impl Filter {
                 primary: last_id.map(FilterInput::Result),
                 secondary: None,
             };
-            let filter_id = graph.add(primitive, inputs);
-            graph.set_output(filter_id);
-            last_id = Some(filter_id);
+            last_id = Some(graph.add(primitive, inputs));
         }
         graph
     }
@@ -108,6 +105,7 @@ impl Filter {
     /// Add a filter primitive with optional inputs.
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
+    /// The added primitive becomes the output of the graph.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
     pub fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
         let id = FilterId(self.primitives.len() as u16);
@@ -117,6 +115,7 @@ impl Filter {
         self.expansion_rect = self.expansion_rect.union(primitive_rect);
 
         self.primitives.push(FilterGraphNode { effect, inputs });
+        self.output = id;
 
         id
     }
@@ -129,11 +128,6 @@ impl Filter {
     /// The output filter for the graph.
     pub fn output(&self) -> FilterId {
         self.output
-    }
-
-    /// Set the output filter for the graph.
-    pub fn set_output(&mut self, output: FilterId) {
-        self.output = output;
     }
 
     /// Calculate the bounds expansion for this filter in pixel/device space.

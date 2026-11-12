@@ -229,11 +229,10 @@ fn luminance_to_alpha() -> Filter {
         FilterEffect::ColorMatrix(matrix),
         FilterInputs::single(source.clone()),
     );
-    let output = filter.add(
+    filter.add(
         FilterEffect::Composite(CompositeOperator::In),
         FilterInputs::dual(FilterInput::Result(luminance), source),
     );
-    filter.set_output(output);
     filter
 }
 

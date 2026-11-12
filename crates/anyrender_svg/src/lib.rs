@@ -181,7 +181,9 @@ mod tests {
         let layers = mask_layers("");
         let masks: Vec<_> = layers.iter().filter(|l| is_mask_layer(l)).collect();
         assert_eq!(masks.len(), 1);
-        assert!(masks[0].filter.is_some());
+        let filter = masks[0].filter.as_ref().unwrap();
+        assert_eq!(filter.nodes().len(), 2);
+        assert_eq!(filter.output().0, 1);
     }
 
     #[test]

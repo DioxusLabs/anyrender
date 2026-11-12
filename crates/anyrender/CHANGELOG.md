@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Changed
 
-- `Filter::set_output` is now public, for building filter graphs whose output isn't the last node.
+- `Filter::add` now makes the added primitive the graph's output, so graphs built with `Filter::empty` and `add` output their last node instead of their first.
 
 ## [0.14.0] - 2026-10-03
 
