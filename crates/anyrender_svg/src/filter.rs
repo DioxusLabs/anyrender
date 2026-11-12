@@ -41,24 +41,6 @@ use std::sync::Arc;
 
 use crate::util;
 
-/// `SourceAlpha`: RGB channels zeroed, alpha preserved.
-const SOURCE_ALPHA_MATRIX: ColorMatrix = ColorMatrix([
-    0.0, 0.0, 0.0, 0.0, 0.0, // Red = 0
-    0.0, 0.0, 0.0, 0.0, 0.0, // Green = 0
-    0.0, 0.0, 0.0, 0.0, 0.0, // Blue = 0
-    0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
-]);
-
-/// `luminanceToAlpha`: alpha computed from RGB luminance, RGB zeroed.
-///
-/// Coefficients per <https://drafts.fxtf.org/filter-effects/#elementdef-fecolormatrix>.
-const LUMINANCE_TO_ALPHA_MATRIX: ColorMatrix = ColorMatrix([
-    0.0, 0.0, 0.0, 0.0, 0.0, // Red = 0
-    0.0, 0.0, 0.0, 0.0, 0.0, // Green = 0
-    0.0, 0.0, 0.0, 0.0, 0.0, // Blue = 0
-    0.2125, 0.7154, 0.0721, 0.0, 0.0, // Alpha = luminance(RGB)
-]);
-
 /// Convert a chain of usvg filters (an element may have multiple filters applied
 /// in sequence) into a single [`anyrender::Filter`] graph.
 ///
@@ -131,7 +113,7 @@ impl FilterContext<'_> {
                 Some(id) => {
                     let alpha_id = *self.source_alpha.get_or_insert_with(|| {
                         self.graph.add(
-                            FilterEffect::ColorMatrix(SOURCE_ALPHA_MATRIX),
+                            FilterEffect::ColorMatrix(ColorMatrix::SOURCE_ALPHA),
                             FilterInputs::single(FilterInput::Result(id)),
                         )
                     });
@@ -423,7 +405,7 @@ fn to_color_matrix(kind: &usvg::filter::ColorMatrixKind) -> ColorMatrix {
         usvg::filter::ColorMatrixKind::HueRotate(degrees) => {
             ColorMatrix::hue_rotate(degrees.to_radians())
         }
-        usvg::filter::ColorMatrixKind::LuminanceToAlpha => LUMINANCE_TO_ALPHA_MATRIX,
+        usvg::filter::ColorMatrixKind::LuminanceToAlpha => ColorMatrix::LUMINANCE_TO_ALPHA,
     }
 }
 

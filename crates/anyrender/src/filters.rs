@@ -1115,6 +1115,23 @@ pub mod color_transformation {
             0.0, 0.0, 0.0, 1.0, 0.0, // Blue = Alpha
             0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
         ]);
+
+        /// `SourceAlpha`: RGB channels zeroed, alpha preserved.
+        pub const SOURCE_ALPHA: Self = Self([
+            0.0, 0.0, 0.0, 0.0, 0.0, // Red = 0
+            0.0, 0.0, 0.0, 0.0, 0.0, // Green = 0
+            0.0, 0.0, 0.0, 0.0, 0.0, // Blue = 0
+            0.0, 0.0, 0.0, 1.0, 0.0, // Alpha = Alpha
+        ]);
+
+        /// `luminanceToAlpha`: alpha computed from RGB luminance, RGB zeroed.
+        /// <https://drafts.fxtf.org/filter-effects/#elementdef-fecolormatrix>
+        pub const LUMINANCE_TO_ALPHA: Self = Self([
+            0.0, 0.0, 0.0, 0.0, 0.0, // Red = 0
+            0.0, 0.0, 0.0, 0.0, 0.0, // Green = 0
+            0.0, 0.0, 0.0, 0.0, 0.0, // Blue = 0
+            0.2125, 0.7154, 0.0721, 0.0, 0.0, // Alpha = luminance(RGB)
+        ]);
     }
 }
 
