@@ -173,6 +173,113 @@ impl Filter {
     pub fn expansion_rect(&self) -> Rect {
         self.expansion_rect
     }
+
+    /// This graph without the primitives that pass one of their inputs
+    /// through unchanged, and without the primitives its output does not
+    /// depend on.
+    ///
+    /// A `Blend` with a fully transparent `Flood` as either input is the
+    /// other input, and a zero `Offset` is its input. Authoring tools emit
+    /// such chains: Figma exports a blur as `feFlood flood-opacity="0"`,
+    /// `feBlend` with `SourceGraphic` and then `feGaussianBlur`, which this
+    /// reduces to the single blur that single-primitive backends can run.
+    ///
+    /// Returns an empty graph when the output is the unfiltered
+    /// `SourceGraphic`.
+    pub fn without_noops(&self) -> Self {
+        // A missing input is the source graphic.
+        fn normalize(input: &Option<FilterInput>) -> FilterInput {
+            input
+                .clone()
+                .unwrap_or(FilterInput::Source(FilterSource::SourceGraphic))
+        }
+
+        // What each primitive's result is: an input it passes through, or
+        // `None` when the primitive is kept.
+        let mut aliases: Vec<Option<FilterInput>> = Vec::with_capacity(self.primitives.len());
+        let resolve = |aliases: &[Option<FilterInput>], input: &Option<FilterInput>| {
+            let input = normalize(input);
+            match input {
+                FilterInput::Result(id) => aliases
+                    .get(id.0 as usize)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or(input),
+                _ => input,
+            }
+        };
+        let is_transparent = |input: &FilterInput| match input {
+            FilterInput::Result(id) => matches!(
+                self.primitives.get(id.0 as usize).map(|node| &node.effect),
+                Some(FilterEffect::Flood(color)) if color.components[3] <= 0.0
+            ),
+            FilterInput::Source(_) => false,
+        };
+        for node in &self.primitives {
+            let primary = resolve(&aliases, &node.inputs.primary);
+            let alias = match &node.effect {
+                FilterEffect::Offset(offset) if *offset == Vec2::ZERO => Some(primary),
+                FilterEffect::Blend(_) => {
+                    let secondary = resolve(&aliases, &node.inputs.secondary);
+                    if is_transparent(&secondary) {
+                        Some(primary)
+                    } else if is_transparent(&primary) {
+                        Some(secondary)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            aliases.push(alias);
+        }
+
+        let output = match resolve(&aliases, &Some(FilterInput::Result(self.output))) {
+            FilterInput::Source(FilterSource::SourceGraphic) => return Self::empty(),
+            FilterInput::Source(_) => return self.clone(),
+            FilterInput::Result(id) => id,
+        };
+
+        // Keep the primitives the output depends on, in their original order.
+        let mut kept = vec![false; self.primitives.len()];
+        let mut stack = vec![output];
+        while let Some(id) = stack.pop() {
+            let index = id.0 as usize;
+            if std::mem::replace(&mut kept[index], true) {
+                continue;
+            }
+            let inputs = &self.primitives[index].inputs;
+            for input in [&inputs.primary, &inputs.secondary] {
+                if input.is_some()
+                    && let FilterInput::Result(id) = resolve(&aliases, input)
+                {
+                    stack.push(id);
+                }
+            }
+        }
+
+        let mut graph = Self::empty();
+        let mut new_ids = vec![FilterId(0); self.primitives.len()];
+        for (index, node) in self.primitives.iter().enumerate() {
+            if !kept[index] {
+                continue;
+            }
+            let remap = |input: &Option<FilterInput>| {
+                input.as_ref()?;
+                Some(match resolve(&aliases, input) {
+                    FilterInput::Result(id) => FilterInput::Result(new_ids[id.0 as usize]),
+                    source => source,
+                })
+            };
+            let inputs = FilterInputs {
+                primary: remap(&node.inputs.primary),
+                secondary: remap(&node.inputs.secondary),
+            };
+            new_ids[index] = graph.add(node.effect.clone(), inputs);
+        }
+        graph.output = new_ids[output.0 as usize];
+        graph
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1406,5 +1513,84 @@ pub mod convolution {
             bias: 0.5,
             preserve_alpha: true,
         }
+    }
+}
+
+#[cfg(test)]
+mod without_noops_tests {
+    use super::{
+        BlendMode, Filter, FilterEffect, FilterId, FilterInput, FilterInputs, FilterSource,
+    };
+    use kurbo::Vec2;
+    use peniko::color::{AlphaColor, palette};
+
+    const SOURCE: FilterInput = FilterInput::Source(FilterSource::SourceGraphic);
+
+    #[test]
+    fn folds_transparent_flood_blend_into_blur() {
+        let mut filter = Filter::empty();
+        let flood = filter.add(
+            FilterEffect::Flood(AlphaColor::TRANSPARENT),
+            FilterInputs::NONE,
+        );
+        let blend = filter.add(
+            FilterEffect::Blend(BlendMode::Normal),
+            FilterInputs::dual(SOURCE, FilterInput::Result(flood)),
+        );
+        filter.add(
+            FilterEffect::blur(10.5),
+            FilterInputs::single(FilterInput::Result(blend)),
+        );
+
+        let folded = filter.without_noops();
+        assert_eq!(folded.nodes().len(), 1);
+        assert_eq!(folded.nodes()[0].effect, FilterEffect::blur(10.5));
+        assert_eq!(folded.nodes()[0].inputs, FilterInputs::single(SOURCE));
+        assert_eq!(folded.output(), FilterId(0));
+        assert_eq!(folded.expansion_rect(), filter.expansion_rect());
+    }
+
+    #[test]
+    fn folds_zero_offset_and_drops_unused_primitives() {
+        let mut filter = Filter::empty();
+        filter.add(FilterEffect::blur(3.0), FilterInputs::single(SOURCE));
+        let offset = filter.add(FilterEffect::Offset(Vec2::ZERO), FilterInputs::NONE);
+        filter.add(
+            FilterEffect::Offset(Vec2::new(2.0, 1.0)),
+            FilterInputs::single(FilterInput::Result(offset)),
+        );
+
+        let folded = filter.without_noops();
+        assert_eq!(folded.nodes().len(), 1);
+        assert_eq!(
+            folded.nodes()[0].effect,
+            FilterEffect::Offset(Vec2::new(2.0, 1.0))
+        );
+        assert_eq!(folded.nodes()[0].inputs, FilterInputs::single(SOURCE));
+    }
+
+    #[test]
+    fn keeps_opaque_flood_blend() {
+        let mut filter = Filter::empty();
+        let flood = filter.add(FilterEffect::Flood(palette::css::RED), FilterInputs::NONE);
+        filter.add(
+            FilterEffect::Blend(BlendMode::Multiply),
+            FilterInputs::dual(SOURCE, FilterInput::Result(flood)),
+        );
+        assert_eq!(filter.without_noops(), filter);
+    }
+
+    #[test]
+    fn source_graphic_output_is_empty() {
+        let mut filter = Filter::empty();
+        let flood = filter.add(
+            FilterEffect::Flood(AlphaColor::TRANSPARENT),
+            FilterInputs::NONE,
+        );
+        filter.add(
+            FilterEffect::Blend(BlendMode::Normal),
+            FilterInputs::dual(FilterInput::Result(flood), SOURCE),
+        );
+        assert!(filter.without_noops().nodes().is_empty());
     }
 }
