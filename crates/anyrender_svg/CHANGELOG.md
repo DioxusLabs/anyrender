@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Support for SVG masks. Backends without luminance mask support render luminance masks as alpha masks.
+- Support for SVG filter effects, translated into AnyRender `Filter` graphs. How faithfully they are applied depends on the backend.
+
+### Fixed
+
+- Keep the `<image>` placement for nested groups and raster images inside embedded SVG images.
+- Draw the red placeholder for unsupported elements at the element's position, including the transform passed to `render_svg_tree`.
 
 ### Fixed
 

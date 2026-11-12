@@ -247,9 +247,13 @@ fn to_extend(spread_method: usvg::SpreadMethod) -> peniko::Extend {
     }
 }
 
-/// Error handler function for [`super::append_tree_with`] which draws a transparent red box
-/// instead of unsupported SVG features
-pub(crate) fn default_error_handler<S: PaintScene>(scene: &mut S, node: &usvg::Node) {
+/// Error handler for [`crate::render_svg_tree`] which draws a transparent red box over
+/// unsupported SVG features. `transform` maps the node's object space into the scene.
+pub(crate) fn default_error_handler<S: PaintScene>(
+    scene: &mut S,
+    node: &usvg::Node,
+    transform: Affine,
+) {
     let Some(bb) = node.bounding_box() else {
         return;
     };
@@ -261,7 +265,7 @@ pub(crate) fn default_error_handler<S: PaintScene>(scene: &mut S, node: &usvg::N
     };
     scene.fill(
         Fill::NonZero,
-        Affine::IDENTITY,
+        transform,
         color::palette::css::RED.multiply_alpha(0.5),
         None,
         &rect,

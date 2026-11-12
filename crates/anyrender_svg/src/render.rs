@@ -1,21 +1,27 @@
 // Copyright 2024 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::util;
+use crate::{filter, util};
 use anyrender::{MaskMode, PaintScene};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::{BlendMode, Color, Fill};
+use std::sync::Arc;
 use usvg::{Node, Path};
 
-pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+/// `base_transform` maps the root of the current usvg (sub)tree into the SVG's coordinate
+/// space: the identity for the document root, or the `<image>` placement for an embedded SVG.
+/// `global_transform` maps the SVG's coordinate space into the scene.
+///
+/// The error handler is called with the node's transform into scene space.
+pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     group: &usvg::Group,
-    transform: Affine,
+    base_transform: Affine,
     global_transform: Affine,
     error_handler: &mut F,
 ) {
     for node in group.children() {
-        let transform = transform * util::to_affine(&node.abs_transform());
+        let transform = base_transform * util::to_affine(&node.abs_transform());
         match node {
             usvg::Node::Group(g) => {
                 let alpha = g.opacity().get();
@@ -79,7 +85,39 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     false
                 };
 
-                render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+                // Apply filter effects by pushing a layer with an `anyrender::Filter`
+                // attached, clipped to the SVG filter region. The filter is applied to
+                // the group's content before the clip/opacity/blend of the outer layer,
+                // matching the SVG rendering model.
+                //
+                // Groups whose filters cannot be expressed as an `anyrender::Filter`
+                // are reported to the error handler and rendered unfiltered.
+                let mut did_push_filter_layer = false;
+                if !g.filters().is_empty() {
+                    let converted = filter::to_anyrender_filter(g.filters());
+                    match (converted, g.filters_bounding_box()) {
+                        (Some(converted), Some(region)) => {
+                            scene.push_layer(
+                                Fill::NonZero,
+                                BlendMode::default(),
+                                1.0,
+                                group_transform,
+                                &util::to_rect(region),
+                                Some(Arc::new(converted)),
+                                None,
+                            );
+                            did_push_filter_layer = true;
+                        }
+                        _ => error_handler(scene, node, group_transform),
+                    }
+                }
+
+                // usvg's absolute transforms already include the ancestor groups
+                render_group(scene, g, base_transform, global_transform, error_handler);
+
+                if did_push_filter_layer {
+                    scene.pop_layer();
+                }
 
                 // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
                 for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
@@ -126,17 +164,17 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         {
                             let Ok(decoded_image) = util::decode_raw_raster_image(img.kind())
                             else {
-                                error_handler(scene, node);
+                                error_handler(scene, node, global_transform * transform);
                                 continue;
                             };
                             let image = util::into_image(decoded_image, img.rendering_mode());
-                            let image_ts = global_transform * util::to_affine(&img.abs_transform());
+                            let image_ts = global_transform * transform;
                             scene.draw_image(image.as_ref(), image_ts);
                         }
 
                         #[cfg(not(feature = "image"))]
                         {
-                            error_handler(scene, node);
+                            error_handler(scene, node, global_transform * transform);
                             continue;
                         }
                     }
@@ -153,12 +191,12 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             }
             usvg::Node::Text(text) => {
                 // The children of the flattened text group already carry the
-                // text node's absolute transform, so recurse with the identity
+                // text node's absolute transform, so recurse with the base
                 // transform (like the group case) to avoid applying it twice.
                 render_group(
                     scene,
                     text.flattened(),
-                    Affine::IDENTITY,
+                    base_transform,
                     global_transform,
                     error_handler,
                 );
@@ -298,7 +336,7 @@ fn fill_clip_group<S: PaintScene>(
 
 /// Multiply the content drawn so far in the current layer by `mask`.
 ///
-fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     mask: &usvg::Mask,
     transform: Affine,
@@ -321,7 +359,7 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene.pop_layer();
 }
 
-fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     error_handler: &mut F,
     path: &Path,
@@ -342,12 +380,12 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 local_path,
             );
         } else {
-            error_handler(scene, node);
+            error_handler(scene, node, transform);
         }
     }
 }
 
-fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     error_handler: &mut F,
     path: &Path,
@@ -366,7 +404,7 @@ fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 local_path,
             );
         } else {
-            error_handler(scene, node);
+            error_handler(scene, node, transform);
         }
     }
 }
