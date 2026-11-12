@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `VelloCpuScenePainter::finish` no longer panics with the `multithreading` feature (it now flushes before rendering).
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
+- `push_mask_layer` pushes one `DestIn` layer, bounded by the enclosing layer, with the mask
+  content clipped inside it, instead of an unbounded layer plus a second mask layer. This makes
+  masks and multi-shape SVG clip paths about a third faster.
 
 ### Added
 
