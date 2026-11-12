@@ -187,6 +187,10 @@ impl Filter {
     /// Returns an empty graph when the output is the unfiltered
     /// `SourceGraphic`.
     pub fn without_noops(&self) -> Self {
+        if self.primitives.is_empty() {
+            return Self::empty();
+        }
+
         // A missing input is the source graphic.
         fn normalize(input: &Option<FilterInput>) -> FilterInput {
             input
@@ -1592,5 +1596,10 @@ mod without_noops_tests {
             FilterInputs::dual(FilterInput::Result(flood), SOURCE),
         );
         assert!(filter.without_noops().nodes().is_empty());
+    }
+
+    #[test]
+    fn empty_graph_stays_empty() {
+        assert!(Filter::empty().without_noops().nodes().is_empty());
     }
 }
