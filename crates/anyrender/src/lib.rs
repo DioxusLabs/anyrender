@@ -212,6 +212,15 @@ pub trait PaintScene: RenderContext {
     /// Backend implementation of [`push_clip_layer`](Self::push_clip_layer).
     fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>);
 
+    /// Backend implementation of [`push_mask_layer`](Self::push_mask_layer).
+    fn push_mask_layer_shape(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: PaintShape<'_>,
+    );
+
     /// Pops the current layer.
     fn pop_layer(&mut self);
 
@@ -319,6 +328,23 @@ pub trait PaintScene: RenderContext {
         self.push_clip_layer_shape(fill, transform, clip.into());
     }
 
+    /// Pushes a new mask layer clipped by the specified shape.
+    /// Content drawn until the layer is popped is used as a mask for the content drawn before it
+    /// in the enclosing layer, converted to a mask according to `mode`. Everything outside of the
+    /// clip shape counts as fully masked, so content of the enclosing layer outside of it is removed.
+    /// However, the transforms are not saved or modified by the layer stack.
+    fn push_mask_layer<'s>(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: impl Into<PaintShape<'s>>,
+    ) where
+        Self: Sized,
+    {
+        self.push_mask_layer_shape(fill, mode, transform, clip.into());
+    }
+
     /// Strokes a shape using the specified style and brush.
     fn stroke<'a, 's>(
         &mut self,
@@ -374,6 +400,12 @@ pub trait PaintScene: RenderContext {
                 ),
                 RenderCommand::PushClipLayer(cmd) => self.push_clip_layer_shape(
                     cmd.fill,
+                    scene_transform * cmd.transform,
+                    (&cmd.clip).into(),
+                ),
+                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer_shape(
+                    cmd.fill,
+                    cmd.mode,
                     scene_transform * cmd.transform,
                     (&cmd.clip).into(),
                 ),

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::util;
-use anyrender::PaintScene;
+use anyrender::{MaskMode, PaintScene};
 use kurbo::{Affine, BezPath};
 use peniko::{BlendMode, Fill};
 use usvg::{Node, Path};
@@ -21,6 +21,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 let alpha = g.opacity().get();
                 let is_fully_opaque = alpha >= 1.0;
                 let blend_mode = util::to_blend_mode(g.blend_mode());
+                let group_transform = global_transform * transform;
 
                 // Support clip-path with a single path
                 let clip_path = g
@@ -38,7 +39,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                             },
                             blend_mode,
                             alpha,
-                            global_transform * transform,
+                            group_transform,
                             &local_path,
                             None,
                             None,
@@ -47,8 +48,12 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         true
                     }
                     // Else if there is blending to be done then push a layer with a rectangular clip
+                    // A mask also needs an isolated layer for it to be applied to
                     #[allow(deprecated)]
-                    _ if blend_mode != BlendMode::default() || !is_fully_opaque => {
+                    _ if blend_mode != BlendMode::default()
+                        || !is_fully_opaque
+                        || g.mask().is_some() =>
+                    {
                         // Use the layer bounding box as the clip path. It is in the group's
                         // content coordinate space, so map it to canvas space and outset it
                         // by 2px on each side (like resvg) so anti-aliased pixels at the
@@ -57,12 +62,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                         let Some(bounding_box) = g.layer_bounding_box() else {
                             continue;
                         };
-                        let rect = kurbo::Rect::from_origin_size(
-                            (bounding_box.x() as f64, bounding_box.y() as f64),
-                            (bounding_box.width() as f64, bounding_box.height() as f64),
-                        );
-                        let rect = (global_transform * transform)
-                            .transform_rect_bbox(rect)
+                        let rect = group_transform
+                            .transform_rect_bbox(util::to_rect(bounding_box))
                             .inflate(2.0, 2.0);
                         scene.push_layer(
                             Fill::NonZero,
@@ -81,6 +82,11 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 };
 
                 render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
+
+                // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
+                for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
+                    apply_mask(scene, mask, group_transform, error_handler);
+                }
 
                 if did_push_layer {
                     scene.pop_layer();
@@ -156,6 +162,31 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
             }
         }
     }
+}
+
+/// Multiply the content drawn so far in the current layer by `mask`.
+///
+fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
+    scene: &mut S,
+    mask: &usvg::Mask,
+    transform: Affine,
+    error_handler: &mut F,
+) {
+    let mode = match mask.kind() {
+        usvg::MaskType::Alpha => MaskMode::Alpha,
+        usvg::MaskType::Luminance => MaskMode::Luminance,
+    };
+    // Content outside of the mask's rect is masked out
+    let rect = util::to_rect(mask.rect());
+    scene.push_mask_layer(Fill::NonZero, mode, transform, &rect);
+    render_group(
+        scene,
+        mask.root(),
+        Affine::IDENTITY,
+        transform,
+        error_handler,
+    );
+    scene.pop_layer();
 }
 
 fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(

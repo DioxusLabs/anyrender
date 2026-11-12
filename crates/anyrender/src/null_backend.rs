@@ -108,6 +108,15 @@ impl PaintScene for NullScenePainter {
     ) {
     }
 
+    fn push_mask_layer_shape(
+        &mut self,
+        _fill: peniko::Fill,
+        _mode: crate::MaskMode,
+        _transform: kurbo::Affine,
+        _clip: crate::PaintShape<'_>,
+    ) {
+    }
+
     fn push_clip_layer_shape(
         &mut self,
         _fill: peniko::Fill,

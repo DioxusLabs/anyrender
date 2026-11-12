@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
+
 ### Fixed
 
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden

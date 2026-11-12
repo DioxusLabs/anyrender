@@ -3,8 +3,8 @@
 
 //! Render an SVG into any impl of [`anyrender::PaintScene`].
 //!
-//! This currently lacks support for some important SVG features. Known missing features include: masking, filter effects, group backgrounds
-//! path shape-rendering, and patterns.
+//! This currently lacks support for some important SVG features. Known missing features include: filter effects, group backgrounds
+//! path shape-rendering, and patterns. Luminance masks are rendered as alpha masks by backends without luminance mask support.
 
 // LINEBENDER LINT SET - lib.rs - v1
 // See https://linebender.org/wiki/canonical-lints/
@@ -87,6 +87,7 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyrender::MaskMode;
     use anyrender::recording::{RenderCommand, Scene};
     use peniko::Fill;
 
@@ -141,5 +142,45 @@ mod tests {
             clip_rule("", r#"fill-rule="nonzero" clip-rule="evenodd""#),
             Fill::EvenOdd
         );
+    }
+
+    fn render_mask(mask_attrs: &str) -> Vec<RenderCommand> {
+        let svg = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <defs><mask id="mask" {mask_attrs}>
+                    <circle cx="50" cy="50" r="40" fill="white"/>
+                </mask></defs>
+                <rect width="100" height="100" mask="url(#mask)"/>
+            </svg>"##
+        );
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, &svg, Affine::IDENTITY).unwrap();
+        scene.commands
+    }
+
+    fn mask_modes(commands: &[RenderCommand]) -> Vec<MaskMode> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                RenderCommand::PushMaskLayer(mask) => Some(mask.mode),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mask_type_is_preserved() {
+        let alpha = render_mask(r#"style="mask-type:alpha""#);
+        assert_eq!(mask_modes(&alpha), [MaskMode::Alpha]);
+        let luminance = render_mask("");
+        assert_eq!(mask_modes(&luminance), [MaskMode::Luminance]);
+    }
+
+    #[test]
+    fn mask_layer_is_isolated() {
+        let commands = render_mask("");
+        assert!(matches!(commands[0], RenderCommand::PushLayer(_)));
+        assert!(matches!(commands[2], RenderCommand::PushMaskLayer(_)));
+        assert!(matches!(commands.last(), Some(RenderCommand::PopLayer)));
     }
 }

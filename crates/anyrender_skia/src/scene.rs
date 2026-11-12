@@ -10,9 +10,9 @@ use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, PaintShape, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
-    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Data, Font, FontArguments,
-    FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle,
-    PathEffect, Point, Point3, RRect, Shader, Typeface,
+    BlendMode as SkBlendMode, BlurStyle, Canvas, ClipOp, Color, ColorFilter, ColorSpace, Data,
+    Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
+    PaintJoin, PaintStyle, PathEffect, Point, Point3, RRect, Shader, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -114,22 +114,26 @@ impl SkiaScenePainter<'_> {
     }
 
     fn clip(&self, fill: peniko::Fill, shape: PaintShape<'_>) {
+        self.clip_with_op(fill, shape, ClipOp::Intersect);
+    }
+
+    fn clip_with_op(&self, fill: peniko::Fill, shape: PaintShape<'_>, op: ClipOp) {
         match shape {
             PaintShape::Rect(rect) => {
-                self.inner.clip_rect(sk_kurbo::rect_from(*rect), None, true);
+                self.inner.clip_rect(sk_kurbo::rect_from(*rect), op, true);
             }
             PaintShape::RoundedRect(rrect) => {
                 self.inner
-                    .clip_rrect(sk_kurbo::rrect_from(*rrect), None, true);
+                    .clip_rrect(sk_kurbo::rrect_from(*rrect), op, true);
             }
             PaintShape::NonUniformRoundedRect(rrect) => {
                 self.inner
-                    .clip_rrect(sk_kurbo::rrect_from_non_uniform(rrect), None, true);
+                    .clip_rrect(sk_kurbo::rrect_from_non_uniform(rrect), op, true);
             }
             shape => {
                 let mut path = sk_kurbo::path_from_shape(&shape);
                 path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
-                self.inner.clip_path(&path, None, true);
+                self.inner.clip_path(&path, op, true);
             }
         }
     }
@@ -474,6 +478,36 @@ impl PaintScene for SkiaScenePainter<'_> {
         }
 
         self.inner.save_layer(&save_layer_rec);
+    }
+
+    fn push_mask_layer_shape(
+        &mut self,
+        fill: peniko::Fill,
+        mode: anyrender::MaskMode,
+        transform: kurbo::Affine,
+        clip: PaintShape<'_>,
+    ) {
+        self.reset_paint();
+        self.cache.paint.set_blend_mode(SkBlendMode::DstIn);
+        if mode == anyrender::MaskMode::Luminance {
+            self.cache.paint.set_color_filter(ColorFilter::luma());
+        }
+
+        self.inner.save();
+
+        self.set_matrix(transform);
+
+        // Everything outside of the clip is masked out
+        self.inner.save();
+        self.clip_with_op(fill, clip.as_ref(), ClipOp::Difference);
+        self.inner
+            .draw_color(Color::TRANSPARENT, SkBlendMode::Clear);
+        self.inner.restore();
+
+        self.clip(fill, clip);
+
+        self.inner
+            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
     }
 
     fn push_clip_layer_shape(
