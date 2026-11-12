@@ -1,16 +1,20 @@
 use std::sync::Arc;
 
-use anyrender::filters::{EdgeMode, Filter, FilterEffect};
+use anyrender::filters::{EdgeMode, Filter, FilterEffect, FilterInput, FilterSource};
 use vello_common::filter_effects::FilterPrimitive;
 
 pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter_effects::Filter> {
-    let nodes = filter.nodes();
-    if nodes.is_empty() {
+    // Vello Hybrid only supports single-node filters that read the source graphic. Converting
+    // just the first node of a larger graph would render the wrong result, so skip the filter.
+    let [node] = filter.nodes() else {
+        return None;
+    };
+    if !matches!(
+        node.inputs.primary,
+        None | Some(FilterInput::Source(FilterSource::SourceGraphic))
+    ) {
         return None;
     }
-
-    // Vello Hybrid only supports single-node filters at the moment
-    let node = &filter.nodes()[0];
     let primitive = convert_filter_effect(&node.effect)?;
     Some(vello_common::filter_effects::Filter::from_primitive(
         primitive,
