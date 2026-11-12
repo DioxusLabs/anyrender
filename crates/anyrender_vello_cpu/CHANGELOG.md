@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Filters with more than one effect are skipped instead of only applying their first effect.
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
 

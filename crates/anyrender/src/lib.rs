@@ -220,8 +220,8 @@ pub trait PaintScene: RenderContext {
 
     /// Pushes a new mask layer clipped by the specified shape.
     /// Content drawn until the layer is popped is used as a mask for the content drawn before it
-    /// in the enclosing layer, converted to a mask according to `mode`. Content of the enclosing
-    /// layer outside of the clip shape is not affected.
+    /// in the enclosing layer, converted to a mask according to `mode`. Everything outside of the
+    /// clip shape counts as fully masked, so content of the enclosing layer outside of it is removed.
     /// However, the transforms are not saved or modified by the layer stack.
     fn push_mask_layer(&mut self, fill: Fill, mode: MaskMode, transform: Affine, clip: &impl Shape);
 

@@ -25,6 +25,7 @@ pub enum RenderCommand<Font = FontData, Brush = Paint> {
     PushClipLayer(ClipCommand),
     /// Pushes a new mask layer clipped by the specified shape.
     /// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+    /// Everything outside of the clip shape counts as fully masked.
     PushMaskLayer(MaskLayerCommand),
     /// Pops the current layer.
     PopLayer,
@@ -88,6 +89,7 @@ pub struct ClipCommand {
 
 /// Pushes a new mask layer clipped by the specified shape.
 /// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+/// Everything outside of the clip shape counts as fully masked.
 /// However, the transforms are not saved or modified by the layer stack.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

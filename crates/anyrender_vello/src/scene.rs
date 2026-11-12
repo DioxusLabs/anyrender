@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyrender::{
     Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
 };
-use kurbo::{Affine, Shape, Stroke};
+use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{
     BlendMode, BrushRef, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef,
 };
@@ -94,11 +94,17 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         transform: Affine,
         clip: &impl Shape,
     ) {
+        let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+
+        // Everything outside of the clip is masked out
+        let everything = Rect::new(-1e6, -1e6, 1e6, 1e6);
+        self.inner
+            .push_layer(Fill::NonZero, blend, 1.0, Affine::IDENTITY, &everything);
+        self.inner.fill(fill, transform, Color::BLACK, None, clip);
+        self.inner.pop_layer();
+
         match mode {
-            MaskMode::Alpha => {
-                let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
-                self.inner.push_layer(fill, blend, 1.0, transform, clip);
-            }
+            MaskMode::Alpha => self.inner.push_layer(fill, blend, 1.0, transform, clip),
             MaskMode::Luminance => {
                 self.inner
                     .push_luminance_mask_layer(fill, 1.0, transform, clip);

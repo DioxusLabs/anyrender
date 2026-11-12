@@ -84,13 +84,8 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
 
                 // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
-                if let Some(bounding_box) = g.layer_bounding_box() {
-                    let bounds = group_transform
-                        .transform_rect_bbox(util::to_rect(bounding_box))
-                        .inflate(2.0, 2.0);
-                    for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
-                        apply_mask(scene, mask, group_transform, bounds, error_handler);
-                    }
+                for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
+                    apply_mask(scene, mask, group_transform, error_handler);
                 }
 
                 if did_push_layer {
@@ -171,22 +166,19 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
 
 /// Multiply the content drawn so far in the current layer by `mask`.
 ///
-/// The mask's content is drawn into a mask layer. `bounds` must cover all of the content to be
-/// masked, as content outside of it is left untouched.
 fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     scene: &mut S,
     mask: &usvg::Mask,
     transform: Affine,
-    bounds: kurbo::Rect,
     error_handler: &mut F,
 ) {
     let mode = match mask.kind() {
         usvg::MaskType::Alpha => MaskMode::Alpha,
         usvg::MaskType::Luminance => MaskMode::Luminance,
     };
-    scene.push_mask_layer(Fill::NonZero, mode, Affine::IDENTITY, &bounds);
     // Content outside of the mask's rect is masked out
-    scene.push_clip_layer(Fill::NonZero, transform, &util::to_rect(mask.rect()));
+    let rect = util::to_rect(mask.rect());
+    scene.push_mask_layer(Fill::NonZero, mode, transform, &rect);
     render_group(
         scene,
         mask.root(),
@@ -194,7 +186,6 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
         transform,
         error_handler,
     );
-    scene.pop_layer();
     scene.pop_layer();
 }
 

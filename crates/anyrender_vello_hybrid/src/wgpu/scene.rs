@@ -5,7 +5,7 @@ use anyrender::{
     Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
 };
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Shape, Stroke};
+use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef};
 use rustc_hash::FxHashSet;
 use vello_common::{
@@ -397,8 +397,23 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         transform: Affine,
         clip: &impl Shape,
     ) {
-        // Luminance masks aren't supported yet, so they are treated as alpha masks
         let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
+
+        // Everything outside of the clip is masked out
+        let everything = Rect::new(-1e6, -1e6, 1e6, 1e6);
+        self.push_layer(
+            Fill::NonZero,
+            blend,
+            1.0,
+            Affine::IDENTITY,
+            &everything,
+            None,
+            None,
+        );
+        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.pop_layer();
+
+        // Luminance masks aren't supported yet, so they are treated as alpha masks
         self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
