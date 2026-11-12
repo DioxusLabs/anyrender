@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep the `<image>` placement for nested groups and raster images inside embedded SVG images.
 - Draw the red placeholder for unsupported elements at the element's position, including the transform passed to `render_svg_tree`.
 
+### Fixed
+
+- Apply `clip-path`s whose content is transformed, nested in groups, made of several shapes or text, or itself clipped. Previously only a clip whose first child was a plain path was applied, and the clip path's own `transform` (including `objectBoundingBox` units) was ignored.
+
 ## [0.15.0] - 2026-10-03
 
 ### Added
