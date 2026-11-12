@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for SVG masks. Backends without luminance mask support render luminance masks as alpha masks.
 
+### Fixed
+
+- Apply `clip-path`s whose content is transformed, nested in groups, made of several shapes or text, or itself clipped. Previously only a clip whose first child was a plain path was applied, and the clip path's own `transform` (including `objectBoundingBox` units) was ignored.
+
 ## [0.15.0] - 2026-10-03
 
 ### Added

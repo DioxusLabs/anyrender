@@ -3,8 +3,8 @@
 
 use crate::util;
 use anyrender::{MaskMode, PaintScene};
-use kurbo::{Affine, BezPath};
-use peniko::{BlendMode, Fill};
+use kurbo::{Affine, BezPath, Rect};
+use peniko::{BlendMode, Color, Fill};
 use usvg::{Node, Path};
 
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
@@ -23,62 +23,60 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 let blend_mode = util::to_blend_mode(g.blend_mode());
                 let group_transform = global_transform * transform;
 
-                // Support clip-path with a single path
-                let clip_path = g
-                    .clip_path()
-                    .and_then(|path| path.root().children().first());
+                let clip = g.clip_path();
+                let clip_shape = clip.and_then(single_clip_shape);
 
-                let did_push_layer = match clip_path {
-                    // If there is a clip path, then push a layer that clips using it
-                    Some(usvg::Node::Path(clip_path)) => {
-                        let local_path = util::to_bez_path(clip_path);
-                        scene.push_layer(
-                            match clip_path.fill().map(|fill| fill.rule()) {
-                                Some(usvg::FillRule::EvenOdd) => Fill::EvenOdd,
-                                _ => Fill::NonZero,
-                            },
-                            blend_mode,
-                            alpha,
-                            group_transform,
-                            &local_path,
-                            None,
-                            None,
-                        );
+                #[allow(deprecated)]
+                let needs_layer = clip.is_some()
+                    || blend_mode != BlendMode::default()
+                    || !is_fully_opaque
+                    || g.mask().is_some();
 
-                        true
-                    }
-                    // Else if there is blending to be done then push a layer with a rectangular clip
-                    // A mask also needs an isolated layer for it to be applied to
-                    #[allow(deprecated)]
-                    _ if blend_mode != BlendMode::default()
-                        || !is_fully_opaque
-                        || g.mask().is_some() =>
-                    {
-                        // Use the layer bounding box as the clip path. It is in the group's
-                        // content coordinate space, so map it to canvas space and outset it
-                        // by 2px on each side (like resvg) so anti-aliased pixels at the
-                        // layer edge aren't clipped.
-                        // A group without a layer bounding box has nothing to draw.
-                        let Some(bounding_box) = g.layer_bounding_box() else {
-                            continue;
-                        };
-                        let rect = group_transform
-                            .transform_rect_bbox(util::to_rect(bounding_box))
-                            .inflate(2.0, 2.0);
-                        scene.push_layer(
-                            Fill::NonZero,
-                            blend_mode,
-                            alpha,
-                            Affine::IDENTITY,
-                            &rect,
-                            None,
-                            None,
-                        );
-
-                        true
-                    }
+                // The canvas space bounds of the group's layer, when it is clipped by a mask
+                let mut layer_bounds = None;
+                let did_push_layer = if let Some((path, fill, path_transform)) = clip_shape {
+                    // A clip-path made of a single shape can clip the layer directly
+                    scene.push_layer(
+                        fill,
+                        blend_mode,
+                        alpha,
+                        group_transform * path_transform,
+                        &util::to_bez_path(path),
+                        None,
+                        None,
+                    );
+                    true
+                } else if needs_layer {
+                    // Else push a layer with a rectangular clip. Blending, masks and
+                    // any other clip-path are applied to this isolated layer.
+                    //
+                    // Use the layer bounding box as the clip path. It is in the group's
+                    // content coordinate space, so map it to canvas space and outset it
+                    // by 2px on each side (like resvg) so anti-aliased pixels at the
+                    // layer edge aren't clipped. Round it out to whole pixels so that a
+                    // clip mask applied with the same bounds fully covers the layer's edge.
+                    // A group without a layer bounding box has nothing to draw.
+                    let Some(bounding_box) = g.layer_bounding_box() else {
+                        continue;
+                    };
+                    let rect = group_transform
+                        .transform_rect_bbox(util::to_rect(bounding_box))
+                        .inflate(2.0, 2.0)
+                        .expand();
+                    scene.push_layer(
+                        Fill::NonZero,
+                        blend_mode,
+                        alpha,
+                        Affine::IDENTITY,
+                        &rect,
+                        None,
+                        None,
+                    );
+                    layer_bounds = Some(rect);
+                    true
+                } else {
                     // Else if there is no clip or blending then don't push a layer
-                    _ => false,
+                    false
                 };
 
                 render_group(scene, g, Affine::IDENTITY, global_transform, error_handler);
@@ -86,6 +84,11 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                 // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
                 for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
                     apply_mask(scene, mask, group_transform, error_handler);
+                }
+
+                // Apply any clip-path that couldn't clip the layer directly
+                if let (Some(clip), Some(bounds)) = (clip, layer_bounds) {
+                    apply_clip_mask(scene, clip, group_transform, bounds);
                 }
 
                 if did_push_layer {
@@ -160,6 +163,135 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     error_handler,
                 );
             }
+        }
+    }
+}
+
+/// Returns the clip path's shape, its fill rule and its transform (relative to the clipped
+/// element's user space) when `clip` is a single visible shape without nested clip paths.
+fn single_clip_shape(clip: &usvg::ClipPath) -> Option<(&usvg::Path, Fill, Affine)> {
+    if clip.clip_path().is_some() {
+        return None;
+    }
+    let mut shape = None;
+    if !find_single_clip_shape(clip.root(), &mut shape) {
+        return None;
+    }
+    let path = shape?;
+    let transform = util::to_affine(&clip.transform()) * util::to_affine(&path.abs_transform());
+    Some((path, clip_fill_rule(path), transform))
+}
+
+/// Looks for the only visible shape in a clip path group. Returns false if there is more than
+/// one, or if a nested group has its own clip path.
+fn find_single_clip_shape<'a>(group: &'a usvg::Group, shape: &mut Option<&'a usvg::Path>) -> bool {
+    for node in group.children() {
+        match node {
+            usvg::Node::Path(path) => {
+                if !path.is_visible() {
+                    continue;
+                }
+                if shape.is_some() {
+                    return false;
+                }
+                *shape = Some(path);
+            }
+            usvg::Node::Group(g) => {
+                if g.clip_path().is_some() || !find_single_clip_shape(g, shape) {
+                    return false;
+                }
+            }
+            usvg::Node::Text(text) => {
+                if !find_single_clip_shape(text.flattened(), shape) {
+                    return false;
+                }
+            }
+            usvg::Node::Image(_) => {}
+        }
+    }
+    true
+}
+
+fn clip_fill_rule(path: &usvg::Path) -> Fill {
+    match path.fill().map(|fill| fill.rule()) {
+        Some(usvg::FillRule::EvenOdd) => Fill::EvenOdd,
+        _ => Fill::NonZero,
+    }
+}
+
+/// Clip the content drawn so far in the current layer by `clip`, using it as an alpha mask.
+///
+/// `transform` maps the clipped element's user space to canvas space, and `bounds` are the
+/// canvas space bounds of the current layer.
+fn apply_clip_mask<S: PaintScene>(
+    scene: &mut S,
+    clip: &usvg::ClipPath,
+    transform: Affine,
+    bounds: Rect,
+) {
+    scene.push_mask_layer(Fill::NonZero, MaskMode::Alpha, Affine::IDENTITY, &bounds);
+    fill_clip_group(
+        scene,
+        clip.root(),
+        transform * util::to_affine(&clip.transform()),
+        bounds,
+    );
+    scene.pop_layer();
+
+    // A clip path's own clip-path is in the same user space as the clip path itself,
+    // and intersects with it.
+    if let Some(clip) = clip.clip_path() {
+        apply_clip_mask(scene, clip, transform, bounds);
+    }
+}
+
+/// Fill the shapes of a clip path group with an opaque color.
+fn fill_clip_group<S: PaintScene>(
+    scene: &mut S,
+    group: &usvg::Group,
+    transform: Affine,
+    bounds: Rect,
+) {
+    for node in group.children() {
+        match node {
+            usvg::Node::Path(path) => {
+                if !path.is_visible() {
+                    continue;
+                }
+                scene.fill(
+                    clip_fill_rule(path),
+                    transform * util::to_affine(&path.abs_transform()),
+                    Color::BLACK,
+                    None,
+                    &util::to_bez_path(path),
+                );
+            }
+            usvg::Node::Group(g) => match g.clip_path() {
+                // A clip path child with its own clip-path is drawn into a layer and clipped
+                // before being added to the clip path.
+                Some(clip) => {
+                    scene.push_layer(
+                        Fill::NonZero,
+                        BlendMode::default(),
+                        1.0,
+                        Affine::IDENTITY,
+                        &bounds,
+                        None,
+                        None,
+                    );
+                    fill_clip_group(scene, g, transform, bounds);
+                    apply_clip_mask(
+                        scene,
+                        clip,
+                        transform * util::to_affine(&g.abs_transform()),
+                        bounds,
+                    );
+                    scene.pop_layer();
+                }
+                None => fill_clip_group(scene, g, transform, bounds),
+            },
+            usvg::Node::Text(text) => fill_clip_group(scene, text.flattened(), transform, bounds),
+            usvg::Node::Image(_) => {}
         }
     }
 }
