@@ -211,43 +211,37 @@ fn single_clip_shape(clip: &usvg::ClipPath) -> Option<(&usvg::Path, Fill, Affine
     if clip.clip_path().is_some() {
         return None;
     }
-    let mut shape = None;
-    if !find_single_clip_shape(clip.root(), &mut shape) {
-        return None;
-    }
-    let path = shape?;
+    let path = find_single_clip_shape(clip.root())?;
     let transform = util::to_affine(&clip.transform()) * util::to_affine(&path.abs_transform());
     Some((path, clip_fill_rule(path), transform))
 }
 
-/// Looks for the only visible shape in a clip path group. Returns false if there is more than
-/// one, or if a nested group has its own clip path.
-fn find_single_clip_shape<'a>(group: &'a usvg::Group, shape: &mut Option<&'a usvg::Path>) -> bool {
+/// Returns the only visible shape in a clip path group, if it has exactly one and no nested
+/// group has its own clip path.
+fn find_single_clip_shape(group: &usvg::Group) -> Option<&usvg::Path> {
+    find_clip_shape(group).ok().flatten()
+}
+
+/// A clip path group has more than one visible shape, or a nested clip path.
+struct NotSingleShape;
+
+fn find_clip_shape(group: &usvg::Group) -> Result<Option<&usvg::Path>, NotSingleShape> {
+    let mut shape = None;
     for node in group.children() {
-        match node {
-            usvg::Node::Path(path) => {
-                if !path.is_visible() {
-                    continue;
-                }
-                if shape.is_some() {
-                    return false;
-                }
-                *shape = Some(path);
-            }
-            usvg::Node::Group(g) => {
-                if g.clip_path().is_some() || !find_single_clip_shape(g, shape) {
-                    return false;
-                }
-            }
-            usvg::Node::Text(text) => {
-                if !find_single_clip_shape(text.flattened(), shape) {
-                    return false;
-                }
-            }
-            usvg::Node::Image(_) => {}
+        let found = match node {
+            usvg::Node::Path(path) => path.is_visible().then_some(path.as_ref()),
+            usvg::Node::Group(g) if g.clip_path().is_some() => return Err(NotSingleShape),
+            usvg::Node::Group(g) => find_clip_shape(g)?,
+            usvg::Node::Text(text) => find_clip_shape(text.flattened())?,
+            usvg::Node::Image(_) => None,
+        };
+        if let Some(found) = found
+            && shape.replace(found).is_some()
+        {
+            return Err(NotSingleShape);
         }
     }
-    true
+    Ok(shape)
 }
 
 fn clip_fill_rule(path: &usvg::Path) -> Fill {
