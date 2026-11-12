@@ -171,6 +171,7 @@ impl VelloCpuScenePainter {
 
     pub fn finish(mut self) -> Pixmap {
         let mut pixmap = Pixmap::new(self.render_ctx.width(), self.render_ctx.height());
+        self.render_ctx.flush();
         self.render_ctx.render(pixmap.as_mut(), &mut self.resources);
         pixmap
     }
