@@ -258,8 +258,12 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.scene
-            .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        if let PaintShape::Rect(rect) = shape {
+            self.scene.stroke_rect(rect);
+        } else {
+            self.scene
+                .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn fill_shape(

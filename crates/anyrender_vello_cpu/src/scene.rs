@@ -253,8 +253,12 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_paint(paint);
         self.render_ctx
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.render_ctx
-            .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        if let PaintShape::Rect(rect) = shape {
+            self.render_ctx.stroke_rect(rect);
+        } else {
+            self.render_ctx
+                .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        }
     }
 
     fn fill_shape(
