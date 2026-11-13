@@ -3,7 +3,6 @@
 //! Like resvg, each primitive operates in its color space (`color-interpolation-filters`) on the
 //! pixels of the filter region.
 
-use anyrender::Filter;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::{
     FilterColorSpace, FilterEffect, FilterInput, FilterSource,
@@ -11,6 +10,7 @@ use anyrender::filters::{
     lighting::{LightSource, PointLightSource, SpotLightSource},
     turbulence::TurbulenceType,
 };
+use anyrender::{Filter, PaintScene};
 use kurbo::Affine;
 use rgb::FromSlice;
 use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
@@ -495,8 +495,6 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 );
                 Image { pixmap, linear }
             }
-            // `Image` needs an image source, which the filter API doesn't carry yet: pass the
-            // input through unchanged.
             FilterEffect::Tile => {
                 let input = input();
                 Image {
@@ -504,7 +502,15 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     linear: input.linear,
                 }
             }
-            FilterEffect::Image(_) => input(),
+            FilterEffect::Image(image) => {
+                let mut painter = crate::TinySkiaScenePainter::new(w, h);
+                let local = Affine::translate((-region.x() as f64, -region.y() as f64)) * transform;
+                painter.append_scene(image.scene.clone(), local);
+                Image {
+                    pixmap: painter.pixmap().clone(),
+                    linear: false,
+                }
+            }
         };
         let mut result = result;
         // As in resvg, results are only clipped to explicit subregions.
