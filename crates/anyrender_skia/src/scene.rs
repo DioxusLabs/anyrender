@@ -1072,12 +1072,15 @@ fn convert_filter_effect(
         // - `Image` needs to resolve an external image by id from a resource registry.
         FilterEffect::Image(_external_image_source) => None,
         FilterEffect::Tile => {
-            // Like `resolve_input`, which reads a missing input as the source graphic.
             let input_subregion = match node.inputs.primary {
                 Some(FilterInput::Result(input_id)) => {
                     filter.nodes()[input_id.0 as usize].subregion
                 }
-                Some(FilterInput::Source(_)) | None => None,
+                None => {
+                    id.0.checked_sub(1)
+                        .and_then(|prev| filter.nodes()[prev as usize].subregion)
+                }
+                Some(FilterInput::Source(_)) => None,
             };
             match (input_subregion, node.subregion) {
                 (Some(src), Some(dst)) => {

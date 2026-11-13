@@ -220,8 +220,32 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
         linear: false,
     };
 
+    let full = IntRect::from_xywh(0, 0, w, h).unwrap();
     let mut results: Vec<Image> = Vec::with_capacity(filter.nodes().len());
+    // Each result's primitive subregion, in the pixel space of `source`.
+    let mut regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
     for node in filter.nodes() {
+        let input_region = |input: &Option<FilterInput>| match input {
+            None => regions.last().copied().unwrap_or(full),
+            Some(FilterInput::Result(id)) => regions.get(id.0 as usize).copied().unwrap_or(full),
+            Some(FilterInput::Source(_)) => full,
+        };
+        let subregion = match node.subregion {
+            Some(rect) => pixel_region(rect, transform, region, full),
+            None => match node.effect {
+                FilterEffect::Flood(_) | FilterEffect::Turbulence(_) | FilterEffect::Image(_) => {
+                    Some(full)
+                }
+                _ => {
+                    let primary = input_region(&node.inputs.primary);
+                    match &node.inputs.secondary {
+                        Some(_) => union(primary, input_region(&node.inputs.secondary)),
+                        None => Some(primary),
+                    }
+                }
+            },
+        };
+
         let resolve = |input: Option<FilterInput>, results: &[Image]| -> Image {
             match input {
                 None => results.last().cloned().unwrap_or_else(|| source.clone()),
@@ -471,11 +495,24 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 );
                 Image { pixmap, linear }
             }
-            // `Tile` needs the input's primitive subregion and `Image` an image source, neither
-            // of which the filter API carries yet: pass the input through unchanged.
-            FilterEffect::Tile | FilterEffect::Image(_) => input(),
+            // `Image` needs an image source, which the filter API doesn't carry yet: pass the
+            // input through unchanged.
+            FilterEffect::Tile => {
+                let input = input();
+                Image {
+                    pixmap: tile(&input.pixmap, input_region(&node.inputs.primary)),
+                    linear: input.linear,
+                }
+            }
+            FilterEffect::Image(_) => input(),
         };
+        let mut result = result;
+        // As in resvg, results are only clipped to explicit subregions.
+        if node.subregion.is_some() {
+            clip_to(&mut result.pixmap, subregion);
+        }
         results.push(result);
+        regions.push(subregion.unwrap_or(full));
     }
 
     let output = results
@@ -485,4 +522,74 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
         .unwrap_or(source);
     pixmap.fill(tiny_skia::Color::TRANSPARENT);
     replace_region(pixmap, region, &output.into_srgb());
+}
+
+/// Maps a user-space primitive subregion to pixels of the filter `region`, clipped to `full`
+/// (`None` if nothing is left). Rounds outwards like resvg.
+fn pixel_region(
+    rect: kurbo::Rect,
+    transform: Affine,
+    region: IntRect,
+    full: IntRect,
+) -> Option<IntRect> {
+    let rect = transform.transform_rect_bbox(rect);
+    let x = rect.x0.floor() as i32;
+    let y = rect.y0.floor() as i32;
+    IntRect::from_xywh(
+        x.checked_sub(region.x())?,
+        y.checked_sub(region.y())?,
+        rect.width().ceil() as u32,
+        rect.height().ceil() as u32,
+    )?
+    .intersect(&full)
+}
+
+/// Clears the pixels of `pixmap` outside `keep` (all of them if `keep` is `None`).
+fn clip_to(pixmap: &mut Pixmap, keep: Option<IntRect>) {
+    let width = pixmap.width() as usize;
+    for (y, row) in pixmap.data_mut().chunks_mut(width * 4).enumerate() {
+        let (x0, x1) = match keep {
+            Some(k) if (k.top()..k.bottom()).contains(&(y as i32)) => {
+                (k.left() as usize, k.right() as usize)
+            }
+            _ => (0, 0),
+        };
+        row[..x0 * 4].fill(0);
+        row[x1 * 4..].fill(0);
+        if x1 == 0 {
+            row.fill(0);
+        }
+    }
+}
+
+/// Repeats the `tile` part of `pixmap` across a pixmap of the same size, as resvg's `feTile`.
+fn tile(pixmap: &Pixmap, tile: IntRect) -> Pixmap {
+    let mut out = Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
+    let Some(tile_pixmap) = pixmap.clone_rect(tile) else {
+        return out;
+    };
+    let paint = tiny_skia::Paint {
+        shader: tiny_skia::Pattern::new(
+            tile_pixmap.as_ref(),
+            tiny_skia::SpreadMode::Repeat,
+            tiny_skia::FilterQuality::Bicubic,
+            1.0,
+            tiny_skia::Transform::from_translate(tile.x() as f32, tile.y() as f32),
+        ),
+        ..Default::default()
+    };
+    let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, out.width() as f32, out.height() as f32);
+    if let Some(rect) = rect {
+        out.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+    }
+    out
+}
+
+fn union(a: IntRect, b: IntRect) -> Option<IntRect> {
+    IntRect::from_ltrb(
+        a.left().min(b.left()),
+        a.top().min(b.top()),
+        a.right().max(b.right()),
+        a.bottom().max(b.bottom()),
+    )
 }
