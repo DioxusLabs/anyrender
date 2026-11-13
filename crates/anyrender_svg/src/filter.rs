@@ -10,6 +10,7 @@
 //!
 //! - Filter primitive subregions (`x`/`y`/`width`/`height` on a primitive) are ignored.
 //!   The overall filter region *is* honoured (it is used as the layer clip).
+//! - `feConvolveMatrix` `kernelUnitLength` is ignored.
 //!
 //! Filters that cannot be expressed at all (see [`convert_primitive`]) cause the whole
 //! conversion to fail, in which case the caller falls back to the error handler and
