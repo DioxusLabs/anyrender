@@ -1293,6 +1293,7 @@ mod css_color_matrix_tests {
 }
 
 pub mod lighting {
+    use peniko::color::{AlphaColor, Srgb};
 
     /// Diffuse lighting simulation.
     ///
@@ -1309,6 +1310,9 @@ pub mod lighting {
         pub kernel_unit_length: f32,
         /// Configuration of the light source (point, distant, or spot).
         pub light_source: LightSource,
+        /// Color of the light (`lighting-color` in SVG), interpreted in the primitive's
+        /// color space.
+        pub lighting_color: AlphaColor<Srgb>,
     }
 
     /// Specular lighting simulation.
@@ -1328,6 +1332,9 @@ pub mod lighting {
         pub kernel_unit_length: f32,
         /// Configuration of the light source (point, distant, or spot).
         pub light_source: LightSource,
+        /// Color of the light (`lighting-color` in SVG), interpreted in the primitive's
+        /// color space.
+        pub lighting_color: AlphaColor<Srgb>,
     }
 
     /// Light source configurations for lighting effects.
