@@ -79,16 +79,17 @@ impl Filter {
     /// Create a filter from a single filter effect.
     ///
     /// Creates a simple filter graph with a single primitive.
-    /// Use this for direct access to low-level SVG filter operations.
+    /// The primitive operates in sRGB, as CSS filter functions do.
     pub fn single(primitive: FilterEffect) -> Self {
         let mut graph = Self::empty();
-        graph.add(primitive, FilterInputs::NONE);
+        graph.add_with_color_space(primitive, FilterInputs::NONE, FilterColorSpace::Srgb);
         graph
     }
 
     /// Create a filter from an iterator of filter effects.
     ///
-    /// Creates a filter graph where the effects are applied in order.
+    /// Creates a filter graph where the effects are applied in order. The effects operate in
+    /// sRGB, as CSS filter functions do.
     pub fn linear_list(primitives: impl Iterator<Item = FilterEffect>) -> Self {
         let mut graph = Self::empty();
         let mut last_id = None;
@@ -97,7 +98,7 @@ impl Filter {
                 primary: last_id.map(FilterInput::Result),
                 secondary: None,
             };
-            last_id = Some(graph.add(primitive, inputs));
+            last_id = Some(graph.add_with_color_space(primitive, inputs, FilterColorSpace::Srgb));
         }
         graph
     }
@@ -108,16 +109,40 @@ impl Filter {
     /// The added primitive becomes the output of the graph.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
     pub fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
+        self.add_with_color_space(effect, inputs, FilterColorSpace::default())
+    }
+
+    /// Add a filter primitive that operates in `color_space`.
+    ///
+    /// Like [`Self::add`], which uses the SVG default of [`FilterColorSpace::LinearRgb`].
+    pub fn add_with_color_space(
+        &mut self,
+        effect: FilterEffect,
+        inputs: FilterInputs,
+        color_space: FilterColorSpace,
+    ) -> FilterId {
         let id = FilterId(self.primitives.len() as u16);
 
         // Update accumulated expansion by taking the union of rects
         let primitive_rect = effect.expansion_rect();
         self.expansion_rect = self.expansion_rect.union(primitive_rect);
 
-        self.primitives.push(FilterGraphNode { effect, inputs });
+        self.primitives.push(FilterGraphNode {
+            effect,
+            inputs,
+            color_space,
+        });
         self.output = id;
 
         id
+    }
+
+    /// Make every primitive in the graph operate in `color_space`.
+    pub fn with_color_space(mut self, color_space: FilterColorSpace) -> Self {
+        for node in &mut self.primitives {
+            node.color_space = color_space;
+        }
+        self
     }
 
     /// The list of nodes in the graph
@@ -180,6 +205,24 @@ impl Filter {
 pub struct FilterGraphNode {
     pub effect: FilterEffect,
     pub inputs: FilterInputs,
+    /// The color space the primitive operates in.
+    pub color_space: FilterColorSpace,
+}
+
+/// The color space a filter primitive operates in (`color-interpolation-filters` in SVG).
+///
+/// Inputs are converted into this color space before the primitive runs, and color
+/// parameters such as flood and lighting colors are interpreted in it.
+///
+/// See: <https://www.w3.org/TR/filter-effects-1/#ColorInterpolationFiltersProperty>
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FilterColorSpace {
+    /// Linear-light sRGB. The SVG default.
+    #[default]
+    LinearRgb,
+    /// Gamma-encoded sRGB.
+    Srgb,
 }
 
 /// Unique identifier for a filter primitive in the graph.
