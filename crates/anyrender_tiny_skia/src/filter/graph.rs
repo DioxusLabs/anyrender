@@ -6,15 +6,19 @@
 use anyrender::Filter;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::{
-    FilterEffect, FilterInput, FilterSource, component_transfer::TransferFunction,
+    FilterEffect, FilterInput, FilterSource,
+    component_transfer::TransferFunction,
+    lighting::{LightSource, PointLightSource, SpotLightSource},
+    turbulence::TurbulenceType,
 };
 use kurbo::Affine;
 use rgb::FromSlice;
 use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 
 use super::{
-    ImageRef, ImageRefMut, box_blur, composite, demultiply_alpha, from_linear_rgb, iir_blur,
-    into_linear_rgb, morphology, multiply_alpha,
+    ImageRef, ImageRefMut, box_blur, composite, convolve_matrix, demultiply_alpha,
+    displacement_map, from_linear_rgb, iir_blur, into_linear_rgb, lighting, morphology,
+    multiply_alpha, turbulence,
 };
 use crate::scene::{to_skia_blend, to_skia_color, transform_scale};
 
@@ -87,6 +91,12 @@ fn blur_in_place(pixmap: &mut Pixmap, std_dx: f64, std_dy: f64) {
     }
 }
 
+/// Maps a user-space vector into pixel space with the linear part of `transform`.
+fn transform_vector(transform: Affine, x: f64, y: f64) -> (f64, f64) {
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    (a * x + c * y, b * x + d * y)
+}
+
 fn offset(pixmap: &Pixmap, dx: f64, dy: f64) -> Pixmap {
     let mut out = Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
     out.draw_pixmap(
@@ -152,8 +162,45 @@ fn transfer(func: &TransferFunction, c: f32) -> f32 {
     }
 }
 
+/// Maps a light source from user space into the pixel space of `region`.
+fn transform_light_source(source: &LightSource, region: IntRect, ts: Affine) -> LightSource {
+    let [a, _, _, d, _, _] = ts.as_coeffs();
+    let sz = ((a * a + d * d).sqrt() / std::f64::consts::SQRT_2) as f32;
+    let map = |x: f32, y: f32| {
+        let p = ts * kurbo::Point::new(x as f64, y as f64);
+        (
+            (p.x - region.x() as f64) as f32,
+            (p.y - region.y() as f64) as f32,
+        )
+    };
+    match source {
+        LightSource::Distant(light) => LightSource::Distant(light.clone()),
+        LightSource::Point(light) => {
+            let (x, y) = map(light.x, light.y);
+            LightSource::Point(PointLightSource {
+                x,
+                y,
+                z: light.z * sz,
+            })
+        }
+        LightSource::Spot(light) => {
+            let (x, y) = map(light.x, light.y);
+            let (points_at_x, points_at_y) = map(light.points_at_x, light.points_at_y);
+            LightSource::Spot(SpotLightSource {
+                x,
+                y,
+                z: light.z * sz,
+                points_at_x,
+                points_at_y,
+                points_at_z: light.points_at_z * sz,
+                ..light.clone()
+            })
+        }
+    }
+}
+
 /// Applies `filter` to the `region` of `pixmap` (pixels outside the region become transparent).
-/// `transform` is the layer's user-space to device-space transform, used to scale lengths.
+/// `transform` maps user space into the pixel space of `pixmap`.
 pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap: &mut Pixmap) {
     let Some(source) = pixmap.clone_rect(region) else {
         return;
@@ -228,7 +275,8 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 }
                 let std = shadow.std_deviation as f64;
                 blur_in_place(&mut shadow_px, std * sx, std * sy);
-                let mut out = offset(&shadow_px, shadow.dx as f64 * sx, shadow.dy as f64 * sy);
+                let (dx, dy) = transform_vector(transform, shadow.dx as f64, shadow.dy as f64);
+                let mut out = offset(&shadow_px, dx, dy);
                 out.draw_pixmap(
                     0,
                     0,
@@ -245,7 +293,10 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
             FilterEffect::Offset(v) => {
                 let img = input();
                 Image {
-                    pixmap: offset(&img.pixmap, v.x * sx, v.y * sy),
+                    pixmap: {
+                        let (dx, dy) = transform_vector(transform, v.x, v.y);
+                        offset(&img.pixmap, dx, dy)
+                    },
                     linear: img.linear,
                 }
             }
@@ -355,8 +406,92 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     linear: true,
                 }
             }
-            // Not yet implemented: pass the input through unchanged.
-            _ => input(),
+            FilterEffect::ConvolveMatrix(kernel) => {
+                let mut pixmap = input().into_linear();
+                if kernel.preserve_alpha {
+                    demultiply_alpha(pixmap.data_mut().as_rgba_mut());
+                }
+                convolve_matrix::apply(kernel, image_mut(&mut pixmap));
+                Image {
+                    pixmap,
+                    linear: true,
+                }
+            }
+            FilterEffect::DisplacementMap(fe) => {
+                let source = input().into_linear();
+                let mut map = input2().into_linear();
+                // The displacement map is read unpremultiplied.
+                demultiply_alpha(map.data_mut().as_rgba_mut());
+                let mut pixmap = Pixmap::new(w, h).unwrap();
+                displacement_map::apply(
+                    fe,
+                    fe.scale * sx as f32,
+                    fe.scale * sy as f32,
+                    ImageRef::new(w, h, source.data().as_rgba()),
+                    ImageRef::new(w, h, map.data().as_rgba()),
+                    image_mut(&mut pixmap),
+                );
+                Image {
+                    pixmap,
+                    linear: true,
+                }
+            }
+            FilterEffect::Turbulence(fe) => {
+                let mut pixmap = Pixmap::new(w, h).unwrap();
+                if sx > 0.0 && sy > 0.0 {
+                    let [_, _, _, _, tx, ty] = transform.as_coeffs();
+                    let frequency = fe.base_frequency as f64;
+                    turbulence::apply(
+                        region.x() as f64 - tx,
+                        region.y() as f64 - ty,
+                        sx,
+                        sy,
+                        frequency,
+                        frequency,
+                        fe.num_octaves,
+                        fe.seed.min(i32::MAX as u32) as i32,
+                        false,
+                        fe.turbulence_type == TurbulenceType::FractalNoise,
+                        image_mut(&mut pixmap),
+                    );
+                    multiply_alpha(pixmap.data_mut().as_rgba_mut());
+                }
+                Image {
+                    pixmap,
+                    linear: true,
+                }
+            }
+            FilterEffect::DiffuseLighting(fe) => {
+                let input = input();
+                let mut pixmap = Pixmap::new(w, h).unwrap();
+                lighting::diffuse_lighting(
+                    fe,
+                    transform_light_source(&fe.light_source, region, transform),
+                    ImageRef::new(w, h, input.pixmap.data().as_rgba()),
+                    image_mut(&mut pixmap),
+                );
+                Image {
+                    pixmap,
+                    linear: true,
+                }
+            }
+            FilterEffect::SpecularLighting(fe) => {
+                let input = input();
+                let mut pixmap = Pixmap::new(w, h).unwrap();
+                lighting::specular_lighting(
+                    fe,
+                    transform_light_source(&fe.light_source, region, transform),
+                    ImageRef::new(w, h, input.pixmap.data().as_rgba()),
+                    image_mut(&mut pixmap),
+                );
+                Image {
+                    pixmap,
+                    linear: true,
+                }
+            }
+            // `Tile` needs the input's primitive subregion and `Image` an image source, neither
+            // of which the filter API carries yet: pass the input through unchanged.
+            FilterEffect::Tile | FilterEffect::Image(_) => input(),
         };
         results.push(result);
     }

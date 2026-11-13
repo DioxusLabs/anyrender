@@ -9,8 +9,12 @@ use rgb::RGBA8;
 
 pub(crate) mod box_blur;
 pub(crate) mod composite;
+pub(crate) mod convolve_matrix;
+pub(crate) mod displacement_map;
 pub(crate) mod iir_blur;
+pub(crate) mod lighting;
 pub(crate) mod morphology;
+pub(crate) mod turbulence;
 
 /// An image reference.
 ///
