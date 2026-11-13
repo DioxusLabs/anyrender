@@ -466,7 +466,10 @@ pub enum FilterEffect {
     /// enabling color corrections, gamma adjustments, and custom mappings.
     ComponentTransfer(ComponentTransferFilter),
 
-    Image(ExternalImageSource),
+    /// Render [`FilterImage::scene`], ignoring the inputs.
+    ///
+    /// See: <https://www.w3.org/TR/filter-effects-1/#feImageElement>
+    Image(FilterImage),
 
     /// Tile the input to fill the primitive subregion.
     ///
@@ -749,15 +752,16 @@ pub mod shadow {
     }
 }
 
-/// Reference an external image as filter input.
-///
-/// Allows using pre-existing images (from an atlas or resource) as
-/// input to filter operations, useful for texturing and overlays.
+/// Content rendered by a [`FilterEffect::Image`] primitive (`feImage` in SVG).
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExternalImageSource {
-    pub image_id: u32,
-    pub transform: Option<[f32; 6]>,
+pub struct FilterImage {
+    /// Drawn in the filter's user space, the space of [`FilterGraphNode::subregion`].
+    ///
+    /// Not serialized (recorded glyph runs hold font data, which isn't serializable): it
+    /// deserializes as an empty scene.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub scene: crate::recording::Scene,
 }
 
 pub mod morphology {

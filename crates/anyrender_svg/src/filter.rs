@@ -18,8 +18,8 @@
 //! renders the group unfiltered.
 
 use anyrender::filters::{
-    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterInput,
-    FilterInputs, FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterImage,
+    FilterInput, FilterInputs, FilterSource,
     blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     component_transfer::{
@@ -36,7 +36,7 @@ use anyrender::filters::{
     shadow::DropShadow,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
-use kurbo::{Rect, Vec2};
+use kurbo::{Affine, Rect, Vec2};
 use peniko::Color;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -335,9 +335,28 @@ fn convert_primitive(
                 FilterInputs::single(input),
             )
         }
-        // feImage renders an external image or SVG subtree, which cannot be
-        // expressed as an `anyrender::FilterEffect`.
-        Kind::Image(_) => return None,
+        Kind::Image(fe) => {
+            // As in resvg, the content is positioned relative to the primitive subregion.
+            let origin = ctx.subregion.map_or(Vec2::ZERO, |r| r.origin().to_vec2());
+            let mut scene = anyrender::recording::Scene::new();
+            let mut unsupported = false;
+            crate::render::render_group(
+                &mut scene,
+                fe.root(),
+                Affine::translate(origin),
+                Affine::IDENTITY,
+                &mut |_: &mut anyrender::recording::Scene, _: &usvg::Node, _: Affine| {
+                    unsupported = true
+                },
+            );
+            if unsupported {
+                return None;
+            }
+            ctx.add(
+                FilterEffect::Image(FilterImage { scene }),
+                FilterInputs::NONE,
+            )
+        }
         Kind::Merge(fe) => {
             // Express an n-ary merge as a chain of `Over` composites
             // (first input at the bottom).
@@ -757,17 +776,40 @@ mod tests {
     }
 
     #[test]
-    fn fe_image_is_unsupported() {
-        assert!(
-            convert(
-                r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-                    <g filter="url(#f)">
-                        <filter id="f"><feImage href="#r"/></filter>
-                        <rect id="r" width="50" height="50" fill="red"/>
-                    </g>
-                </svg>"##,
-            )
-            .is_none()
+    fn image_links_to_an_element() {
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g filter="url(#f)">
+                    <filter id="f"><feImage href="#r"/></filter>
+                    <rect id="r" width="50" height="50" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        let [node] = graph.nodes() else {
+            panic!("expected one node, got {:?}", graph.nodes());
+        };
+        let FilterEffect::Image(image) = &node.effect else {
+            panic!("expected image, got {:?}", node.effect);
+        };
+        assert!(!image.scene.commands.is_empty());
+    }
+
+    #[test]
+    fn image_records_its_content_at_the_subregion() {
+        let node = single_node(
+            r#"<feImage x="10" y="20" width="30" height="30"
+                href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="/>"#,
         );
+        assert_eq!(node.subregion, Some(Rect::new(10.0, 20.0, 40.0, 50.0)));
+        assert_eq!(node.inputs, FilterInputs::NONE);
+        let FilterEffect::Image(image) = node.effect else {
+            panic!("expected image, got {:?}", node.effect);
+        };
+        let [anyrender::recording::RenderCommand::Fill(fill)] = image.scene.commands.as_slice()
+        else {
+            panic!("expected one fill, got {:?}", image.scene.commands);
+        };
+        assert_eq!(fill.transform.translation(), Vec2::new(10.0, 20.0));
     }
 }
