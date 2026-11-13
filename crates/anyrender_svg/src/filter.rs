@@ -10,7 +10,7 @@
 //!
 //! - Filter primitive subregions (`x`/`y`/`width`/`height` on a primitive) are ignored.
 //!   The overall filter region *is* honoured (it is used as the layer clip).
-//! - `feConvolveMatrix` `targetX`/`targetY`, `edgeMode` and `kernelUnitLength` are ignored.
+//! - `feConvolveMatrix` `kernelUnitLength` is ignored.
 //! - `feTurbulence` `stitchTiles` is ignored.
 //!
 //! Filters that cannot be expressed at all (see [`convert_primitive`]) cause the whole
@@ -153,7 +153,6 @@ impl FilterContext<'_> {
 /// Returns `None` for primitives that cannot be expressed:
 ///
 /// - `feImage`
-/// - `feConvolveMatrix` with a non-square kernel
 /// - lighting primitives with a non-white lighting color
 fn convert_primitive(
     ctx: &mut FilterContext<'_>,
@@ -220,12 +219,17 @@ fn convert_primitive(
         }
         Kind::ConvolveMatrix(fe) => {
             let matrix = fe.matrix();
-            if matrix.columns() != matrix.rows() {
-                return None;
-            }
             let kernel = ConvolutionKernel {
-                size: matrix.columns(),
+                columns: matrix.columns(),
+                rows: matrix.rows(),
                 values: matrix.data().to_vec(),
+                target_x: matrix.target_x(),
+                target_y: matrix.target_y(),
+                edge_mode: match fe.edge_mode() {
+                    usvg::filter::EdgeMode::None => EdgeMode::None,
+                    usvg::filter::EdgeMode::Duplicate => EdgeMode::Duplicate,
+                    usvg::filter::EdgeMode::Wrap => EdgeMode::Wrap,
+                },
                 divisor: fe.divisor().get(),
                 bias: fe.bias(),
                 preserve_alpha: fe.preserve_alpha(),
@@ -651,6 +655,20 @@ mod tests {
         let srgb =
             single_node(r#"<feGaussianBlur stdDeviation="3" color-interpolation-filters="sRGB"/>"#);
         assert_eq!(srgb.color_space, FilterColorSpace::Srgb);
+    }
+
+    #[test]
+    fn rectangular_convolve_matrix() {
+        let node = single_node(
+            r#"<feConvolveMatrix order="3 2" kernelMatrix="1 2 3 4 5 6" targetX="2" targetY="0" edgeMode="wrap"/>"#,
+        );
+        let FilterEffect::ConvolveMatrix(kernel) = node.effect else {
+            panic!("expected convolve, got {:?}", node.effect);
+        };
+        assert_eq!((kernel.columns, kernel.rows), (3, 2));
+        assert_eq!((kernel.target_x, kernel.target_y), (2, 0));
+        assert_eq!(kernel.edge_mode, anyrender::filters::EdgeMode::Wrap);
+        assert_eq!(kernel.values.len(), 6);
     }
 
     #[test]
