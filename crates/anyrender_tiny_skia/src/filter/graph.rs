@@ -1,12 +1,12 @@
 //! Evaluation of an anyrender [`Filter`] graph on tiny-skia pixmaps.
 //!
-//! Like resvg, primitives operate in linearRGB (the SVG default `color-interpolation-filters`)
-//! on the pixels of the filter region.
+//! Like resvg, each primitive operates in its color space (`color-interpolation-filters`) on the
+//! pixels of the filter region.
 
 use anyrender::Filter;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::{
-    FilterEffect, FilterInput, FilterSource,
+    FilterColorSpace, FilterEffect, FilterInput, FilterSource,
     component_transfer::TransferFunction,
     lighting::{LightSource, PointLightSource, SpotLightSource},
     turbulence::TurbulenceType,
@@ -29,9 +29,13 @@ struct Image {
 }
 
 impl Image {
-    fn into_linear(mut self) -> Pixmap {
-        if !self.linear {
+    /// Converts the image into linear RGB if `linear` is set, or into sRGB otherwise.
+    fn into_color_space(mut self, linear: bool) -> Pixmap {
+        if linear && !self.linear {
             convert(&mut self.pixmap, into_linear_rgb);
+        }
+        if !linear && self.linear {
+            convert(&mut self.pixmap, from_linear_rgb);
         }
         self.pixmap
     }
@@ -237,6 +241,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 }
             }
         };
+        let linear = node.color_space == FilterColorSpace::LinearRgb;
         let input = || resolve(node.inputs.primary.clone(), &results);
         let input2 = || resolve(node.inputs.secondary.clone(), &results);
 
@@ -250,19 +255,21 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 }
             }
             FilterEffect::GaussianBlur(blur) => {
-                let mut pixmap = input().into_linear();
-                let std = blur.std_deviation as f64;
-                blur_in_place(&mut pixmap, std * sx, std * sy);
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                let mut pixmap = input().into_color_space(linear);
+                blur_in_place(
+                    &mut pixmap,
+                    blur.std_deviation_x as f64 * sx,
+                    blur.std_deviation_y as f64 * sy,
+                );
+                Image { pixmap, linear }
             }
             FilterEffect::DropShadow(shadow) => {
-                let input = input().into_linear();
+                let input = input().into_color_space(linear);
                 let mut color_px = Pixmap::new(1, 1).unwrap();
                 color_px.fill(to_skia_color(shadow.color, 1.0));
-                convert(&mut color_px, into_linear_rgb);
+                if linear {
+                    convert(&mut color_px, into_linear_rgb);
+                }
                 let color = color_px.pixel(0, 0).unwrap().demultiply();
 
                 let mut shadow_px = input.clone();
@@ -273,8 +280,11 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     p[2] = (color.blue() as f32 * a + 0.5) as u8;
                     p[3] = (a * 255.0 + 0.5) as u8;
                 }
-                let std = shadow.std_deviation as f64;
-                blur_in_place(&mut shadow_px, std * sx, std * sy);
+                blur_in_place(
+                    &mut shadow_px,
+                    shadow.std_deviation_x as f64 * sx,
+                    shadow.std_deviation_y as f64 * sy,
+                );
                 let (dx, dy) = transform_vector(transform, shadow.dx as f64, shadow.dy as f64);
                 let mut out = offset(&shadow_px, dx, dy);
                 out.draw_pixmap(
@@ -287,7 +297,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 );
                 Image {
                     pixmap: out,
-                    linear: true,
+                    linear,
                 }
             }
             FilterEffect::Offset(v) => {
@@ -301,7 +311,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 }
             }
             FilterEffect::ColorMatrix(matrix) => {
-                let mut pixmap = input().into_linear();
+                let mut pixmap = input().into_color_space(linear);
                 let m = &matrix.0;
                 map_unpremultiplied(&mut pixmap, |c| {
                     let [r, g, b, a] = *c;
@@ -310,27 +320,21 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                         *out = row[0] * r + row[1] * g + row[2] * b + row[3] * a + row[4];
                     }
                 });
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::ComponentTransfer(ct) => {
-                let mut pixmap = input().into_linear();
+                let mut pixmap = input().into_color_space(linear);
                 map_unpremultiplied(&mut pixmap, |c| {
                     c[0] = transfer(&ct.red_function, c[0]);
                     c[1] = transfer(&ct.green_function, c[1]);
                     c[2] = transfer(&ct.blue_function, c[2]);
                     c[3] = transfer(&ct.alpha_function, c[3]);
                 });
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::Composite(op) => {
-                let in1 = input().into_linear();
-                let mut in2 = input2().into_linear();
+                let in1 = input().into_color_space(linear);
+                let mut in2 = input2().into_color_space(linear);
                 let blend_mode = match op {
                     CompositeOperator::Over => Some(tiny_skia::BlendMode::SourceOver),
                     CompositeOperator::In => Some(tiny_skia::BlendMode::SourceIn),
@@ -368,14 +372,11 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                         in2
                     }
                 };
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::Blend(mode) => {
-                let in1 = input().into_linear();
-                let mut in2 = input2().into_linear();
+                let in1 = input().into_color_space(linear);
+                let mut in2 = input2().into_color_space(linear);
                 in2.draw_pixmap(
                     0,
                     0,
@@ -389,37 +390,31 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 );
                 Image {
                     pixmap: in2,
-                    linear: true,
+                    linear,
                 }
             }
             FilterEffect::Morphology(m) => {
-                let mut pixmap = input().into_linear();
-                let rx = m.radius as f64 * sx;
-                let ry = m.radius as f64 * sy;
+                let mut pixmap = input().into_color_space(linear);
+                let rx = m.radius_x as f64 * sx;
+                let ry = m.radius_y as f64 * sy;
                 if rx > 0.0 && ry > 0.0 {
                     morphology::apply(m.operator, rx as f32, ry as f32, image_mut(&mut pixmap));
                 } else {
                     pixmap.fill(tiny_skia::Color::TRANSPARENT);
                 }
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::ConvolveMatrix(kernel) => {
-                let mut pixmap = input().into_linear();
+                let mut pixmap = input().into_color_space(linear);
                 if kernel.preserve_alpha {
                     demultiply_alpha(pixmap.data_mut().as_rgba_mut());
                 }
                 convolve_matrix::apply(kernel, image_mut(&mut pixmap));
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::DisplacementMap(fe) => {
-                let source = input().into_linear();
-                let mut map = input2().into_linear();
+                let source = input().into_color_space(linear);
+                let mut map = input2().into_color_space(linear);
                 // The displacement map is read unpremultiplied.
                 demultiply_alpha(map.data_mut().as_rgba_mut());
                 let mut pixmap = Pixmap::new(w, h).unwrap();
@@ -431,35 +426,28 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     ImageRef::new(w, h, map.data().as_rgba()),
                     image_mut(&mut pixmap),
                 );
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::Turbulence(fe) => {
                 let mut pixmap = Pixmap::new(w, h).unwrap();
                 if sx > 0.0 && sy > 0.0 {
                     let [_, _, _, _, tx, ty] = transform.as_coeffs();
-                    let frequency = fe.base_frequency as f64;
                     turbulence::apply(
                         region.x() as f64 - tx,
                         region.y() as f64 - ty,
                         sx,
                         sy,
-                        frequency,
-                        frequency,
+                        fe.base_frequency_x as f64,
+                        fe.base_frequency_y as f64,
                         fe.num_octaves,
                         fe.seed.min(i32::MAX as u32) as i32,
-                        false,
+                        fe.stitch_tiles,
                         fe.turbulence_type == TurbulenceType::FractalNoise,
                         image_mut(&mut pixmap),
                     );
                     multiply_alpha(pixmap.data_mut().as_rgba_mut());
                 }
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::DiffuseLighting(fe) => {
                 let input = input();
@@ -470,10 +458,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     ImageRef::new(w, h, input.pixmap.data().as_rgba()),
                     image_mut(&mut pixmap),
                 );
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             FilterEffect::SpecularLighting(fe) => {
                 let input = input();
@@ -484,10 +469,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                     ImageRef::new(w, h, input.pixmap.data().as_rgba()),
                     image_mut(&mut pixmap),
                 );
-                Image {
-                    pixmap,
-                    linear: true,
-                }
+                Image { pixmap, linear }
             }
             // `Tile` needs the input's primitive subregion and `Image` an image source, neither
             // of which the filter API carries yet: pass the input through unchanged.

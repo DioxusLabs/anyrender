@@ -6,9 +6,9 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, RenderContext};
-use peniko::color::AlphaColor;
+use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
     BlendMode as SkBlendMode, BlurStyle, Canvas, ClipOp, Color, ColorFilter, ColorSpace, Data,
     Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
@@ -707,39 +707,73 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 
 fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
     // Convert each node once, in order, so that inputs are looked up rather than reconverted.
-    let mut results: Vec<Option<ImageFilter>> = Vec::with_capacity(filter.nodes().len());
+    let mut results: Vec<(Option<ImageFilter>, FilterColorSpace)> =
+        Vec::with_capacity(filter.nodes().len());
     for id in 0..=filter.output().0 {
         let result = convert_filter_effect(filter, FilterId(id), &results);
         results.push(result);
     }
-    results.pop().flatten()
+    let (output, color_space) = results.pop().unwrap_or((None, FilterColorSpace::Srgb));
+    convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
-/// Resolves an input of the primitive `id` from the results of the primitives before it. Skia
-/// reads a `None` filter as the source graphic.
+/// Resolves an input of the primitive `id` from the results of the primitives before it, converted
+/// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
 fn resolve_input(
-    results: &[Option<ImageFilter>],
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
     id: FilterId,
     input: &Option<FilterInput>,
+    color_space: FilterColorSpace,
 ) -> Option<ImageFilter> {
-    let result = |id: u16| results.get(id as usize).cloned().flatten();
-    match input {
-        None => id.0.checked_sub(1).and_then(result),
-        Some(FilterInput::Source(_)) => None,
+    let source = (None, FilterColorSpace::Srgb);
+    let result = |id: u16| results.get(id as usize).cloned().unwrap_or(source.clone());
+    let (input, input_color_space) = match input {
+        None => id.0.checked_sub(1).map_or(source.clone(), result),
+        Some(FilterInput::Source(_)) => source.clone(),
         Some(FilterInput::Result(input_id)) => result(input_id.0),
+    };
+    convert_color_space(input, input_color_space, color_space)
+}
+
+/// Wrap `filter` (`None` meaning the source graphic) in a gamma colour filter converting it
+/// between colour spaces, the way Chrome implements `color-interpolation-filters`.
+fn convert_color_space(
+    filter: Option<ImageFilter>,
+    from: FilterColorSpace,
+    to: FilterColorSpace,
+) -> Option<ImageFilter> {
+    let color_filter = match (from, to) {
+        (FilterColorSpace::Srgb, FilterColorSpace::LinearRgb) => {
+            skia_safe::color_filters::srgb_to_linear_gamma()
+        }
+        (FilterColorSpace::LinearRgb, FilterColorSpace::Srgb) => {
+            skia_safe::color_filters::linear_to_srgb_gamma()
+        }
+        _ => return filter,
+    };
+    skia_safe::image_filters::color_filter(color_filter, filter, None)
+}
+
+/// Express an sRGB colour in the colour space a primitive operates in.
+fn color_in_space(color: AlphaColor<Srgb>, color_space: FilterColorSpace) -> AlphaColor<Srgb> {
+    match color_space {
+        FilterColorSpace::Srgb => color,
+        FilterColorSpace::LinearRgb => AlphaColor::new(color.convert::<LinearSrgb>().components),
     }
 }
 
+/// Convert a filter node, returning the result and the colour space it is encoded in.
 fn convert_filter_effect(
     filter: &Filter,
     id: FilterId,
-    results: &[Option<ImageFilter>],
-) -> Option<ImageFilter> {
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
+) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
-    let input = resolve_input(results, id, &node.inputs.primary);
+    let color_space = node.color_space;
+    let input = resolve_input(results, id, &node.inputs.primary, color_space);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(results, id, &node.inputs.secondary);
+    let secondary = resolve_input(results, id, &node.inputs.secondary, color_space);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -748,18 +782,21 @@ fn convert_filter_effect(
 
     let filter: Option<ImageFilter> = match &node.effect {
         FilterEffect::Flood(color) => {
-            let rgba8 = color.to_rgba8();
+            let rgba8 = color_in_space(*color, color_space).to_rgba8();
             let sk_color = Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
             let shader = skia_safe::shaders::color(sk_color);
             image_filters::shader(shader, None)
         }
-        FilterEffect::GaussianBlur(blur) => {
-            image_filters::blur((blur.std_deviation, blur.std_deviation), None, input, None)
-        }
+        FilterEffect::GaussianBlur(blur) => image_filters::blur(
+            (blur.std_deviation_x, blur.std_deviation_y),
+            None,
+            input,
+            None,
+        ),
         FilterEffect::DropShadow(drop_shadow) => image_filters::drop_shadow(
             (drop_shadow.dx, drop_shadow.dy),
-            (drop_shadow.std_deviation, drop_shadow.std_deviation),
-            color4f_from_alpha_color(drop_shadow.color),
+            (drop_shadow.std_deviation_x, drop_shadow.std_deviation_y),
+            color4f_from_alpha_color(color_in_space(drop_shadow.color, color_space)),
             None,
             input,
             None,
@@ -877,39 +914,47 @@ fn convert_filter_effect(
             image_filters::blend(mode, secondary, input, None)
         }
         FilterEffect::Morphology(morphology_filter) => {
-            let radius = (morphology_filter.radius, morphology_filter.radius);
+            let radius = (morphology_filter.radius_x, morphology_filter.radius_y);
             match morphology_filter.operator {
                 MorphologyOperator::Dilate => image_filters::dilate(radius, input, None),
                 MorphologyOperator::Erode => image_filters::erode(radius, input, None),
             }
         }
-        FilterEffect::ConvolveMatrix(convolution_kernel) => {
-            let size = convolution_kernel.size as i32;
-            // Skia applies `gain` as a multiplier, so invert the divisor.
-            let gain = if convolution_kernel.divisor != 0.0 {
-                1.0 / convolution_kernel.divisor
-            } else {
-                1.0
+        FilterEffect::ConvolveMatrix(kernel) => {
+            // Skia applies `gain` as a multiplier, so invert the divisor. As in SVG, a zero
+            // divisor falls back to the sum of the kernel, or 1 if that is zero too.
+            let divisor = match kernel.divisor {
+                0.0 => match kernel.values.iter().sum::<f32>() {
+                    0.0 => 1.0,
+                    sum => sum,
+                },
+                divisor => divisor,
             };
-            // Center the kernel over each pixel (SVG default targetX/Y = floor(order / 2)).
-            let offset = size / 2;
+            let tile_mode = match kernel.edge_mode {
+                EdgeMode::Duplicate => skia_safe::TileMode::Clamp,
+                EdgeMode::Wrap => skia_safe::TileMode::Repeat,
+                EdgeMode::Mirror => skia_safe::TileMode::Mirror,
+                EdgeMode::None => skia_safe::TileMode::Decal,
+            };
             image_filters::matrix_convolution(
-                skia_safe::ISize::new(size, size),
-                &convolution_kernel.values,
-                gain,
-                convolution_kernel.bias,
-                skia_safe::IPoint::new(offset, offset),
-                skia_safe::TileMode::Clamp,
-                !convolution_kernel.preserve_alpha,
+                skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
+                &kernel.values,
+                1.0 / divisor,
+                kernel.bias,
+                skia_safe::IPoint::new(kernel.target_x as i32, kernel.target_y as i32),
+                tile_mode,
+                !kernel.preserve_alpha,
                 input,
                 None,
             )
         }
         FilterEffect::Turbulence(turbulence_filter) => {
             let base_frequency = (
-                turbulence_filter.base_frequency,
-                turbulence_filter.base_frequency,
+                turbulence_filter.base_frequency_x,
+                turbulence_filter.base_frequency_y,
             );
+            // TODO: `stitch_tiles` needs the primitive subregion, which Skia takes as the tile
+            // size. The filter API doesn't carry subregions yet.
             let num_octaves = turbulence_filter.num_octaves as usize;
             let seed = turbulence_filter.seed as f32;
             let shader = match turbulence_filter.turbulence_type {
@@ -937,8 +982,11 @@ fn convert_filter_effect(
             )
         }
         FilterEffect::DiffuseLighting(diffuse_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(diffuse_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = diffuse_lighting_filter.surface_scale;
             let kd = diffuse_lighting_filter.diffuse_constant;
             match &diffuse_lighting_filter.light_source {
@@ -972,8 +1020,11 @@ fn convert_filter_effect(
             }
         }
         FilterEffect::SpecularLighting(specular_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(specular_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = specular_lighting_filter.surface_scale;
             let ks = specular_lighting_filter.specular_constant;
             let shininess = specular_lighting_filter.specular_exponent;
@@ -1022,7 +1073,7 @@ fn convert_filter_effect(
     // If we do not implement given type of filter then the match statement above returns None
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
-    filter.or(input_clone)
+    (filter.or(input_clone), color_space)
 }
 
 /// Convert an anyrender displacement-map [`ColorChannel`] to the corresponding Skia channel.

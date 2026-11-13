@@ -1,21 +1,26 @@
 // Copyright 2020 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::filters::convolution::ConvolutionKernel;
+use anyrender::filters::{EdgeMode, convolution::ConvolutionKernel};
 use rgb::RGBA8;
 
 use super::{ImageRefMut, f32_bound};
 
-/// Applies a convolve matrix, with the target at the kernel center and `edgeMode="duplicate"`
-/// (the SVG defaults).
+/// Applies a convolve matrix.
 ///
 /// Input image pixels should have a **premultiplied alpha** when `preserve_alpha=false`.
 pub fn apply(kernel: &ConvolutionKernel, src: ImageRefMut) {
-    let size = kernel.size as i32;
-    if size == 0 || kernel.values.len() != (size * size) as usize {
+    let (columns, rows) = (kernel.columns as i32, kernel.rows as i32);
+    if columns == 0
+        || rows == 0
+        || kernel.values.len() != (columns * rows) as usize
+        || kernel.target_x >= kernel.columns
+        || kernel.target_y >= kernel.rows
+    {
         return;
     }
-    let target = size / 2;
+    let (target_x, target_y) = (kernel.target_x as i32, kernel.target_y as i32);
+    let (width, height) = (src.width as i32, src.height as i32);
     // As in SVG, a zero divisor falls back to the sum of the kernel, or 1 if that is zero too.
     let divisor = match kernel.divisor {
         0.0 => match kernel.values.iter().sum::<f32>() {
@@ -37,12 +42,36 @@ pub fn apply(kernel: &ConvolutionKernel, src: ImageRefMut) {
         let mut new_g = 0.0;
         let mut new_b = 0.0;
         let mut new_a = 0.0;
-        for oy in 0..size {
-            for ox in 0..size {
-                let tx = (x as i32 - target + ox).clamp(0, width_max);
-                let ty = (y as i32 - target + oy).clamp(0, height_max);
+        for oy in 0..rows {
+            for ox in 0..columns {
+                let mut tx = x as i32 - target_x + ox;
+                let mut ty = y as i32 - target_y + oy;
 
-                let k = kernel.values[((size - oy - 1) * size + (size - ox - 1)) as usize];
+                match kernel.edge_mode {
+                    EdgeMode::None => {
+                        if tx < 0 || tx > width_max || ty < 0 || ty > height_max {
+                            continue;
+                        }
+                    }
+                    EdgeMode::Duplicate => {
+                        tx = tx.clamp(0, width_max);
+                        ty = ty.clamp(0, height_max);
+                    }
+                    EdgeMode::Wrap => {
+                        tx = tx.rem_euclid(width);
+                        ty = ty.rem_euclid(height);
+                    }
+                    EdgeMode::Mirror => {
+                        let mirror = |v: i32, len: i32| {
+                            let v = v.rem_euclid(2 * len);
+                            if v < len { v } else { 2 * len - 1 - v }
+                        };
+                        tx = mirror(tx, width);
+                        ty = mirror(ty, height);
+                    }
+                }
+
+                let k = kernel.values[((rows - oy - 1) * columns + (columns - ox - 1)) as usize];
 
                 let p = src.pixel_at(tx as u32, ty as u32);
                 new_r += (p.r as f32) / 255.0 * k;
@@ -89,4 +118,43 @@ pub fn apply(kernel: &ConvolutionKernel, src: ImageRefMut) {
     }
 
     src.data.copy_from_slice(buf.data);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn convolve_row(edge_mode: EdgeMode) -> Vec<(u8, u8)> {
+        let mut pixels = [10, 20, 30].map(|r| RGBA8::new(r, 0, 0, 255));
+        let kernel = ConvolutionKernel {
+            columns: 2,
+            rows: 1,
+            values: vec![1.0, 0.0],
+            target_x: 0,
+            target_y: 0,
+            edge_mode,
+            divisor: 1.0,
+            bias: 0.0,
+            preserve_alpha: false,
+        };
+        apply(&kernel, ImageRefMut::new(3, 1, &mut pixels));
+        pixels.iter().map(|p| (p.r, p.a)).collect()
+    }
+
+    #[test]
+    fn non_square_kernel_with_target_and_edge_modes() {
+        assert_eq!(
+            convolve_row(EdgeMode::Wrap),
+            [(20, 255), (30, 255), (10, 255)]
+        );
+        assert_eq!(
+            convolve_row(EdgeMode::Duplicate),
+            [(20, 255), (30, 255), (30, 255)]
+        );
+        assert_eq!(convolve_row(EdgeMode::None), [(20, 255), (30, 255), (0, 0)]);
+        assert_eq!(
+            convolve_row(EdgeMode::Mirror),
+            [(20, 255), (30, 255), (30, 255)]
+        );
+    }
 }

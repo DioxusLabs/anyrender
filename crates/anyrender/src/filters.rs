@@ -79,16 +79,17 @@ impl Filter {
     /// Create a filter from a single filter effect.
     ///
     /// Creates a simple filter graph with a single primitive.
-    /// Use this for direct access to low-level SVG filter operations.
+    /// The primitive operates in sRGB, as CSS filter functions do.
     pub fn single(primitive: FilterEffect) -> Self {
         let mut graph = Self::empty();
-        graph.add(primitive, FilterInputs::NONE);
+        graph.add_with_color_space(primitive, FilterInputs::NONE, FilterColorSpace::Srgb);
         graph
     }
 
     /// Create a filter from an iterator of filter effects.
     ///
-    /// Creates a filter graph where the effects are applied in order.
+    /// Creates a filter graph where the effects are applied in order. The effects operate in
+    /// sRGB, as CSS filter functions do.
     pub fn linear_list(primitives: impl Iterator<Item = FilterEffect>) -> Self {
         let mut graph = Self::empty();
         let mut last_id = None;
@@ -97,7 +98,7 @@ impl Filter {
                 primary: last_id.map(FilterInput::Result),
                 secondary: None,
             };
-            last_id = Some(graph.add(primitive, inputs));
+            last_id = Some(graph.add_with_color_space(primitive, inputs, FilterColorSpace::Srgb));
         }
         graph
     }
@@ -108,16 +109,40 @@ impl Filter {
     /// The added primitive becomes the output of the graph.
     /// Automatically updates the accumulated bounds expansion based on the primitive's requirements.
     pub fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
+        self.add_with_color_space(effect, inputs, FilterColorSpace::default())
+    }
+
+    /// Add a filter primitive that operates in `color_space`.
+    ///
+    /// Like [`Self::add`], which uses the SVG default of [`FilterColorSpace::LinearRgb`].
+    pub fn add_with_color_space(
+        &mut self,
+        effect: FilterEffect,
+        inputs: FilterInputs,
+        color_space: FilterColorSpace,
+    ) -> FilterId {
         let id = FilterId(self.primitives.len() as u16);
 
         // Update accumulated expansion by taking the union of rects
         let primitive_rect = effect.expansion_rect();
         self.expansion_rect = self.expansion_rect.union(primitive_rect);
 
-        self.primitives.push(FilterGraphNode { effect, inputs });
+        self.primitives.push(FilterGraphNode {
+            effect,
+            inputs,
+            color_space,
+        });
         self.output = id;
 
         id
+    }
+
+    /// Make every primitive in the graph operate in `color_space`.
+    pub fn with_color_space(mut self, color_space: FilterColorSpace) -> Self {
+        for node in &mut self.primitives {
+            node.color_space = color_space;
+        }
+        self
     }
 
     /// The list of nodes in the graph
@@ -180,6 +205,24 @@ impl Filter {
 pub struct FilterGraphNode {
     pub effect: FilterEffect,
     pub inputs: FilterInputs,
+    /// The color space the primitive operates in.
+    pub color_space: FilterColorSpace,
+}
+
+/// The color space a filter primitive operates in (`color-interpolation-filters` in SVG).
+///
+/// Inputs are converted into this color space before the primitive runs, and color
+/// parameters such as flood and lighting colors are interpreted in it.
+///
+/// See: <https://www.w3.org/TR/filter-effects-1/#ColorInterpolationFiltersProperty>
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FilterColorSpace {
+    /// Linear-light sRGB. The SVG default.
+    #[default]
+    LinearRgb,
+    /// Gamma-encoded sRGB.
+    Srgb,
 }
 
 /// Unique identifier for a filter primitive in the graph.
@@ -442,7 +485,8 @@ impl FilterEffect {
     /// produce more blur. The blur is applied equally in all directions.
     pub fn blur(radius: f32) -> Self {
         Self::GaussianBlur(GaussianBlurFilter {
-            std_deviation: radius,
+            std_deviation_x: radius,
+            std_deviation_y: radius,
             edge_mode: EdgeMode::None,
         })
     }
@@ -458,7 +502,8 @@ impl FilterEffect {
         Self::DropShadow(DropShadow {
             dx,
             dy,
-            std_deviation,
+            std_deviation_x: std_deviation,
+            std_deviation_y: std_deviation,
             color,
             edge_mode: EdgeMode::None,
         })
@@ -521,9 +566,10 @@ impl FilterEffect {
     pub fn expansion_rect(&self) -> Rect {
         match self {
             Self::GaussianBlur(blur) => {
-                // Gaussian blur expands uniformly by 3*sigma (covers 99.7% of distribution)
-                let radius = (blur.std_deviation * 3.0) as f64;
-                Rect::new(-radius, -radius, radius, radius)
+                // Gaussian blur expands by 3*sigma (covers 99.7% of distribution)
+                let rx = (blur.std_deviation_x * 3.0) as f64;
+                let ry = (blur.std_deviation_y * 3.0) as f64;
+                Rect::new(-rx, -ry, rx, ry)
             }
             Self::Offset(offset) => {
                 // Offset shifts pixels; expand bounds asymmetrically so shifted content isn't cut.
@@ -532,22 +578,24 @@ impl FilterEffect {
                 Rect::new(dx.min(0.0), dy.min(0.0), dx.max(0.0), dy.max(0.0))
             }
             Self::DropShadow(DropShadow {
-                std_deviation,
+                std_deviation_x,
+                std_deviation_y,
                 dx,
                 dy,
                 ..
             }) => {
                 // Drop shadow = blur + offset + composite with original
                 // The expansion rect encompasses both the blur and the offset
-                let blur_radius = (*std_deviation * 3.0) as f64;
+                let rx = (*std_deviation_x * 3.0) as f64;
+                let ry = (*std_deviation_y * 3.0) as f64;
                 let dx = *dx as f64;
                 let dy = *dy as f64;
 
                 Rect::new(
-                    -(blur_radius + (-dx).max(0.0)),
-                    -(blur_radius + (-dy).max(0.0)),
-                    blur_radius + dx.max(0.0),
-                    blur_radius + dy.max(0.0),
+                    -(rx + (-dx).max(0.0)),
+                    -(ry + (-dy).max(0.0)),
+                    rx + dx.max(0.0),
+                    ry + dy.max(0.0),
                 )
             }
             // Most other filters don't expand bounds
@@ -632,7 +680,7 @@ pub mod composite {
     }
 }
 
-mod blur {
+pub mod blur {
     use crate::filters::EdgeMode;
 
     /// Gaussian blur filter.
@@ -644,17 +692,14 @@ mod blur {
     #[derive(Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct GaussianBlurFilter {
-        /// Standard deviation for the blur kernel. Larger values create more blur.
-        /// Must be non-negative. A value of 0 means no blur.
+        /// Standard deviation of the blur kernel along the x axis. Larger values create more
+        /// blur. Must be non-negative. A value of 0 means no blur along that axis.
         ///
         /// This directly corresponds to the σ (sigma) parameter in the Gaussian
         /// function. The visible blur effect extends approximately 3σ in each direction.
-        ///
-        /// TODO: Per the W3C specification, this should support separate x and y values.
-        /// The spec allows `stdDeviation` to be either one number (applied to both axes)
-        /// or two numbers (first for x-axis, second for y-axis). Currently only uniform
-        /// blur is supported. Consider changing to `(f32, f32)` or a dedicated type.
-        pub std_deviation: f32,
+        pub std_deviation_x: f32,
+        /// Standard deviation of the blur kernel along the y axis.
+        pub std_deviation_y: f32,
         /// Edge mode determining how pixels beyond the input bounds are handled.
         pub edge_mode: EdgeMode,
     }
@@ -676,7 +721,10 @@ pub mod shadow {
     pub struct DropShadow {
         pub dx: f32,
         pub dy: f32,
-        pub std_deviation: f32,
+        /// Standard deviation of the shadow's blur along the x axis.
+        pub std_deviation_x: f32,
+        /// Standard deviation of the shadow's blur along the y axis.
+        pub std_deviation_y: f32,
         pub color: AlphaColor<Srgb>,
         pub edge_mode: EdgeMode,
     }
@@ -704,8 +752,10 @@ pub mod morphology {
     pub struct MorphologyFilter {
         /// Morphological operator determining whether to erode or dilate.
         pub operator: MorphologyOperator,
-        /// Operation radius in pixels. Larger values create stronger effects.
-        pub radius: f32,
+        /// Operation radius along the x axis. Larger values create stronger effects.
+        pub radius_x: f32,
+        /// Operation radius along the y axis.
+        pub radius_y: f32,
     }
 
     /// Morphological operators for dilate/erode operations.
@@ -736,14 +786,20 @@ pub mod turbulence {
     #[derive(Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TurbulenceFilter {
-        /// Base frequency for noise generation. Higher values create finer detail.
-        pub base_frequency: f32,
+        /// Base frequency for noise generation along the x axis. Higher values create finer
+        /// detail.
+        pub base_frequency_x: f32,
+        /// Base frequency for noise generation along the y axis.
+        pub base_frequency_y: f32,
         /// Number of octaves for fractal noise. More octaves add finer detail.
         pub num_octaves: u32,
         /// Random seed for reproducible noise generation.
         pub seed: u32,
         /// Type of noise: smooth fractal or more chaotic turbulence.
         pub turbulence_type: TurbulenceType,
+        /// Whether to adjust the frequencies so that the noise tiles seamlessly across the
+        /// filter region (`stitchTiles="stitch"` in SVG).
+        pub stitch_tiles: bool,
     }
 
     /// Types of turbulence noise generation.
@@ -1245,6 +1301,7 @@ mod css_color_matrix_tests {
 }
 
 pub mod lighting {
+    use peniko::color::{AlphaColor, Srgb};
 
     /// Diffuse lighting simulation.
     ///
@@ -1261,6 +1318,9 @@ pub mod lighting {
         pub kernel_unit_length: f32,
         /// Configuration of the light source (point, distant, or spot).
         pub light_source: LightSource,
+        /// Color of the light (`lighting-color` in SVG), interpreted in the primitive's
+        /// color space.
+        pub lighting_color: AlphaColor<Srgb>,
     }
 
     /// Specular lighting simulation.
@@ -1280,6 +1340,9 @@ pub mod lighting {
         pub kernel_unit_length: f32,
         /// Configuration of the light source (point, distant, or spot).
         pub light_source: LightSource,
+        /// Color of the light (`lighting-color` in SVG), interpreted in the primitive's
+        /// color space.
+        pub lighting_color: AlphaColor<Srgb>,
     }
 
     /// Light source configurations for lighting effects.
@@ -1343,23 +1406,32 @@ pub mod lighting {
 /// These kernels are used with the `ConvolveMatrix` filter primitive
 /// for various image processing effects. All provided kernels are 3x3.
 pub mod convolution {
+    use super::EdgeMode;
 
     /// Convolution kernel for custom filtering operations.
     ///
-    /// Defines a square matrix of weights used for convolution-based image processing.
+    /// Defines a matrix of weights used for convolution-based image processing.
     /// The kernel is applied to each pixel by multiplying surrounding pixels by the weights,
     /// summing the results, dividing by the divisor, and adding the bias.
     #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ConvolutionKernel {
-        /// Kernel size (e.g., 3 for a 3×3 kernel, 5 for 5×5).
-        /// The kernel must be square, so this defines both width and height.
-        pub size: u32,
-        /// Kernel weight values in row-major order.
-        /// Length must equal size × size. Center of kernel is typically at (size/2, size/2).
+        /// Number of columns in the kernel.
+        pub columns: u32,
+        /// Number of rows in the kernel.
+        pub rows: u32,
+        /// Kernel weight values in row-major order. Length must equal columns × rows.
         pub values: Vec<f32>,
+        /// Column of the kernel that is placed over the output pixel. Must be less than
+        /// `columns`; SVG defaults it to `columns / 2`.
+        pub target_x: u32,
+        /// Row of the kernel that is placed over the output pixel. Must be less than `rows`;
+        /// SVG defaults it to `rows / 2`.
+        pub target_y: u32,
+        /// How pixels beyond the edges of the input are read.
+        pub edge_mode: EdgeMode,
         /// Normalization divisor applied to the convolution result.
-        /// Common practice is to use the sum of all weights for averaging, or 1.0 otherwise.
+        /// As in SVG, 0 means the sum of all weights, or 1 if that is 0 too.
         pub divisor: f32,
         /// Bias value added to the result after normalization.
         /// Useful for edge detection or emboss effects to shift the result range.
@@ -1372,7 +1444,11 @@ pub mod convolution {
     /// 3x3 Gaussian blur kernel for basic smoothing.
     pub fn gaussian_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![1.0, 2.0, 1.0, 2.0, 4.0, 2.0, 1.0, 2.0, 1.0],
             divisor: 16.0,
             bias: 0.0,
@@ -1383,7 +1459,11 @@ pub mod convolution {
     /// 3x3 Sharpen kernel to enhance edges and details.
     pub fn sharpen_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0],
             divisor: 1.0,
             bias: 0.0,
@@ -1394,7 +1474,11 @@ pub mod convolution {
     /// 3x3 Edge detection kernel (Laplacian operator).
     pub fn edge_detect_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![-1.0, -1.0, -1.0, -1.0, 8.0, -1.0, -1.0, -1.0, -1.0],
             divisor: 1.0,
             bias: 0.0,
@@ -1405,7 +1489,11 @@ pub mod convolution {
     /// 3x3 Emboss kernel for creating a raised/beveled appearance.
     pub fn emboss_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![-2.0, -1.0, 0.0, -1.0, 1.0, 1.0, 0.0, 1.0, 2.0],
             divisor: 1.0,
             bias: 0.5,

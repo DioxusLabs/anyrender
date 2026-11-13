@@ -3,6 +3,7 @@
 
 use super::{ImageRef, ImageRefMut, f32_bound};
 use anyrender::filters::lighting::{DiffuseLightingFilter, LightSource, SpecularLightingFilter};
+use peniko::color::{AlphaColor, Srgb};
 use rgb::RGBA8;
 
 #[derive(Clone, Copy)]
@@ -12,9 +13,14 @@ struct Color {
     blue: u8,
 }
 
-impl Color {
-    const WHITE: Self = Self::new_rgb(255, 255, 255);
+impl From<AlphaColor<Srgb>> for Color {
+    fn from(color: AlphaColor<Srgb>) -> Self {
+        let c = color.to_rgba8();
+        Self::new_rgb(c.r, c.g, c.b)
+    }
+}
 
+impl Color {
     const fn new_rgb(red: u8, green: u8, blue: u8) -> Self {
         Self { red, green, blue }
     }
@@ -179,7 +185,7 @@ pub fn diffuse_lighting(
     apply(
         light_source,
         fe.surface_scale,
-        Color::WHITE,
+        Color::from(fe.lighting_color),
         &light_factor,
         calc_diffuse_alpha,
         src,
@@ -239,7 +245,7 @@ pub fn specular_lighting(
     apply(
         light_source,
         fe.surface_scale,
-        Color::WHITE,
+        Color::from(fe.lighting_color),
         &light_factor,
         calc_specular_alpha,
         src,
