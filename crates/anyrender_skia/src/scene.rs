@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use anyrender::filters::color_transformation::ColorMatrix;
 use anyrender::filters::component_transfer::TransferFunction;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput, FilterSource};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::AlphaColor;
 use skia_safe::{
@@ -711,6 +712,14 @@ fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
 
 fn resolve_input(filter: &Filter, input: &Option<FilterInput>) -> Option<ImageFilter> {
     input.as_ref().and_then(|input| match input {
+        FilterInput::Source(FilterSource::SourceAlpha) => skia_safe::image_filters::color_filter(
+            skia_safe::color_filters::matrix_row_major(
+                &ColorMatrix::SOURCE_ALPHA.0,
+                skia_safe::color_filters::Clamp::Yes,
+            ),
+            None,
+            None,
+        ),
         FilterInput::Source(_) => None,
         FilterInput::Result(input_id) => convert_filter_effect(filter, *input_id),
     })

@@ -108,7 +108,11 @@ impl GlyphOriginSnap {
 
 enum LayerKind {
     Layer,
-    Clip,
+    /// A rectangle on Vello's clip stack, with the transform it was pushed with.
+    Clip(Rect, Affine),
+    /// A filter layer, with the number of rectangle clips moved into clip
+    /// layers around it.
+    Filter(usize),
 }
 
 pub struct VelloCpuScenePainter {
@@ -124,6 +128,19 @@ impl VelloCpuScenePainter {
         Self::with_image_cache_config(width, height, ImageCacheConfig::default())
     }
 
+    /// A painter that renders on the calling thread even with the
+    /// `multithreading` feature, which filters need.
+    pub fn new_single_threaded(width: u16, height: u16) -> Self {
+        let settings = vello_cpu::RenderSettings {
+            num_threads: 0,
+            ..Default::default()
+        };
+        Self {
+            render_ctx: vello_cpu::RenderContext::new_with(width, height, settings),
+            ..Self::new(width, height)
+        }
+    }
+
     pub fn with_image_cache_config(width: u16, height: u16, config: ImageCacheConfig) -> Self {
         Self {
             render_ctx: vello_cpu::RenderContext::new(width, height),
@@ -131,6 +148,47 @@ impl VelloCpuScenePainter {
             image_cache: ImageCache::new(config),
             layer_stack: Vec::new(),
             glyph_caching: false,
+        }
+    }
+
+    /// Moves the rectangle clips on Vello's clip stack into clip layers,
+    /// returning how many there were.
+    fn lift_clip_rects(&mut self) -> usize {
+        let clips: Vec<_> = self
+            .layer_stack
+            .iter()
+            .filter_map(|kind| match kind {
+                LayerKind::Clip(rect, transform) => Some((*rect, *transform)),
+                _ => None,
+            })
+            .collect();
+        for _ in &clips {
+            self.render_ctx.pop_clip();
+        }
+        for (rect, transform) in &clips {
+            self.render_ctx.set_transform(*transform);
+            self.render_ctx
+                .push_clip_layer(&rect.to_path(DEFAULT_TOLERANCE));
+        }
+        clips.len()
+    }
+
+    /// Undoes [`Self::lift_clip_rects`] once the filter layer is popped.
+    fn restore_clip_rects(&mut self, lifted: usize) {
+        for _ in 0..lifted {
+            self.render_ctx.pop_layer();
+        }
+        let clips: Vec<_> = self
+            .layer_stack
+            .iter()
+            .filter_map(|kind| match kind {
+                LayerKind::Clip(rect, transform) => Some((*rect, *transform)),
+                _ => None,
+            })
+            .collect();
+        for (rect, transform) in clips {
+            self.render_ctx.set_transform(transform);
+            self.render_ctx.push_clip_rect(&rect);
         }
     }
 
@@ -195,26 +253,46 @@ impl PaintScene for VelloCpuScenePainter {
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
         #[cfg(feature = "filters")]
-        let filter = filter
+        let (filter, floods) = match filter
+            // The multi-threaded dispatcher doesn't support filters.
+            .filter(|_| self.render_ctx.render_settings().num_threads == 0)
             .and_then(crate::filters::convert_filter)
-            .filter(|_| cfg!(not(feature = "multithreading")));
+        {
+            Some(converted) => (Some(converted.filter), converted.floods),
+            None => (None, false),
+        };
 
         #[cfg(not(feature = "filters"))]
-        let filter = {
+        let (filter, floods) = {
             let _ = filter;
-            None
+            (None, false)
+        };
+
+        // Vello CPU shifts a filter layer's content into its own viewport and
+        // clips the filtered result with the shifted clip stack, cutting it
+        // off. So the active rectangle clips become clip layers around it.
+        let lifted = if filter.is_some() {
+            self.lift_clip_rects()
+        } else {
+            0
         };
 
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
-        self.layer_stack.push(LayerKind::Layer);
-        self.render_ctx.push_layer(
-            Some(&clip.into_path(DEFAULT_TOLERANCE)),
-            Some(blend.into()),
-            Some(alpha),
-            None,
-            filter,
-        );
+        self.layer_stack.push(if filter.is_some() {
+            LayerKind::Filter(lifted)
+        } else {
+            LayerKind::Layer
+        });
+        let clip = clip.into_path(DEFAULT_TOLERANCE);
+        self.render_ctx
+            .push_layer(Some(&clip), Some(blend.into()), Some(alpha), None, filter);
+        if floods {
+            // Vello CPU sizes a filter's output to the painted content, so a
+            // transparent fill of the layer's clip makes a flood fill all of it.
+            self.render_ctx.set_paint(Color::TRANSPARENT);
+            self.render_ctx.fill_path(&clip);
+        }
     }
 
     fn push_mask_layer(
@@ -248,7 +326,7 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
         if let Some(rect) = clip.as_rect() {
-            self.layer_stack.push(LayerKind::Clip);
+            self.layer_stack.push(LayerKind::Clip(rect, transform));
             self.render_ctx.push_clip_rect(&rect);
         } else {
             // An isolated layer (rather than `push_clip_path`) so that overlapping draws are
@@ -262,7 +340,11 @@ impl PaintScene for VelloCpuScenePainter {
     fn pop_layer(&mut self) {
         match self.layer_stack.pop() {
             Some(LayerKind::Layer) => self.render_ctx.pop_layer(),
-            Some(LayerKind::Clip) => self.render_ctx.pop_clip(),
+            Some(LayerKind::Clip(..)) => self.render_ctx.pop_clip(),
+            Some(LayerKind::Filter(lifted)) => {
+                self.render_ctx.pop_layer();
+                self.restore_clip_rects(lifted);
+            }
             None => {}
         }
     }
