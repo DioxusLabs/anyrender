@@ -706,31 +706,40 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
-    convert_filter_effect(filter, filter.output())
+    // Convert each node once, in order, so that inputs are looked up rather than reconverted.
+    let mut results: Vec<Option<ImageFilter>> = Vec::with_capacity(filter.nodes().len());
+    for id in 0..=filter.output().0 {
+        let result = convert_filter_effect(filter, FilterId(id), &results);
+        results.push(result);
+    }
+    results.pop().flatten()
 }
 
-/// Resolves an input of the primitive `id`. Skia reads a `None` filter as the source graphic.
+/// Resolves an input of the primitive `id` from the results of the primitives before it. Skia
+/// reads a `None` filter as the source graphic.
 fn resolve_input(
-    filter: &Filter,
+    results: &[Option<ImageFilter>],
     id: FilterId,
     input: &Option<FilterInput>,
 ) -> Option<ImageFilter> {
+    let result = |id: u16| results.get(id as usize).cloned().flatten();
     match input {
-        None => {
-            id.0.checked_sub(1)
-                .and_then(|previous| convert_filter_effect(filter, FilterId(previous)))
-        }
+        None => id.0.checked_sub(1).and_then(result),
         Some(FilterInput::Source(_)) => None,
-        Some(FilterInput::Result(input_id)) => convert_filter_effect(filter, *input_id),
+        Some(FilterInput::Result(input_id)) => result(input_id.0),
     }
 }
 
-fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
+fn convert_filter_effect(
+    filter: &Filter,
+    id: FilterId,
+    results: &[Option<ImageFilter>],
+) -> Option<ImageFilter> {
     let node = &filter.nodes()[id.0 as usize];
-    let input = resolve_input(filter, id, &node.inputs.primary);
+    let input = resolve_input(results, id, &node.inputs.primary);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(filter, id, &node.inputs.secondary);
+    let secondary = resolve_input(results, id, &node.inputs.secondary);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();

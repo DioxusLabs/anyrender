@@ -70,6 +70,38 @@ fn infinite_clip_keeps_content() {
 }
 
 #[test]
+fn nested_layer_in_offset_parent() {
+    // The parent layer's x range doesn't overlap its y range, so clamping either axis to the
+    // other's range would drop the inner layer.
+    let buffer = render(|scene| {
+        scene.push_clip_layer(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &Rect::new(20.0, 0.0, 40.0, 10.0),
+        );
+        scene.push_layer(
+            Fill::NonZero,
+            Mix::Normal,
+            0.5,
+            Affine::IDENTITY,
+            &Rect::new(20.0, 0.0, 40.0, 10.0),
+            None,
+            None,
+        );
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            RED,
+            None,
+            &Rect::new(0.0, 0.0, 40.0, 40.0),
+        );
+        scene.pop_layer();
+        scene.pop_layer();
+    });
+    assert!((120..136).contains(&pixel_at(&buffer, 30, 5)[3]));
+}
+
+#[test]
 fn box_shadow_is_blurred_before_cropping() {
     // The box covers the canvas with a wide margin, so the shadow is opaque everywhere,
     // including at the edges of the canvas and of the clip layer.

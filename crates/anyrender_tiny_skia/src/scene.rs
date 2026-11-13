@@ -600,37 +600,73 @@ impl PaintScene for TinySkiaScenePainter {
         let Some(rect) = round_out_within(bbox, area) else {
             return;
         };
-        let offset = Affine::translate((-rect.x() as f64, -rect.y() as f64));
+        let Some(visible) = rect.intersect(&top) else {
+            return;
+        };
 
-        let mut shadow = self.take_pixmap(rect.width(), rect.height());
+        // Large blurs are smooth, so render and blur them at a lower resolution (keeping at
+        // least 16 low-resolution pixels per standard deviation) and scale the result up.
+        let (std_x, std_y) = (geometry.std_dev * sx, geometry.std_dev * sy);
+        let scale = (std_x.min(std_y) / 16.0).floor().max(1.0);
+        let (w, h) = (
+            (rect.width() as f64 / scale).ceil() as u32,
+            (rect.height() as f64 / scale).ceil() as u32,
+        );
+        let to_low_res = Affine::scale(1.0 / scale)
+            * Affine::translate((-rect.x() as f64, -rect.y() as f64))
+            * transform;
+
+        let mut low_res = self.take_pixmap(w, h);
         let paint = Paint {
             shader: Shader::SolidColor(to_skia_color(color, 1.0)),
             anti_alias: true,
             ..Default::default()
         };
-        shadow.fill_path(
+        low_res.fill_path(
             &path,
             &paint,
             FillRule::Winding,
-            skia_transform(offset * transform),
+            skia_transform(to_low_res),
             None,
         );
-        let full = IntRect::from_xywh(0, 0, rect.width(), rect.height()).unwrap();
-        filter::blur(
-            &mut shadow,
-            full,
-            geometry.std_dev * sx,
-            geometry.std_dev * sy,
+        let full = IntRect::from_xywh(0, 0, w, h).unwrap();
+        filter::blur(&mut low_res, full, std_x / scale, std_y / scale);
+
+        // Only the visible part of the blurred shadow is drawn.
+        let mut shadow = self.take_pixmap(visible.width(), visible.height());
+        shadow.draw_pixmap(
+            0,
+            0,
+            low_res.as_ref(),
+            &PixmapPaint {
+                quality: if scale > 1.0 {
+                    FilterQuality::Bilinear
+                } else {
+                    FilterQuality::Nearest
+                },
+                ..Default::default()
+            },
+            Transform::from_row(
+                scale as f32,
+                0.0,
+                0.0,
+                scale as f32,
+                (rect.x() - visible.x()) as f32,
+                (rect.y() - visible.y()) as f32,
+            ),
+            None,
         );
+        self.recycle(low_res);
         if geometry.needs_clip() {
+            let offset = Affine::translate((-visible.x() as f64, -visible.y() as f64));
             shadow.apply_mask(&shape_mask(
                 Fill::NonZero,
                 offset * transform,
                 &geometry.area,
-                rect,
+                visible,
             ));
         }
-        let (dx, dy) = (rect.x() - top.x(), rect.y() - top.y());
+        let (dx, dy) = (visible.x() - top.x(), visible.y() - top.y());
         self.top().draw_pixmap(
             dx,
             dy,
@@ -666,18 +702,19 @@ impl OutlinePen for SkiaPen {
 /// The smallest pixel rect containing the part of `rect` inside `bounds`, or `None` if they
 /// don't intersect. NaN edges are treated as unbounded.
 fn round_out_within(rect: kurbo::Rect, bounds: IntRect) -> Option<IntRect> {
-    let clamp = |v: f64, default: i32| {
+    let clamp = |v: f64, min: i32, max: i32, default: i32| {
         if v.is_nan() {
             default
         } else {
-            v.clamp(bounds.left() as f64, bounds.right() as f64) as i32
+            v.clamp(min as f64, max as f64) as i32
         }
     };
+    let (l, t, r, b) = (bounds.left(), bounds.top(), bounds.right(), bounds.bottom());
     IntRect::from_ltrb(
-        clamp(rect.x0.floor(), bounds.left()),
-        clamp(rect.y0.floor(), bounds.top()),
-        clamp(rect.x1.ceil(), bounds.right()),
-        clamp(rect.y1.ceil(), bounds.bottom()),
+        clamp(rect.x0.floor(), l, r, l),
+        clamp(rect.y0.floor(), t, b, t),
+        clamp(rect.x1.ceil(), l, r, r),
+        clamp(rect.y1.ceil(), t, b, b),
     )
 }
 

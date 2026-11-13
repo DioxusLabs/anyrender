@@ -16,10 +16,13 @@ pub fn apply(kernel: &ConvolutionKernel, src: ImageRefMut) {
         return;
     }
     let target = size / 2;
-    let divisor = if kernel.divisor == 0.0 {
-        1.0
-    } else {
-        kernel.divisor
+    // As in SVG, a zero divisor falls back to the sum of the kernel, or 1 if that is zero too.
+    let divisor = match kernel.divisor {
+        0.0 => match kernel.values.iter().sum::<f32>() {
+            0.0 => 1.0,
+            sum => sum,
+        },
+        divisor => divisor,
     };
 
     let width_max = src.width as i32 - 1;

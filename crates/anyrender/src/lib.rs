@@ -164,7 +164,9 @@ pub trait WindowRenderer: RenderContext {
 
 /// Abstraction for rendering a scene to an image buffer.
 ///
-/// Buffers hold premultiplied RGBA8 pixels.
+/// Buffers hold RGBA8 pixels. Whether they are premultiplied depends on the backend:
+/// `anyrender_vello_cpu`, `anyrender_skia` and `anyrender_tiny_skia` write premultiplied alpha,
+/// while `anyrender_vello` writes unpremultiplied alpha.
 pub trait ImageRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where
