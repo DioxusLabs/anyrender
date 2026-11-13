@@ -710,11 +710,8 @@ fn image_to_pixmap(image: &ImageData) -> Option<Pixmap> {
         return None;
     }
     let premultiplied = matches!(image.alpha_type, ImageAlphaType::AlphaPremultiplied);
-    for (dst, src) in pixmap
-        .data_mut()
-        .chunks_exact_mut(4)
-        .zip(src[..len].chunks_exact(4))
-    {
+    let src = src[..len].as_chunks::<4>().0;
+    for (dst, src) in pixmap.data_mut().as_chunks_mut::<4>().0.iter_mut().zip(src) {
         let [r, g, b, a] = match image.format {
             ImageFormat::Bgra8 => [src[2], src[1], src[0], src[3]],
             _ => [src[0], src[1], src[2], src[3]],

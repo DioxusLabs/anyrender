@@ -177,7 +177,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 Some(FilterInput::Source(FilterSource::SourceGraphic)) => source.clone(),
                 Some(FilterInput::Source(FilterSource::SourceAlpha)) => {
                     let mut img = source.clone();
-                    for p in img.pixmap.data_mut().chunks_exact_mut(4) {
+                    for p in img.pixmap.data_mut().as_chunks_mut::<4>().0 {
                         p[0] = 0;
                         p[1] = 0;
                         p[2] = 0;
@@ -219,7 +219,7 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
                 let color = color_px.pixel(0, 0).unwrap().demultiply();
 
                 let mut shadow_px = input.clone();
-                for p in shadow_px.data_mut().chunks_exact_mut(4) {
+                for p in shadow_px.data_mut().as_chunks_mut::<4>().0 {
                     let a = p[3] as f32 / 255.0 * color.alpha() as f32 / 255.0;
                     p[0] = (color.red() as f32 * a + 0.5) as u8;
                     p[1] = (color.green() as f32 * a + 0.5) as u8;

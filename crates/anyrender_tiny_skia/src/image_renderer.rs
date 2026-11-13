@@ -50,7 +50,12 @@ impl ImageRenderer for TinySkiaImageRenderer {
             "buffer too small: {} < {len}",
             buffer.len()
         );
-        for (dst, pixel) in buffer[..len].chunks_exact_mut(4).zip(pixmap.pixels()) {
+        for (dst, pixel) in buffer[..len]
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(pixmap.pixels())
+        {
             let c = pixel.demultiply();
             dst.copy_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
         }
