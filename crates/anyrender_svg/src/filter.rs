@@ -18,7 +18,9 @@
 //! renders the group unfiltered.
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs, FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    FilterSource,
+    blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     component_transfer::{
         ComponentTransferFilter, GammaTransferFunction, LinearTransferFunction, TransferFunction,
@@ -31,6 +33,7 @@ use anyrender::filters::{
         SpecularLightingFilter, SpotLightSource,
     },
     morphology::{MorphologyFilter, MorphologyOperator},
+    shadow::DropShadow,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
 use kurbo::Vec2;
@@ -150,9 +153,6 @@ impl FilterContext<'_> {
 /// Returns `None` for primitives that cannot be expressed:
 ///
 /// - `feImage`
-/// - `feGaussianBlur`/`feDropShadow` with different X/Y std deviations
-/// - `feMorphology` with different X/Y radii
-/// - `feTurbulence` with different X/Y base frequencies
 /// - `feConvolveMatrix` with a non-square kernel
 /// - lighting primitives with a non-white lighting color
 fn convert_primitive(
@@ -283,18 +283,15 @@ fn convert_primitive(
             )
         }
         Kind::DropShadow(fe) => {
-            let std_dev_x = fe.std_dev_x().get();
-            let std_dev_y = fe.std_dev_y().get();
-            if std_dev_x != std_dev_y {
-                return None;
-            }
             let color = fe.color();
-            let effect = FilterEffect::drop_shadow(
-                fe.dx(),
-                fe.dy(),
-                std_dev_x,
-                Color::from_rgba8(color.red, color.green, color.blue, fe.opacity().to_u8()),
-            );
+            let effect = FilterEffect::DropShadow(DropShadow {
+                dx: fe.dx(),
+                dy: fe.dy(),
+                std_deviation_x: fe.std_dev_x().get(),
+                std_deviation_y: fe.std_dev_y().get(),
+                color: Color::from_rgba8(color.red, color.green, color.blue, fe.opacity().to_u8()),
+                edge_mode: EdgeMode::None,
+            });
             let input = ctx.resolve_input(fe.input());
             ctx.add(effect, FilterInputs::single(input))
         }
@@ -311,13 +308,16 @@ fn convert_primitive(
             )
         }
         Kind::GaussianBlur(fe) => {
-            let std_dev_x = fe.std_dev_x().get();
-            let std_dev_y = fe.std_dev_y().get();
-            if std_dev_x != std_dev_y {
-                return None;
-            }
+            let blur = GaussianBlurFilter {
+                std_deviation_x: fe.std_dev_x().get(),
+                std_deviation_y: fe.std_dev_y().get(),
+                edge_mode: EdgeMode::None,
+            };
             let input = ctx.resolve_input(fe.input());
-            ctx.add(FilterEffect::blur(std_dev_x), FilterInputs::single(input))
+            ctx.add(
+                FilterEffect::GaussianBlur(blur),
+                FilterInputs::single(input),
+            )
         }
         // feImage renders an external image or SVG subtree, which cannot be
         // expressed as an `anyrender::FilterEffect`.
@@ -348,17 +348,13 @@ fn convert_primitive(
             }
         }
         Kind::Morphology(fe) => {
-            let radius_x = fe.radius_x().get();
-            let radius_y = fe.radius_y().get();
-            if radius_x != radius_y {
-                return None;
-            }
             let filter = MorphologyFilter {
                 operator: match fe.operator() {
                     usvg::filter::MorphologyOperator::Erode => MorphologyOperator::Erode,
                     usvg::filter::MorphologyOperator::Dilate => MorphologyOperator::Dilate,
                 },
-                radius: radius_x,
+                radius_x: fe.radius_x().get(),
+                radius_y: fe.radius_y().get(),
             };
             let input = ctx.resolve_input(fe.input());
             ctx.add(
@@ -378,13 +374,9 @@ fn convert_primitive(
             ctx.add(FilterEffect::Tile, FilterInputs::single(input))
         }
         Kind::Turbulence(fe) => {
-            let base_frequency_x = fe.base_frequency_x().get();
-            let base_frequency_y = fe.base_frequency_y().get();
-            if base_frequency_x != base_frequency_y {
-                return None;
-            }
             let filter = TurbulenceFilter {
-                base_frequency: base_frequency_x,
+                base_frequency_x: fe.base_frequency_x().get(),
+                base_frequency_y: fe.base_frequency_y().get(),
                 num_octaves: fe.num_octaves(),
                 seed: fe.seed().max(0) as u32,
                 turbulence_type: match fe.kind() {
@@ -644,6 +636,15 @@ mod tests {
     }
 
     #[test]
+    fn anisotropic_blur() {
+        let node = single_node(r#"<feGaussianBlur stdDeviation="3 7"/>"#);
+        let FilterEffect::GaussianBlur(blur) = node.effect else {
+            panic!("expected blur, got {:?}", node.effect);
+        };
+        assert_eq!((blur.std_deviation_x, blur.std_deviation_y), (3.0, 7.0));
+    }
+
+    #[test]
     fn color_interpolation_filters() {
         let default = single_node(r#"<feGaussianBlur stdDeviation="3"/>"#);
         assert_eq!(default.color_space, FilterColorSpace::LinearRgb);
@@ -653,17 +654,14 @@ mod tests {
     }
 
     #[test]
-    fn anisotropic_blur_is_unsupported() {
-        assert!(
-            convert(
-                r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-                    <g filter="url(#f)">
-                        <filter id="f"><feGaussianBlur stdDeviation="3 7"/></filter>
-                        <rect width="50" height="50" fill="red"/>
-                    </g>
-                </svg>"##,
-            )
-            .is_none()
+    fn turbulence_frequency_pair() {
+        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2"/>"#);
+        let FilterEffect::Turbulence(turbulence) = node.effect else {
+            panic!("expected turbulence, got {:?}", node.effect);
+        };
+        assert_eq!(
+            (turbulence.base_frequency_x, turbulence.base_frequency_y),
+            (0.05, 0.2)
         );
     }
 

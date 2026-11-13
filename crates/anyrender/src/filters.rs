@@ -480,7 +480,8 @@ impl FilterEffect {
     /// produce more blur. The blur is applied equally in all directions.
     pub fn blur(radius: f32) -> Self {
         Self::GaussianBlur(GaussianBlurFilter {
-            std_deviation: radius,
+            std_deviation_x: radius,
+            std_deviation_y: radius,
             edge_mode: EdgeMode::None,
         })
     }
@@ -496,7 +497,8 @@ impl FilterEffect {
         Self::DropShadow(DropShadow {
             dx,
             dy,
-            std_deviation,
+            std_deviation_x: std_deviation,
+            std_deviation_y: std_deviation,
             color,
             edge_mode: EdgeMode::None,
         })
@@ -559,9 +561,10 @@ impl FilterEffect {
     pub fn expansion_rect(&self) -> Rect {
         match self {
             Self::GaussianBlur(blur) => {
-                // Gaussian blur expands uniformly by 3*sigma (covers 99.7% of distribution)
-                let radius = (blur.std_deviation * 3.0) as f64;
-                Rect::new(-radius, -radius, radius, radius)
+                // Gaussian blur expands by 3*sigma (covers 99.7% of distribution)
+                let rx = (blur.std_deviation_x * 3.0) as f64;
+                let ry = (blur.std_deviation_y * 3.0) as f64;
+                Rect::new(-rx, -ry, rx, ry)
             }
             Self::Offset(offset) => {
                 // Offset shifts pixels; expand bounds asymmetrically so shifted content isn't cut.
@@ -570,22 +573,24 @@ impl FilterEffect {
                 Rect::new(dx.min(0.0), dy.min(0.0), dx.max(0.0), dy.max(0.0))
             }
             Self::DropShadow(DropShadow {
-                std_deviation,
+                std_deviation_x,
+                std_deviation_y,
                 dx,
                 dy,
                 ..
             }) => {
                 // Drop shadow = blur + offset + composite with original
                 // The expansion rect encompasses both the blur and the offset
-                let blur_radius = (*std_deviation * 3.0) as f64;
+                let rx = (*std_deviation_x * 3.0) as f64;
+                let ry = (*std_deviation_y * 3.0) as f64;
                 let dx = *dx as f64;
                 let dy = *dy as f64;
 
                 Rect::new(
-                    -(blur_radius + (-dx).max(0.0)),
-                    -(blur_radius + (-dy).max(0.0)),
-                    blur_radius + dx.max(0.0),
-                    blur_radius + dy.max(0.0),
+                    -(rx + (-dx).max(0.0)),
+                    -(ry + (-dy).max(0.0)),
+                    rx + dx.max(0.0),
+                    ry + dy.max(0.0),
                 )
             }
             // Most other filters don't expand bounds
@@ -670,7 +675,7 @@ pub mod composite {
     }
 }
 
-mod blur {
+pub mod blur {
     use crate::filters::EdgeMode;
 
     /// Gaussian blur filter.
@@ -682,17 +687,14 @@ mod blur {
     #[derive(Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct GaussianBlurFilter {
-        /// Standard deviation for the blur kernel. Larger values create more blur.
-        /// Must be non-negative. A value of 0 means no blur.
+        /// Standard deviation of the blur kernel along the x axis. Larger values create more
+        /// blur. Must be non-negative. A value of 0 means no blur along that axis.
         ///
         /// This directly corresponds to the σ (sigma) parameter in the Gaussian
         /// function. The visible blur effect extends approximately 3σ in each direction.
-        ///
-        /// TODO: Per the W3C specification, this should support separate x and y values.
-        /// The spec allows `stdDeviation` to be either one number (applied to both axes)
-        /// or two numbers (first for x-axis, second for y-axis). Currently only uniform
-        /// blur is supported. Consider changing to `(f32, f32)` or a dedicated type.
-        pub std_deviation: f32,
+        pub std_deviation_x: f32,
+        /// Standard deviation of the blur kernel along the y axis.
+        pub std_deviation_y: f32,
         /// Edge mode determining how pixels beyond the input bounds are handled.
         pub edge_mode: EdgeMode,
     }
@@ -714,7 +716,10 @@ pub mod shadow {
     pub struct DropShadow {
         pub dx: f32,
         pub dy: f32,
-        pub std_deviation: f32,
+        /// Standard deviation of the shadow's blur along the x axis.
+        pub std_deviation_x: f32,
+        /// Standard deviation of the shadow's blur along the y axis.
+        pub std_deviation_y: f32,
         pub color: AlphaColor<Srgb>,
         pub edge_mode: EdgeMode,
     }
@@ -742,8 +747,10 @@ pub mod morphology {
     pub struct MorphologyFilter {
         /// Morphological operator determining whether to erode or dilate.
         pub operator: MorphologyOperator,
-        /// Operation radius in pixels. Larger values create stronger effects.
-        pub radius: f32,
+        /// Operation radius along the x axis. Larger values create stronger effects.
+        pub radius_x: f32,
+        /// Operation radius along the y axis.
+        pub radius_y: f32,
     }
 
     /// Morphological operators for dilate/erode operations.
@@ -774,8 +781,11 @@ pub mod turbulence {
     #[derive(Debug, Clone, Copy, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct TurbulenceFilter {
-        /// Base frequency for noise generation. Higher values create finer detail.
-        pub base_frequency: f32,
+        /// Base frequency for noise generation along the x axis. Higher values create finer
+        /// detail.
+        pub base_frequency_x: f32,
+        /// Base frequency for noise generation along the y axis.
+        pub base_frequency_y: f32,
         /// Number of octaves for fractal noise. More octaves add finer detail.
         pub num_octaves: u32,
         /// Random seed for reproducible noise generation.
