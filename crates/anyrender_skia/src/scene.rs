@@ -6,9 +6,9 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, RenderContext};
-use peniko::color::AlphaColor;
+use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
     BlendMode as SkBlendMode, BlurStyle, Canvas, ClipOp, Color, ColorFilter, ColorSpace, Data,
     Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
@@ -706,22 +706,59 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
-    convert_filter_effect(filter, filter.output())
+    let (output, color_space) = convert_filter_effect(filter, filter.output());
+    convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
-fn resolve_input(filter: &Filter, input: &Option<FilterInput>) -> Option<ImageFilter> {
-    input.as_ref().and_then(|input| match input {
-        FilterInput::Source(_) => None,
-        FilterInput::Result(input_id) => convert_filter_effect(filter, *input_id),
-    })
+/// Resolve a primitive's input, converted into the colour space the primitive operates in.
+fn resolve_input(
+    filter: &Filter,
+    input: &Option<FilterInput>,
+    color_space: FilterColorSpace,
+) -> Option<ImageFilter> {
+    let (input, input_color_space) = match input {
+        Some(FilterInput::Result(input_id)) => convert_filter_effect(filter, *input_id),
+        // Source graphics are sRGB-encoded.
+        Some(FilterInput::Source(_)) | None => (None, FilterColorSpace::Srgb),
+    };
+    convert_color_space(input, input_color_space, color_space)
 }
 
-fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
+/// Wrap `filter` (`None` meaning the source graphic) in a gamma colour filter converting it
+/// between colour spaces, the way Chrome implements `color-interpolation-filters`.
+fn convert_color_space(
+    filter: Option<ImageFilter>,
+    from: FilterColorSpace,
+    to: FilterColorSpace,
+) -> Option<ImageFilter> {
+    let color_filter = match (from, to) {
+        (FilterColorSpace::Srgb, FilterColorSpace::LinearRgb) => {
+            skia_safe::color_filters::srgb_to_linear_gamma()
+        }
+        (FilterColorSpace::LinearRgb, FilterColorSpace::Srgb) => {
+            skia_safe::color_filters::linear_to_srgb_gamma()
+        }
+        _ => return filter,
+    };
+    skia_safe::image_filters::color_filter(color_filter, filter, None)
+}
+
+/// Express an sRGB colour in the colour space a primitive operates in.
+fn color_in_space(color: AlphaColor<Srgb>, color_space: FilterColorSpace) -> AlphaColor<Srgb> {
+    match color_space {
+        FilterColorSpace::Srgb => color,
+        FilterColorSpace::LinearRgb => AlphaColor::new(color.convert::<LinearSrgb>().components),
+    }
+}
+
+/// Convert a filter node, returning the result and the colour space it is encoded in.
+fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
-    let input = resolve_input(filter, &node.inputs.primary);
+    let color_space = node.color_space;
+    let input = resolve_input(filter, &node.inputs.primary, color_space);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(filter, &node.inputs.secondary);
+    let secondary = resolve_input(filter, &node.inputs.secondary, color_space);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -730,7 +767,7 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
 
     let filter: Option<ImageFilter> = match &node.effect {
         FilterEffect::Flood(color) => {
-            let rgba8 = color.to_rgba8();
+            let rgba8 = color_in_space(*color, color_space).to_rgba8();
             let sk_color = Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
             let shader = skia_safe::shaders::color(sk_color);
             image_filters::shader(shader, None)
@@ -741,7 +778,7 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
         FilterEffect::DropShadow(drop_shadow) => image_filters::drop_shadow(
             (drop_shadow.dx, drop_shadow.dy),
             (drop_shadow.std_deviation, drop_shadow.std_deviation),
-            color4f_from_alpha_color(drop_shadow.color),
+            color4f_from_alpha_color(color_in_space(drop_shadow.color, color_space)),
             None,
             input,
             None,
@@ -1004,7 +1041,7 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
     // If we do not implement given type of filter then the match statement above returns None
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
-    filter.or(input_clone)
+    (filter.or(input_clone), color_space)
 }
 
 /// Convert an anyrender displacement-map [`ColorChannel`] to the corresponding Skia channel.
