@@ -938,6 +938,8 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
                 turbulence_filter.base_frequency_x,
                 turbulence_filter.base_frequency_y,
             );
+            // TODO: `stitch_tiles` needs the primitive subregion, which Skia takes as the tile
+            // size. The filter API doesn't carry subregions yet.
             let num_octaves = turbulence_filter.num_octaves as usize;
             let seed = turbulence_filter.seed as f32;
             let shader = match turbulence_filter.turbulence_type {

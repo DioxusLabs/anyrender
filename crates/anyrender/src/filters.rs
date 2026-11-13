@@ -792,6 +792,9 @@ pub mod turbulence {
         pub seed: u32,
         /// Type of noise: smooth fractal or more chaotic turbulence.
         pub turbulence_type: TurbulenceType,
+        /// Whether to adjust the frequencies so that the noise tiles seamlessly across the
+        /// filter region (`stitchTiles="stitch"` in SVG).
+        pub stitch_tiles: bool,
     }
 
     /// Types of turbulence noise generation.
