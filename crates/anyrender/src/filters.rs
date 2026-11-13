@@ -121,17 +121,26 @@ impl Filter {
         inputs: FilterInputs,
         color_space: FilterColorSpace,
     ) -> FilterId {
-        let id = FilterId(self.primitives.len() as u16);
-
-        // Update accumulated expansion by taking the union of rects
-        let primitive_rect = effect.expansion_rect();
-        self.expansion_rect = self.expansion_rect.union(primitive_rect);
-
-        self.primitives.push(FilterGraphNode {
+        self.add_node(FilterGraphNode {
             effect,
             inputs,
             color_space,
-        });
+            subregion: None,
+        })
+    }
+
+    /// Add a fully specified filter primitive, such as one with a [`FilterGraphNode::subregion`].
+    ///
+    /// Returns a `FilterId` that can be referenced by other primitives.
+    /// The added primitive becomes the output of the graph.
+    pub fn add_node(&mut self, node: FilterGraphNode) -> FilterId {
+        let id = FilterId(self.primitives.len() as u16);
+
+        // Update accumulated expansion by taking the union of rects
+        let primitive_rect = node.effect.expansion_rect();
+        self.expansion_rect = self.expansion_rect.union(primitive_rect);
+
+        self.primitives.push(node);
         self.output = id;
 
         id
@@ -207,6 +216,16 @@ pub struct FilterGraphNode {
     pub inputs: FilterInputs,
     /// The color space the primitive operates in.
     pub color_space: FilterColorSpace,
+    /// The filter primitive subregion (`x`/`y`/`width`/`height` in SVG), in the same user space
+    /// as the filter's other coordinates. The result is clipped to it, and [`FilterEffect::Tile`]
+    /// uses its input's subregion as the tile.
+    ///
+    /// `None` means the union of the input primitives' subregions, or the whole filter region
+    /// for primitives without primitive inputs (such as flood, turbulence, or a source graphic
+    /// input).
+    ///
+    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterPrimitiveSubRegion>
+    pub subregion: Option<Rect>,
 }
 
 /// The color space a filter primitive operates in (`color-interpolation-filters` in SVG).
@@ -449,10 +468,10 @@ pub enum FilterEffect {
 
     Image(ExternalImageSource),
 
-    /// Tile the input to fill the filter region.
+    /// Tile the input to fill the primitive subregion.
     ///
-    /// Repeats the input image to fill the entire filter primitive subregion,
-    /// creating a tiling/repeating pattern.
+    /// The input's [`FilterGraphNode::subregion`] is the tile, which is repeated to fill this
+    /// primitive's subregion.
     Tile,
 
     /// Diffuse lighting simulation.
