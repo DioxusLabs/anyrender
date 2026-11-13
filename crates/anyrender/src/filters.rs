@@ -159,6 +159,26 @@ impl Filter {
         &self.primitives
     }
 
+    /// The content of every [`FilterEffect::Image`] primitive, in node order.
+    pub fn images(&self) -> impl Iterator<Item = &FilterImage> {
+        self.primitives
+            .iter()
+            .filter_map(|node| match &node.effect {
+                FilterEffect::Image(image) => Some(image),
+                _ => None,
+            })
+    }
+
+    /// Mutable access to the content of every [`FilterEffect::Image`] primitive, in node order.
+    pub fn images_mut(&mut self) -> impl Iterator<Item = &mut FilterImage> {
+        self.primitives
+            .iter_mut()
+            .filter_map(|node| match &mut node.effect {
+                FilterEffect::Image(image) => Some(image),
+                _ => None,
+            })
+    }
+
     /// The output filter for the graph.
     pub fn output(&self) -> FilterId {
         self.output
@@ -758,8 +778,8 @@ pub mod shadow {
 pub struct FilterImage {
     /// Drawn in the filter's user space, the space of [`FilterGraphNode::subregion`].
     ///
-    /// Not serialized (recorded glyph runs hold font data, which isn't serializable): it
-    /// deserializes as an empty scene.
+    /// Skipped by serde, because its fonts and images aren't serializable: `anyrender_serialize`
+    /// stores it alongside the scene's other resources instead.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub scene: crate::recording::Scene,
 }
