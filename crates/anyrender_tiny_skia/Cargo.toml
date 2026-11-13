@@ -1,0 +1,37 @@
+[package]
+name = "anyrender_tiny_skia"
+description = "tiny-skia backend for anyrender"
+version = "0.1.0"
+documentation = "https://docs.rs/anyrender_tiny_skia"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyrender = { workspace = true }
+
+debug_timer = { workspace = true }
+kurbo = { workspace = true }
+peniko = { workspace = true }
+tiny-skia = "0.12"
+bytemuck = "1"
+rgb = "0.8"
+skrifa = { workspace = true }
+
+# WindowRenderer backends
+softbuffer_window_renderer = { workspace = true, optional = true }
+pixels_window_renderer = { workspace = true, optional = true }
+
+[features]
+pixels_window_renderer = ["dep:pixels_window_renderer"]
+softbuffer_window_renderer = ["dep:softbuffer_window_renderer"]
+log_frame_times = [
+  "debug_timer/enable",
+  "softbuffer_window_renderer?/log_frame_times",
+  "pixels_window_renderer?/log_frame_times",
+]
+
+[package.metadata.docs.rs]
+features = ["pixels_window_renderer", "softbuffer_window_renderer"]
+
