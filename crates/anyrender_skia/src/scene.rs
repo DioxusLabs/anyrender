@@ -6,7 +6,7 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
@@ -905,24 +905,30 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
                 MorphologyOperator::Erode => image_filters::erode(radius, input, None),
             }
         }
-        FilterEffect::ConvolveMatrix(convolution_kernel) => {
-            let size = convolution_kernel.size as i32;
-            // Skia applies `gain` as a multiplier, so invert the divisor.
-            let gain = if convolution_kernel.divisor != 0.0 {
-                1.0 / convolution_kernel.divisor
-            } else {
-                1.0
+        FilterEffect::ConvolveMatrix(kernel) => {
+            // Skia applies `gain` as a multiplier, so invert the divisor. As in SVG, a zero
+            // divisor falls back to the sum of the kernel, or 1 if that is zero too.
+            let divisor = match kernel.divisor {
+                0.0 => match kernel.values.iter().sum::<f32>() {
+                    0.0 => 1.0,
+                    sum => sum,
+                },
+                divisor => divisor,
             };
-            // Center the kernel over each pixel (SVG default targetX/Y = floor(order / 2)).
-            let offset = size / 2;
+            let tile_mode = match kernel.edge_mode {
+                EdgeMode::Duplicate => skia_safe::TileMode::Clamp,
+                EdgeMode::Wrap => skia_safe::TileMode::Repeat,
+                EdgeMode::Mirror => skia_safe::TileMode::Mirror,
+                EdgeMode::None => skia_safe::TileMode::Decal,
+            };
             image_filters::matrix_convolution(
-                skia_safe::ISize::new(size, size),
-                &convolution_kernel.values,
-                gain,
-                convolution_kernel.bias,
-                skia_safe::IPoint::new(offset, offset),
-                skia_safe::TileMode::Clamp,
-                !convolution_kernel.preserve_alpha,
+                skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
+                &kernel.values,
+                1.0 / divisor,
+                kernel.bias,
+                skia_safe::IPoint::new(kernel.target_x as i32, kernel.target_y as i32),
+                tile_mode,
+                !kernel.preserve_alpha,
                 input,
                 None,
             )

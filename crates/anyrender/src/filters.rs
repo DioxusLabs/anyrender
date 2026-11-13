@@ -1391,23 +1391,32 @@ pub mod lighting {
 /// These kernels are used with the `ConvolveMatrix` filter primitive
 /// for various image processing effects. All provided kernels are 3x3.
 pub mod convolution {
+    use super::EdgeMode;
 
     /// Convolution kernel for custom filtering operations.
     ///
-    /// Defines a square matrix of weights used for convolution-based image processing.
+    /// Defines a matrix of weights used for convolution-based image processing.
     /// The kernel is applied to each pixel by multiplying surrounding pixels by the weights,
     /// summing the results, dividing by the divisor, and adding the bias.
     #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct ConvolutionKernel {
-        /// Kernel size (e.g., 3 for a 3×3 kernel, 5 for 5×5).
-        /// The kernel must be square, so this defines both width and height.
-        pub size: u32,
-        /// Kernel weight values in row-major order.
-        /// Length must equal size × size. Center of kernel is typically at (size/2, size/2).
+        /// Number of columns in the kernel.
+        pub columns: u32,
+        /// Number of rows in the kernel.
+        pub rows: u32,
+        /// Kernel weight values in row-major order. Length must equal columns × rows.
         pub values: Vec<f32>,
+        /// Column of the kernel that is placed over the output pixel. Must be less than
+        /// `columns`; SVG defaults it to `columns / 2`.
+        pub target_x: u32,
+        /// Row of the kernel that is placed over the output pixel. Must be less than `rows`;
+        /// SVG defaults it to `rows / 2`.
+        pub target_y: u32,
+        /// How pixels beyond the edges of the input are read.
+        pub edge_mode: EdgeMode,
         /// Normalization divisor applied to the convolution result.
-        /// Common practice is to use the sum of all weights for averaging, or 1.0 otherwise.
+        /// As in SVG, 0 means the sum of all weights, or 1 if that is 0 too.
         pub divisor: f32,
         /// Bias value added to the result after normalization.
         /// Useful for edge detection or emboss effects to shift the result range.
@@ -1420,7 +1429,11 @@ pub mod convolution {
     /// 3x3 Gaussian blur kernel for basic smoothing.
     pub fn gaussian_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![1.0, 2.0, 1.0, 2.0, 4.0, 2.0, 1.0, 2.0, 1.0],
             divisor: 16.0,
             bias: 0.0,
@@ -1431,7 +1444,11 @@ pub mod convolution {
     /// 3x3 Sharpen kernel to enhance edges and details.
     pub fn sharpen_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0],
             divisor: 1.0,
             bias: 0.0,
@@ -1442,7 +1459,11 @@ pub mod convolution {
     /// 3x3 Edge detection kernel (Laplacian operator).
     pub fn edge_detect_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![-1.0, -1.0, -1.0, -1.0, 8.0, -1.0, -1.0, -1.0, -1.0],
             divisor: 1.0,
             bias: 0.0,
@@ -1453,7 +1474,11 @@ pub mod convolution {
     /// 3x3 Emboss kernel for creating a raised/beveled appearance.
     pub fn emboss_3x3() -> ConvolutionKernel {
         ConvolutionKernel {
-            size: 3,
+            columns: 3,
+            rows: 3,
+            target_x: 1,
+            target_y: 1,
+            edge_mode: EdgeMode::Duplicate,
             values: vec![-2.0, -1.0, 0.0, -1.0, 1.0, 1.0, 0.0, 1.0, 2.0],
             divisor: 1.0,
             bias: 0.5,
