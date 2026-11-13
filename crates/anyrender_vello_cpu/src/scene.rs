@@ -172,16 +172,23 @@ impl VelloCpuScenePainter {
         }
         let mut pushed = 0;
         for (rect, transform) in clips {
-            let invertible = transform.determinant() != 0.0;
-            let local = if invertible {
-                transform.inverse().transform_rect_bbox(bounds)
+            let cut = if transform.determinant() != 0.0 {
+                let inverse = transform.inverse();
+                let local = inverse.transform_rect_bbox(bounds);
+                // A clip that contains the layer (up to rounding) is a no-op for it.
+                let eps = 1e-3;
+                if rect.x0 <= local.x0 + eps
+                    && rect.y0 <= local.y0 + eps
+                    && rect.x1 >= local.x1 - eps
+                    && rect.y1 >= local.y1 - eps
+                {
+                    continue;
+                }
+                // Cut outside the layer's bounds, so the cut doesn't anti-alias the layer's edge twice.
+                rect.intersect(inverse.transform_rect_bbox(bounds.inflate(2.0, 2.0)))
             } else {
                 Rect::ZERO
             };
-            let cut = rect.intersect(local);
-            if invertible && cut == local {
-                continue;
-            }
             self.render_ctx.set_transform(transform);
             self.render_ctx
                 .push_clip_layer(&cut.to_path(DEFAULT_TOLERANCE));
