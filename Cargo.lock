@@ -395,7 +395,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.3",
  "shlex",
- "syn 3.0.4",
+ "syn 2.0.119",
 ]
 
 [[package]]
