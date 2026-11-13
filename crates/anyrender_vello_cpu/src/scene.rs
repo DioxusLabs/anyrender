@@ -110,8 +110,8 @@ enum LayerKind {
     Layer,
     /// A rectangle on Vello's clip stack, with the transform it was pushed with.
     Clip(Rect, Affine),
-    /// A filter layer, with the number of rectangle clips moved into clip
-    /// layers around it.
+    /// A filter layer, with the number of clip layers pushed around it in
+    /// place of rectangle clips.
     Filter(usize),
 }
 
@@ -151,42 +151,51 @@ impl VelloCpuScenePainter {
         }
     }
 
-    /// Moves the rectangle clips on Vello's clip stack into clip layers,
-    /// returning how many there were.
-    fn lift_clip_rects(&mut self) -> usize {
-        let clips: Vec<_> = self
-            .layer_stack
+    /// The rectangles on Vello's clip stack, with their transforms.
+    fn clip_rects(&self) -> Vec<(Rect, Affine)> {
+        self.layer_stack
             .iter()
             .filter_map(|kind| match kind {
                 LayerKind::Clip(rect, transform) => Some((*rect, *transform)),
                 _ => None,
             })
-            .collect();
+            .collect()
+    }
+
+    /// Takes the rectangle clips off Vello's clip stack, and pushes clip
+    /// layers for the ones that cut into `bounds` (in device pixels), each
+    /// covering only `bounds`. Returns how many layers were pushed.
+    fn lift_clip_rects(&mut self, bounds: Rect) -> usize {
+        let clips = self.clip_rects();
         for _ in &clips {
             self.render_ctx.pop_clip();
         }
-        for (rect, transform) in &clips {
-            self.render_ctx.set_transform(*transform);
+        let mut pushed = 0;
+        for (rect, transform) in clips {
+            let invertible = transform.determinant() != 0.0;
+            let local = if invertible {
+                transform.inverse().transform_rect_bbox(bounds)
+            } else {
+                Rect::ZERO
+            };
+            let cut = rect.intersect(local);
+            if invertible && cut == local {
+                continue;
+            }
+            self.render_ctx.set_transform(transform);
             self.render_ctx
-                .push_clip_layer(&rect.to_path(DEFAULT_TOLERANCE));
+                .push_clip_layer(&cut.to_path(DEFAULT_TOLERANCE));
+            pushed += 1;
         }
-        clips.len()
+        pushed
     }
 
     /// Undoes [`Self::lift_clip_rects`] once the filter layer is popped.
-    fn restore_clip_rects(&mut self, lifted: usize) {
-        for _ in 0..lifted {
+    fn restore_clip_rects(&mut self, pushed: usize) {
+        for _ in 0..pushed {
             self.render_ctx.pop_layer();
         }
-        let clips: Vec<_> = self
-            .layer_stack
-            .iter()
-            .filter_map(|kind| match kind {
-                LayerKind::Clip(rect, transform) => Some((*rect, *transform)),
-                _ => None,
-            })
-            .collect();
-        for (rect, transform) in clips {
+        for (rect, transform) in self.clip_rects() {
             self.render_ctx.set_transform(transform);
             self.render_ctx.push_clip_rect(&rect);
         }
@@ -270,9 +279,11 @@ impl PaintScene for VelloCpuScenePainter {
 
         // Vello CPU shifts a filter layer's content into its own viewport and
         // clips the filtered result with the shifted clip stack, cutting it
-        // off. So the active rectangle clips become clip layers around it.
+        // off. So the active rectangle clips that cut into it become clip
+        // layers around it.
         let lifted = if filter.is_some() {
-            self.lift_clip_rects()
+            // The filtered output stays inside the layer's clip.
+            self.lift_clip_rects(transform.transform_rect_bbox(clip.bounding_box()))
         } else {
             0
         };

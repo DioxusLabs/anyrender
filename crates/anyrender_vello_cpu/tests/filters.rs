@@ -116,3 +116,45 @@ fn flood_fills_the_filter_region() {
     assert_eq!(pixel(175, 175), [0, 0, 255, 255]);
     assert_eq!(pixel(10, 10)[3], 0);
 }
+
+#[test]
+fn rect_clip_around_a_filter_still_clips_later_draws() {
+    let pixel = render(|scene| {
+        scene.push_clip_layer(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &Rect::new(0.0, 0.0, 100.0, 200.0),
+        );
+        scene.push_layer(
+            Fill::NonZero,
+            BlendMode::default(),
+            1.0,
+            Affine::IDENTITY,
+            &Rect::new(20.0, 20.0, 80.0, 80.0),
+            Some(Arc::new(Filter::single(FilterEffect::blur(4.0)))),
+            None,
+        );
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(255, 0, 0),
+            None,
+            &Rect::new(30.0, 30.0, 70.0, 70.0),
+        );
+        scene.pop_layer();
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(0, 0, 255),
+            None,
+            &Rect::new(0.0, 150.0, 200.0, 200.0),
+        );
+        scene.pop_layer();
+    });
+    // The clip contains the filter layer, so the blur is intact.
+    assert!(pixel(26, 50)[3] > 0, "{:?}", pixel(26, 50));
+    assert_eq!(pixel(15, 50)[3], 0);
+    // And it still clips what is drawn after the filter layer.
+    assert_eq!(pixel(50, 175), [0, 0, 255, 255]);
+    assert_eq!(pixel(150, 175)[3], 0);
+}
