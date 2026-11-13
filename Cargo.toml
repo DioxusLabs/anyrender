@@ -5,6 +5,7 @@ members = [
   "crates/anyrender_skia",
   "crates/anyrender_vello",
   "crates/anyrender_vello_cpu",
+  "crates/anyrender_tiny_skia",
   "crates/anyrender_vello_hybrid",
   "crates/anyrender_svg",
   "crates/wgpu_context",
