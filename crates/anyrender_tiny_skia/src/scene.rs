@@ -1,9 +1,11 @@
 //! A tiny-skia implementation of [`PaintScene`].
 //!
-//! Every layer is a full-canvas premultiplied pixmap. Transforms are passed straight to tiny-skia
-//! (nothing is accumulated on the layer stack), and a layer's clip shape becomes a coverage
-//! [`Mask`] that is applied when the layer is composited back into its parent. This mirrors how
-//! resvg renders SVG groups.
+//! Every layer is a premultiplied pixmap covering the pixel bounds of its clip shape (filter and
+//! mask layers cover their parent, since their output can depend on content outside the clip).
+//! Transforms are passed straight to tiny-skia (offset by the layer's origin; nothing is
+//! accumulated on the layer stack), and a non-rectangular clip shape becomes a coverage [`Mask`]
+//! that is applied when the layer is composited back into its parent. This mirrors how resvg
+//! renders SVG groups.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -46,10 +48,15 @@ enum LayerKind {
 
 struct Layer {
     pixmap: Pixmap,
-    /// Coverage of the layer's clip shape, in canvas space. `None` means "no clip".
+    /// The canvas-space rect the pixmap covers.
+    rect: IntRect,
+    /// Coverage of the layer's clip shape, in layer space. `None` means the clip covers the
+    /// whole layer.
     clip: Option<Mask>,
-    /// Pixel bounds of the clip shape (used as the filter region).
-    bounds: IntRect,
+    /// Pixel bounds of the clip shape in layer space (used as the filter region).
+    region: IntRect,
+    /// The clip shape doesn't intersect the parent, so nothing drawn in the layer is visible.
+    empty: bool,
     kind: LayerKind,
 }
 
@@ -110,63 +117,91 @@ impl TinySkiaScenePainter {
         IntRect::from_xywh(0, 0, self.width, self.height).unwrap()
     }
 
-    fn take_pixmap(&mut self) -> Pixmap {
-        match self.spare_pixmaps.pop() {
-            Some(mut pixmap) => {
+    fn take_pixmap(&mut self, width: u32, height: u32) -> Pixmap {
+        let spare = self
+            .spare_pixmaps
+            .iter()
+            .position(|p| p.width() == width && p.height() == height);
+        match spare {
+            Some(i) => {
+                let mut pixmap = self.spare_pixmaps.swap_remove(i);
                 pixmap.fill(tiny_skia::Color::TRANSPARENT);
                 pixmap
             }
-            None => Pixmap::new(self.width, self.height).unwrap(),
+            None => Pixmap::new(width, height).unwrap(),
         }
+    }
+
+    fn recycle(&mut self, pixmap: Pixmap) {
+        const MAX_SPARE_PIXMAPS: usize = 16;
+        if self.spare_pixmaps.len() >= MAX_SPARE_PIXMAPS {
+            self.spare_pixmaps.remove(0);
+        }
+        self.spare_pixmaps.push(pixmap);
     }
 
     fn top(&mut self) -> &mut Pixmap {
         &mut self.layers.last_mut().unwrap().pixmap
     }
 
-    fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, kind: LayerKind) {
-        let (clip, bounds) = self.clip_mask(fill, transform, clip);
-        let pixmap = self.take_pixmap();
-        self.layers.push(Layer {
-            pixmap,
-            clip,
-            bounds,
-            kind,
-        });
+    fn top_rect(&self) -> IntRect {
+        self.layers.last().unwrap().rect
     }
 
-    /// Rasterizes a clip shape into a coverage mask. Returns `None` for the mask when the shape
-    /// covers the whole canvas (so no masking is needed).
-    fn clip_mask(
-        &self,
-        fill: Fill,
-        transform: Affine,
-        shape: &impl Shape,
-    ) -> (Option<Mask>, IntRect) {
-        let full = self.full_rect();
-        if let Some(rect) = shape.as_rect()
-            && is_axis_aligned(transform)
-        {
-            let r = transform.transform_rect_bbox(rect);
-            if r.x0 <= 0.0 && r.y0 <= 0.0 && r.x1 >= self.width as f64 && r.y1 >= self.height as f64
-            {
-                return (None, full);
-            }
-        }
+    /// Maps a canvas-space transform into the space of the top layer's pixmap.
+    fn local(&self, transform: Affine) -> Affine {
+        let rect = self.top_rect();
+        Affine::translate((-rect.x() as f64, -rect.y() as f64)) * transform
+    }
 
-        let mut mask = Mask::new(self.width, self.height).unwrap();
-        let bbox = transform.transform_rect_bbox(shape.bounding_box());
-        let bounds = IntRect::from_ltrb(
-            bbox.x0.floor().max(0.0) as i32,
-            bbox.y0.floor().max(0.0) as i32,
-            bbox.x1.ceil().min(self.width as f64) as i32,
-            bbox.y1.ceil().min(self.height as f64) as i32,
-        )
-        .unwrap_or(IntRect::from_xywh(0, 0, 1, 1).unwrap());
-        if let Some(path) = to_path(shape) {
-            mask.fill_path(&path, fill_rule(fill), true, skia_transform(transform));
-        }
-        (Some(mask), bounds)
+    fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, kind: LayerKind) {
+        let parent = self.top_rect();
+        let full_extent = matches!(
+            kind,
+            LayerKind::Mask(_)
+                | LayerKind::Group {
+                    filter: Some(_),
+                    ..
+                }
+        );
+        let bbox = transform.transform_rect_bbox(clip.bounding_box());
+        let clip_rect = round_out(bbox).and_then(|r| r.intersect(&parent));
+        let rect = match clip_rect {
+            _ if full_extent => parent,
+            Some(r) => r,
+            None => IntRect::from_xywh(parent.x(), parent.y(), 1, 1).unwrap(),
+        };
+        let empty = clip_rect.is_none() && !full_extent;
+
+        // A pixel-aligned rect clip is fully expressed by the layer's extent.
+        let rect_clip = clip
+            .as_rect()
+            .filter(|_| is_axis_aligned(transform))
+            .map(|r| transform.transform_rect_bbox(r))
+            .filter(|r| is_pixel_aligned(*r));
+        let needs_mask = !empty
+            && !rect_clip.is_some_and(|r| {
+                r.x0 <= rect.x() as f64
+                    && r.y0 <= rect.y() as f64
+                    && r.x1 >= rect.right() as f64
+                    && r.y1 >= rect.bottom() as f64
+            });
+        let offset = Affine::translate((-rect.x() as f64, -rect.y() as f64));
+        let mask = needs_mask.then(|| shape_mask(fill, offset * transform, clip, rect));
+        let region = clip_rect
+            .unwrap_or(rect)
+            .translate(-rect.x(), -rect.y())
+            .unwrap();
+
+        let pixmap = self.take_pixmap(rect.width(), rect.height());
+        self.layers.push(Layer {
+            pixmap,
+            rect,
+            clip: mask,
+            region,
+            empty,
+            kind,
+        });
     }
 
     fn image_pixmap(&mut self, image: &ImageData) -> Option<Arc<Pixmap>> {
@@ -224,7 +259,7 @@ impl TinySkiaScenePainter {
         brush_transform: Option<Affine>,
         path: &Path,
     ) {
-        let transform = skia_transform(transform);
+        let transform = skia_transform(self.local(transform));
         self.with_paint(brush, brush_alpha, brush_transform, |pixmap, paint| {
             pixmap.fill_path(path, paint, fill_rule(fill), transform, None);
         });
@@ -243,7 +278,7 @@ impl TinySkiaScenePainter {
             return;
         }
         let stroke = to_skia_stroke(style);
-        let transform = skia_transform(transform);
+        let transform = skia_transform(self.local(transform));
         self.with_paint(brush, brush_alpha, brush_transform, |pixmap, paint| {
             pixmap.stroke_path(path, paint, &stroke, transform, None);
         });
@@ -285,15 +320,17 @@ impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
         while self.layers.len() > 1 {
             let layer = self.layers.pop().unwrap();
-            self.spare_pixmaps.push(layer.pixmap);
+            self.recycle(layer.pixmap);
         }
         if self.layers.is_empty() {
-            let pixmap = self.take_pixmap();
-            let bounds = self.full_rect();
+            let rect = self.full_rect();
+            let pixmap = self.take_pixmap(rect.width(), rect.height());
             self.layers.push(Layer {
                 pixmap,
+                rect,
                 clip: None,
-                bounds,
+                region: rect,
+                empty: false,
                 kind: LayerKind::Root,
             });
         } else {
@@ -338,17 +375,28 @@ impl PaintScene for TinySkiaScenePainter {
             return;
         }
         let mut layer = self.layers.pop().unwrap();
-        let parent = &mut self.layers.last_mut().unwrap().pixmap;
+        if layer.empty {
+            self.recycle(layer.pixmap);
+            return;
+        }
+        let parent = self.layers.last_mut().unwrap();
+        let (dx, dy) = (
+            layer.rect.x() - parent.rect.x(),
+            layer.rect.y() - parent.rect.y(),
+        );
         match layer.kind {
             LayerKind::Root => unreachable!(),
             LayerKind::Clip => {
-                parent.draw_pixmap(
-                    0,
-                    0,
+                if let Some(clip) = &layer.clip {
+                    layer.pixmap.apply_mask(clip);
+                }
+                parent.pixmap.draw_pixmap(
+                    dx,
+                    dy,
                     layer.pixmap.as_ref(),
                     &PixmapPaint::default(),
                     Transform::identity(),
-                    layer.clip.as_ref(),
+                    None,
                 );
             }
             LayerKind::Group {
@@ -357,20 +405,39 @@ impl PaintScene for TinySkiaScenePainter {
                 ref filter,
             } => {
                 if let Some((filter, transform)) = filter {
-                    filter::apply(filter, *transform, layer.bounds, &mut layer.pixmap);
+                    filter::apply(filter, *transform, layer.region, &mut layer.pixmap);
                 }
-                parent.draw_pixmap(
-                    0,
-                    0,
-                    layer.pixmap.as_ref(),
-                    &PixmapPaint {
-                        opacity: alpha.clamp(0.0, 1.0),
-                        blend_mode: blend,
-                        quality: FilterQuality::Nearest,
-                    },
-                    Transform::identity(),
-                    layer.clip.as_ref(),
-                );
+                let paint = PixmapPaint {
+                    opacity: alpha.clamp(0.0, 1.0),
+                    blend_mode: blend,
+                    quality: FilterQuality::Nearest,
+                };
+                // Source-over is linear in the source, so the clip can be applied to the layer
+                // itself. Other blend modes must leave the parent untouched outside the clip,
+                // which needs a parent-sized mask.
+                if blend == tiny_skia::BlendMode::SourceOver {
+                    if let Some(clip) = &layer.clip {
+                        layer.pixmap.apply_mask(clip);
+                    }
+                    parent.pixmap.draw_pixmap(
+                        dx,
+                        dy,
+                        layer.pixmap.as_ref(),
+                        &paint,
+                        Transform::identity(),
+                        None,
+                    );
+                } else {
+                    let mask = expand_mask(layer.clip.as_ref(), layer.rect, parent.rect);
+                    parent.pixmap.draw_pixmap(
+                        dx,
+                        dy,
+                        layer.pixmap.as_ref(),
+                        &paint,
+                        Transform::identity(),
+                        Some(&mask),
+                    );
+                }
             }
             LayerKind::Mask(mode) => {
                 let mask_type = match mode {
@@ -383,10 +450,10 @@ impl PaintScene for TinySkiaScenePainter {
                         *m = ((*m as u16 * *c as u16 + 127) / 255) as u8;
                     }
                 }
-                parent.apply_mask(&mask);
+                parent.pixmap.apply_mask(&mask);
             }
         }
-        self.spare_pixmaps.push(layer.pixmap);
+        self.recycle(layer.pixmap);
     }
 
     fn stroke<'a>(
@@ -430,19 +497,25 @@ impl PaintScene for TinySkiaScenePainter {
         let style = style.into();
         let brush = brush.into();
         let glyph_transform = glyph_transform.unwrap_or(Affine::IDENTITY);
+        // Glyph outlines are merged into a single path so the run is rasterized in one pass.
+        let mut run = PathBuilder::new();
         for glyph in glyphs {
             let Some(path) = self.glyph_path(font, font_size, normalized_coords, glyph.id) else {
                 continue;
             };
-            let transform =
-                transform * Affine::translate((glyph.x as f64, glyph.y as f64)) * glyph_transform;
-            match style {
-                StyleRef::Fill(fill) => {
-                    self.fill_path(fill, transform, brush.clone(), brush_alpha, None, &path)
-                }
-                StyleRef::Stroke(stroke) => {
-                    self.stroke_path(stroke, transform, brush.clone(), brush_alpha, None, &path)
-                }
+            let glyph_transform =
+                Affine::translate((glyph.x as f64, glyph.y as f64)) * glyph_transform;
+            if let Some(path) = path.transform(skia_transform(glyph_transform)) {
+                run.push_path(&path);
+            }
+        }
+        let Some(path) = run.finish() else { return };
+        match style {
+            StyleRef::Fill(fill) => {
+                self.fill_path(fill, transform, brush, brush_alpha, None, &path)
+            }
+            StyleRef::Stroke(stroke) => {
+                self.stroke_path(stroke, transform, brush, brush_alpha, None, &path)
             }
         }
     }
@@ -479,7 +552,25 @@ impl PaintScene for TinySkiaScenePainter {
         };
         let Some(path) = to_path(&path) else { return };
 
-        let mut shadow = self.take_pixmap();
+        // Blur only the area the shadow can reach.
+        let (sx, sy) = transform_scale(transform);
+        let reach = 3.0 * geometry.std_dev * sx.max(sy) + 2.0;
+        let b = path.bounds();
+        let bbox = transform
+            .transform_rect_bbox(kurbo::Rect::new(
+                b.left() as f64,
+                b.top() as f64,
+                b.right() as f64,
+                b.bottom() as f64,
+            ))
+            .inflate(reach, reach);
+        let top = self.top_rect();
+        let Some(rect) = round_out(bbox).and_then(|r| r.intersect(&top)) else {
+            return;
+        };
+        let offset = Affine::translate((-rect.x() as f64, -rect.y() as f64));
+
+        let mut shadow = self.take_pixmap(rect.width(), rect.height());
         let paint = Paint {
             shader: Shader::SolidColor(to_skia_color(color, 1.0)),
             anti_alias: true,
@@ -489,31 +580,34 @@ impl PaintScene for TinySkiaScenePainter {
             &path,
             &paint,
             FillRule::Winding,
-            skia_transform(transform),
+            skia_transform(offset * transform),
             None,
         );
-        let (sx, sy) = transform_scale(transform);
+        let full = IntRect::from_xywh(0, 0, rect.width(), rect.height()).unwrap();
         filter::blur(
             &mut shadow,
-            self.full_rect(),
+            full,
             geometry.std_dev * sx,
             geometry.std_dev * sy,
         );
-
-        let (clip, _) = if geometry.needs_clip() {
-            self.clip_mask(Fill::NonZero, transform, &geometry.area)
-        } else {
-            (None, self.full_rect())
-        };
+        if geometry.needs_clip() {
+            shadow.apply_mask(&shape_mask(
+                Fill::NonZero,
+                offset * transform,
+                &geometry.area,
+                rect,
+            ));
+        }
+        let (dx, dy) = (rect.x() - top.x(), rect.y() - top.y());
         self.top().draw_pixmap(
-            0,
-            0,
+            dx,
+            dy,
             shadow.as_ref(),
             &PixmapPaint::default(),
             Transform::identity(),
-            clip.as_ref(),
+            None,
         );
-        self.spare_pixmaps.push(shadow);
+        self.recycle(shadow);
     }
 }
 
@@ -535,6 +629,53 @@ impl OutlinePen for SkiaPen {
     fn close(&mut self) {
         self.0.close();
     }
+}
+
+/// The smallest pixel rect containing `rect`.
+fn round_out(rect: kurbo::Rect) -> Option<IntRect> {
+    IntRect::from_ltrb(
+        rect.x0.floor().max(i32::MIN as f64) as i32,
+        rect.y0.floor().max(i32::MIN as f64) as i32,
+        rect.x1.ceil().min(i32::MAX as f64) as i32,
+        rect.y1.ceil().min(i32::MAX as f64) as i32,
+    )
+}
+
+fn is_pixel_aligned(rect: kurbo::Rect) -> bool {
+    const EPSILON: f64 = 1.0 / 256.0;
+    [rect.x0, rect.y0, rect.x1, rect.y1]
+        .iter()
+        .all(|v| (v - v.round()).abs() < EPSILON)
+}
+
+/// Rasterizes `shape` into a coverage mask the size of `rect`. `transform` maps the shape into
+/// the mask's space.
+fn shape_mask(fill: Fill, transform: Affine, shape: &impl Shape, rect: IntRect) -> Mask {
+    let mut mask = Mask::new(rect.width(), rect.height()).unwrap();
+    if let Some(path) = to_path(shape) {
+        mask.fill_path(&path, fill_rule(fill), true, skia_transform(transform));
+    }
+    mask
+}
+
+/// Places a layer's clip mask (`None` meaning full coverage of `rect`) into a mask covering
+/// `parent`.
+fn expand_mask(clip: Option<&Mask>, rect: IntRect, parent: IntRect) -> Mask {
+    let mut mask = Mask::new(parent.width(), parent.height()).unwrap();
+    let (dx, dy) = (
+        (rect.x() - parent.x()) as usize,
+        (rect.y() - parent.y()) as usize,
+    );
+    let (w, pw) = (rect.width() as usize, parent.width() as usize);
+    let data = mask.data_mut();
+    for y in 0..rect.height() as usize {
+        let row = &mut data[(dy + y) * pw + dx..][..w];
+        match clip {
+            Some(clip) => row.copy_from_slice(&clip.data()[y * w..][..w]),
+            None => row.fill(255),
+        }
+    }
+    mask
 }
 
 fn is_axis_aligned(transform: Affine) -> bool {
