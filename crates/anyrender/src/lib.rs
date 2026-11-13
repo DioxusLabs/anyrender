@@ -60,6 +60,8 @@ mod null_backend;
 pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
+pub mod dyn_scene;
+pub use dyn_scene::{DynPaintScene, DynScenePainter};
 
 mod resource_id;
 pub use resource_id::ResourceId;
