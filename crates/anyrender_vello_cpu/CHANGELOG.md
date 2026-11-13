@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `VelloCpuScenePainter::finish` no longer panics with the `multithreading` feature (it now flushes before rendering).
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
 

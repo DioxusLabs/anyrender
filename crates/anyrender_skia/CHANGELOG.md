@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `push_mask_layer` support, including luminance masks.
 
+### Fixed
+
+- Gradients respect `interpolation_alpha_space`. They were always interpolated premultiplied.
+
 ## [0.12.0] - 2026-10-03
 
 ### Changed

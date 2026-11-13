@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ColorMatrix::SOURCE_ALPHA` and `ColorMatrix::LUMINANCE_TO_ALPHA` constants.
 - `PaintScene::push_mask_layer` with `MaskMode::Alpha` and `MaskMode::Luminance`, and the recorded `MaskLayerCommand` (breaking for `PaintScene` implementors).
 
 ### Changed
