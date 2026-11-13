@@ -10,8 +10,7 @@
 //!
 //! - Filter primitive subregions (`x`/`y`/`width`/`height` on a primitive) are ignored.
 //!   The overall filter region *is* honoured (it is used as the layer clip).
-//! - `color-interpolation-filters` is ignored (backends pick a color space).
-//! - `feConvolveMatrix` `targetX`/`targetY`, `edgeMode` and `kernelUnitLength` are ignored.
+//! - `feConvolveMatrix` `kernelUnitLength` is ignored.
 //! - `feTurbulence` `stitchTiles` is ignored.
 //!
 //! Filters that cannot be expressed at all (see [`convert_primitive`]) cause the whole
@@ -19,7 +18,9 @@
 //! renders the group unfiltered.
 
 use anyrender::filters::{
-    Filter, FilterEffect, FilterId, FilterInput, FilterInputs, FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    FilterSource,
+    blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     component_transfer::{
         ComponentTransferFilter, GammaTransferFunction, LinearTransferFunction, TransferFunction,
@@ -32,6 +33,7 @@ use anyrender::filters::{
         SpecularLightingFilter, SpotLightSource,
     },
     morphology::{MorphologyFilter, MorphologyOperator},
+    shadow::DropShadow,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
 use kurbo::Vec2;
@@ -78,10 +80,15 @@ fn convert_filter(
         chain_input,
         source_alpha: None,
         results: HashMap::new(),
+        color_space: FilterColorSpace::default(),
     };
 
     let mut last: Option<FilterId> = None;
     for primitive in filter.primitives() {
+        ctx.color_space = match primitive.color_interpolation() {
+            usvg::filter::ColorInterpolation::SRGB => FilterColorSpace::Srgb,
+            usvg::filter::ColorInterpolation::LinearRGB => FilterColorSpace::LinearRgb,
+        };
         let id = convert_primitive(&mut ctx, primitive)?;
         if !primitive.result().is_empty() {
             ctx.results.insert(primitive.result().to_string(), id);
@@ -100,9 +107,16 @@ struct FilterContext<'a> {
     source_alpha: Option<FilterId>,
     /// Map from primitive `result` names to their graph node ids.
     results: HashMap<String, FilterId>,
+    /// Color space of the primitive being converted.
+    color_space: FilterColorSpace,
 }
 
 impl FilterContext<'_> {
+    fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
+        self.graph
+            .add_with_color_space(effect, inputs, self.color_space)
+    }
+
     fn resolve_input(&mut self, input: &usvg::filter::Input) -> FilterInput {
         match input {
             usvg::filter::Input::SourceGraphic => match self.chain_input {
@@ -136,14 +150,7 @@ impl FilterContext<'_> {
 
 /// Convert a single filter primitive, appending it (and any helper nodes) to the graph.
 ///
-/// Returns `None` for primitives that cannot be expressed:
-///
-/// - `feImage`
-/// - `feGaussianBlur`/`feDropShadow` with different X/Y std deviations
-/// - `feMorphology` with different X/Y radii
-/// - `feTurbulence` with different X/Y base frequencies
-/// - `feConvolveMatrix` with a non-square kernel
-/// - lighting primitives with a non-white lighting color
+/// Returns `None` for primitives that cannot be expressed, which is only `feImage`.
 fn convert_primitive(
     ctx: &mut FilterContext<'_>,
     primitive: &usvg::filter::Primitive,
@@ -154,7 +161,7 @@ fn convert_primitive(
         Kind::Blend(fe) => {
             let input1 = ctx.resolve_input(fe.input1());
             let input2 = ctx.resolve_input(fe.input2());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::Blend(util::to_blend_mode(fe.mode()).mix),
                 FilterInputs::dual(input1, input2),
             )
@@ -162,7 +169,7 @@ fn convert_primitive(
         Kind::ColorMatrix(fe) => {
             let matrix = to_color_matrix(fe.kind());
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::ColorMatrix(matrix),
                 FilterInputs::single(input),
             )
@@ -175,7 +182,7 @@ fn convert_primitive(
                 alpha_function: to_transfer_function(fe.func_a()),
             };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::ComponentTransfer(filter),
                 FilterInputs::single(input),
             )
@@ -202,58 +209,59 @@ fn convert_primitive(
             };
             let input1 = ctx.resolve_input(fe.input1());
             let input2 = ctx.resolve_input(fe.input2());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::Composite(operator),
                 FilterInputs::dual(input1, input2),
             )
         }
         Kind::ConvolveMatrix(fe) => {
             let matrix = fe.matrix();
-            if matrix.columns() != matrix.rows() {
-                return None;
-            }
             let kernel = ConvolutionKernel {
-                size: matrix.columns(),
+                columns: matrix.columns(),
+                rows: matrix.rows(),
                 values: matrix.data().to_vec(),
+                target_x: matrix.target_x(),
+                target_y: matrix.target_y(),
+                edge_mode: match fe.edge_mode() {
+                    usvg::filter::EdgeMode::None => EdgeMode::None,
+                    usvg::filter::EdgeMode::Duplicate => EdgeMode::Duplicate,
+                    usvg::filter::EdgeMode::Wrap => EdgeMode::Wrap,
+                },
                 divisor: fe.divisor().get(),
                 bias: fe.bias(),
                 preserve_alpha: fe.preserve_alpha(),
             };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::ConvolveMatrix(kernel),
                 FilterInputs::single(input),
             )
         }
         Kind::DiffuseLighting(fe) => {
-            if !is_white(fe.lighting_color()) {
-                return None;
-            }
             let filter = DiffuseLightingFilter {
                 surface_scale: fe.surface_scale(),
                 diffuse_constant: fe.diffuse_constant(),
                 kernel_unit_length: 1.0,
                 light_source: to_light_source(fe.light_source()),
+                lighting_color: to_color(fe.lighting_color()),
             };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::DiffuseLighting(filter),
                 FilterInputs::single(input),
             )
         }
         Kind::SpecularLighting(fe) => {
-            if !is_white(fe.lighting_color()) {
-                return None;
-            }
             let filter = SpecularLightingFilter {
                 surface_scale: fe.surface_scale(),
                 specular_constant: fe.specular_constant(),
                 specular_exponent: fe.specular_exponent(),
                 kernel_unit_length: 1.0,
                 light_source: to_light_source(fe.light_source()),
+                lighting_color: to_color(fe.lighting_color()),
             };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::SpecularLighting(filter),
                 FilterInputs::single(input),
             )
@@ -266,30 +274,27 @@ fn convert_primitive(
             };
             let input1 = ctx.resolve_input(fe.input1());
             let input2 = ctx.resolve_input(fe.input2());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::DisplacementMap(filter),
                 FilterInputs::dual(input1, input2),
             )
         }
         Kind::DropShadow(fe) => {
-            let std_dev_x = fe.std_dev_x().get();
-            let std_dev_y = fe.std_dev_y().get();
-            if std_dev_x != std_dev_y {
-                return None;
-            }
             let color = fe.color();
-            let effect = FilterEffect::drop_shadow(
-                fe.dx(),
-                fe.dy(),
-                std_dev_x,
-                Color::from_rgba8(color.red, color.green, color.blue, fe.opacity().to_u8()),
-            );
+            let effect = FilterEffect::DropShadow(DropShadow {
+                dx: fe.dx(),
+                dy: fe.dy(),
+                std_deviation_x: fe.std_dev_x().get(),
+                std_deviation_y: fe.std_dev_y().get(),
+                color: Color::from_rgba8(color.red, color.green, color.blue, fe.opacity().to_u8()),
+                edge_mode: EdgeMode::None,
+            });
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(effect, FilterInputs::single(input))
+            ctx.add(effect, FilterInputs::single(input))
         }
         Kind::Flood(fe) => {
             let color = fe.color();
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::Flood(Color::from_rgba8(
                     color.red,
                     color.green,
@@ -300,14 +305,16 @@ fn convert_primitive(
             )
         }
         Kind::GaussianBlur(fe) => {
-            let std_dev_x = fe.std_dev_x().get();
-            let std_dev_y = fe.std_dev_y().get();
-            if std_dev_x != std_dev_y {
-                return None;
-            }
+            let blur = GaussianBlurFilter {
+                std_deviation_x: fe.std_dev_x().get(),
+                std_deviation_y: fe.std_dev_y().get(),
+                edge_mode: EdgeMode::None,
+            };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph
-                .add(FilterEffect::blur(std_dev_x), FilterInputs::single(input))
+            ctx.add(
+                FilterEffect::GaussianBlur(blur),
+                FilterInputs::single(input),
+            )
         }
         // feImage renders an external image or SVG subtree, which cannot be
         // expressed as an `anyrender::FilterEffect`.
@@ -320,7 +327,7 @@ fn convert_primitive(
                 let input = ctx.resolve_input(input);
                 acc = Some(match acc {
                     None => input,
-                    Some(below) => FilterInput::Result(ctx.graph.add(
+                    Some(below) => FilterInput::Result(ctx.add(
                         FilterEffect::Composite(CompositeOperator::Over),
                         FilterInputs::dual(input, below),
                     )),
@@ -329,55 +336,44 @@ fn convert_primitive(
             match acc {
                 Some(FilterInput::Result(id)) => id,
                 // A single source input: pass it through unchanged.
-                Some(input @ FilterInput::Source(_)) => ctx.graph.add(
+                Some(input @ FilterInput::Source(_)) => ctx.add(
                     FilterEffect::Offset(Vec2::ZERO),
                     FilterInputs::single(input),
                 ),
                 // No inputs: transparent black.
-                None => ctx
-                    .graph
-                    .add(FilterEffect::Flood(Color::TRANSPARENT), FilterInputs::NONE),
+                None => ctx.add(FilterEffect::Flood(Color::TRANSPARENT), FilterInputs::NONE),
             }
         }
         Kind::Morphology(fe) => {
-            let radius_x = fe.radius_x().get();
-            let radius_y = fe.radius_y().get();
-            if radius_x != radius_y {
-                return None;
-            }
             let filter = MorphologyFilter {
                 operator: match fe.operator() {
                     usvg::filter::MorphologyOperator::Erode => MorphologyOperator::Erode,
                     usvg::filter::MorphologyOperator::Dilate => MorphologyOperator::Dilate,
                 },
-                radius: radius_x,
+                radius_x: fe.radius_x().get(),
+                radius_y: fe.radius_y().get(),
             };
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::Morphology(filter),
                 FilterInputs::single(input),
             )
         }
         Kind::Offset(fe) => {
             let input = ctx.resolve_input(fe.input());
-            ctx.graph.add(
+            ctx.add(
                 FilterEffect::Offset(Vec2::new(fe.dx() as f64, fe.dy() as f64)),
                 FilterInputs::single(input),
             )
         }
         Kind::Tile(fe) => {
             let input = ctx.resolve_input(fe.input());
-            ctx.graph
-                .add(FilterEffect::Tile, FilterInputs::single(input))
+            ctx.add(FilterEffect::Tile, FilterInputs::single(input))
         }
         Kind::Turbulence(fe) => {
-            let base_frequency_x = fe.base_frequency_x().get();
-            let base_frequency_y = fe.base_frequency_y().get();
-            if base_frequency_x != base_frequency_y {
-                return None;
-            }
             let filter = TurbulenceFilter {
-                base_frequency: base_frequency_x,
+                base_frequency_x: fe.base_frequency_x().get(),
+                base_frequency_y: fe.base_frequency_y().get(),
                 num_octaves: fe.num_octaves(),
                 seed: fe.seed().max(0) as u32,
                 turbulence_type: match fe.kind() {
@@ -385,8 +381,7 @@ fn convert_primitive(
                     usvg::filter::TurbulenceKind::Turbulence => TurbulenceType::Turbulence,
                 },
             };
-            ctx.graph
-                .add(FilterEffect::Turbulence(filter), FilterInputs::NONE)
+            ctx.add(FilterEffect::Turbulence(filter), FilterInputs::NONE)
         }
     };
 
@@ -477,8 +472,8 @@ fn to_light_source(light_source: usvg::filter::LightSource) -> LightSource {
     }
 }
 
-fn is_white(color: usvg::Color) -> bool {
-    color.red == 255 && color.green == 255 && color.blue == 255
+fn to_color(color: usvg::Color) -> Color {
+    Color::from_rgb8(color.red, color.green, color.blue)
 }
 
 #[cfg(test)]
@@ -623,18 +618,72 @@ mod tests {
         );
     }
 
+    fn single_node(primitive: &str) -> anyrender::filters::FilterGraphNode {
+        let graph = convert(&format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g filter="url(#f)">
+                    <filter id="f">{primitive}</filter>
+                    <rect width="50" height="50" fill="red"/>
+                </g>
+            </svg>"##
+        ))
+        .unwrap();
+        assert_eq!(graph.nodes().len(), 1);
+        graph.nodes()[0].clone()
+    }
+
     #[test]
-    fn anisotropic_blur_is_unsupported() {
-        assert!(
-            convert(
-                r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-                    <g filter="url(#f)">
-                        <filter id="f"><feGaussianBlur stdDeviation="3 7"/></filter>
-                        <rect width="50" height="50" fill="red"/>
-                    </g>
-                </svg>"##,
-            )
-            .is_none()
+    fn anisotropic_blur() {
+        let node = single_node(r#"<feGaussianBlur stdDeviation="3 7"/>"#);
+        let FilterEffect::GaussianBlur(blur) = node.effect else {
+            panic!("expected blur, got {:?}", node.effect);
+        };
+        assert_eq!((blur.std_deviation_x, blur.std_deviation_y), (3.0, 7.0));
+    }
+
+    #[test]
+    fn color_interpolation_filters() {
+        let default = single_node(r#"<feGaussianBlur stdDeviation="3"/>"#);
+        assert_eq!(default.color_space, FilterColorSpace::LinearRgb);
+        let srgb =
+            single_node(r#"<feGaussianBlur stdDeviation="3" color-interpolation-filters="sRGB"/>"#);
+        assert_eq!(srgb.color_space, FilterColorSpace::Srgb);
+    }
+
+    #[test]
+    fn rectangular_convolve_matrix() {
+        let node = single_node(
+            r#"<feConvolveMatrix order="3 2" kernelMatrix="1 2 3 4 5 6" targetX="2" targetY="0" edgeMode="wrap"/>"#,
+        );
+        let FilterEffect::ConvolveMatrix(kernel) = node.effect else {
+            panic!("expected convolve, got {:?}", node.effect);
+        };
+        assert_eq!((kernel.columns, kernel.rows), (3, 2));
+        assert_eq!((kernel.target_x, kernel.target_y), (2, 0));
+        assert_eq!(kernel.edge_mode, anyrender::filters::EdgeMode::Wrap);
+        assert_eq!(kernel.values.len(), 6);
+    }
+
+    #[test]
+    fn lighting_color() {
+        let node = single_node(
+            r#"<feDiffuseLighting lighting-color="rgb(10, 20, 30)"><feDistantLight/></feDiffuseLighting>"#,
+        );
+        let FilterEffect::DiffuseLighting(lighting) = node.effect else {
+            panic!("expected diffuse lighting, got {:?}", node.effect);
+        };
+        assert_eq!(lighting.lighting_color, Color::from_rgb8(10, 20, 30));
+    }
+
+    #[test]
+    fn turbulence_frequency_pair() {
+        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2"/>"#);
+        let FilterEffect::Turbulence(turbulence) = node.effect else {
+            panic!("expected turbulence, got {:?}", node.effect);
+        };
+        assert_eq!(
+            (turbulence.base_frequency_x, turbulence.base_frequency_y),
+            (0.05, 0.2)
         );
     }
 

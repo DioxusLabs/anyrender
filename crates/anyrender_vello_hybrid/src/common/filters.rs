@@ -21,14 +21,18 @@ pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimi
     Some(match effect {
         FilterEffect::Flood(color) => FilterPrimitive::Flood { color: *color },
         FilterEffect::GaussianBlur(blur) => FilterPrimitive::GaussianBlur {
-            std_deviation_x: blur.std_deviation,
-            std_deviation_y: blur.std_deviation,
+            std_deviation_x: blur.std_deviation_x,
+            std_deviation_y: blur.std_deviation_y,
             edge_mode: convert_edge_mode(blur.edge_mode),
         },
+        // Vello has one standard deviation for both axes.
+        FilterEffect::DropShadow(shadow) if shadow.std_deviation_x != shadow.std_deviation_y => {
+            return None;
+        }
         FilterEffect::DropShadow(shadow) => FilterPrimitive::DropShadow {
             dx: shadow.dx,
             dy: shadow.dy,
-            std_deviation: shadow.std_deviation,
+            std_deviation: shadow.std_deviation_x,
             color: shadow.color,
             edge_mode: convert_edge_mode(shadow.edge_mode),
         },
