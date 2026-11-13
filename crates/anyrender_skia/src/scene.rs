@@ -965,8 +965,11 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
             )
         }
         FilterEffect::DiffuseLighting(diffuse_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(diffuse_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = diffuse_lighting_filter.surface_scale;
             let kd = diffuse_lighting_filter.diffuse_constant;
             match &diffuse_lighting_filter.light_source {
@@ -1000,8 +1003,11 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
             }
         }
         FilterEffect::SpecularLighting(specular_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(specular_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = specular_lighting_filter.surface_scale;
             let ks = specular_lighting_filter.specular_constant;
             let shininess = specular_lighting_filter.specular_exponent;

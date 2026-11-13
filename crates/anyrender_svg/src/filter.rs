@@ -150,10 +150,7 @@ impl FilterContext<'_> {
 
 /// Convert a single filter primitive, appending it (and any helper nodes) to the graph.
 ///
-/// Returns `None` for primitives that cannot be expressed:
-///
-/// - `feImage`
-/// - lighting primitives with a non-white lighting color
+/// Returns `None` for primitives that cannot be expressed, which is only `feImage`.
 fn convert_primitive(
     ctx: &mut FilterContext<'_>,
     primitive: &usvg::filter::Primitive,
@@ -241,14 +238,12 @@ fn convert_primitive(
             )
         }
         Kind::DiffuseLighting(fe) => {
-            if !is_white(fe.lighting_color()) {
-                return None;
-            }
             let filter = DiffuseLightingFilter {
                 surface_scale: fe.surface_scale(),
                 diffuse_constant: fe.diffuse_constant(),
                 kernel_unit_length: 1.0,
                 light_source: to_light_source(fe.light_source()),
+                lighting_color: to_color(fe.lighting_color()),
             };
             let input = ctx.resolve_input(fe.input());
             ctx.add(
@@ -257,15 +252,13 @@ fn convert_primitive(
             )
         }
         Kind::SpecularLighting(fe) => {
-            if !is_white(fe.lighting_color()) {
-                return None;
-            }
             let filter = SpecularLightingFilter {
                 surface_scale: fe.surface_scale(),
                 specular_constant: fe.specular_constant(),
                 specular_exponent: fe.specular_exponent(),
                 kernel_unit_length: 1.0,
                 light_source: to_light_source(fe.light_source()),
+                lighting_color: to_color(fe.lighting_color()),
             };
             let input = ctx.resolve_input(fe.input());
             ctx.add(
@@ -479,8 +472,8 @@ fn to_light_source(light_source: usvg::filter::LightSource) -> LightSource {
     }
 }
 
-fn is_white(color: usvg::Color) -> bool {
-    color.red == 255 && color.green == 255 && color.blue == 255
+fn to_color(color: usvg::Color) -> Color {
+    Color::from_rgb8(color.red, color.green, color.blue)
 }
 
 #[cfg(test)]
@@ -669,6 +662,17 @@ mod tests {
         assert_eq!((kernel.target_x, kernel.target_y), (2, 0));
         assert_eq!(kernel.edge_mode, anyrender::filters::EdgeMode::Wrap);
         assert_eq!(kernel.values.len(), 6);
+    }
+
+    #[test]
+    fn lighting_color() {
+        let node = single_node(
+            r#"<feDiffuseLighting lighting-color="rgb(10, 20, 30)"><feDistantLight/></feDiffuseLighting>"#,
+        );
+        let FilterEffect::DiffuseLighting(lighting) = node.effect else {
+            panic!("expected diffuse lighting, got {:?}", node.effect);
+        };
+        assert_eq!(lighting.lighting_color, Color::from_rgb8(10, 20, 30));
     }
 
     #[test]
