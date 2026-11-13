@@ -257,11 +257,7 @@ fn render_layout(
                 let parley_font = run.font();
                 let font_data = FontData::new(font_blob.clone(), parley_font.index);
                 let font_size = run.font_size();
-                let normalized_coords: Vec<i16> = run
-                    .normalized_coords()
-                    .iter()
-                    .map(|coord| coord.to_bits())
-                    .collect();
+                let normalized_coords: &[i16] = bytemuck::cast_slice(run.normalized_coords());
                 let glyphs = glyph_run.positioned_glyphs().map(|g| Glyph {
                     id: g.id,
                     x: g.x,
@@ -272,7 +268,7 @@ fn render_layout(
                     &font_data,
                     font_size,
                     false,
-                    &normalized_coords,
+                    normalized_coords,
                     Vec2 { x: 0.0, y: 0.0 },
                     Fill::NonZero,
                     color,
