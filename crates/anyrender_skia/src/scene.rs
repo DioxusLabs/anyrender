@@ -772,12 +772,15 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
             let shader = skia_safe::shaders::color(sk_color);
             image_filters::shader(shader, None)
         }
-        FilterEffect::GaussianBlur(blur) => {
-            image_filters::blur((blur.std_deviation, blur.std_deviation), None, input, None)
-        }
+        FilterEffect::GaussianBlur(blur) => image_filters::blur(
+            (blur.std_deviation_x, blur.std_deviation_y),
+            None,
+            input,
+            None,
+        ),
         FilterEffect::DropShadow(drop_shadow) => image_filters::drop_shadow(
             (drop_shadow.dx, drop_shadow.dy),
-            (drop_shadow.std_deviation, drop_shadow.std_deviation),
+            (drop_shadow.std_deviation_x, drop_shadow.std_deviation_y),
             color4f_from_alpha_color(color_in_space(drop_shadow.color, color_space)),
             None,
             input,
@@ -896,7 +899,7 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
             image_filters::blend(mode, secondary, input, None)
         }
         FilterEffect::Morphology(morphology_filter) => {
-            let radius = (morphology_filter.radius, morphology_filter.radius);
+            let radius = (morphology_filter.radius_x, morphology_filter.radius_y);
             match morphology_filter.operator {
                 MorphologyOperator::Dilate => image_filters::dilate(radius, input, None),
                 MorphologyOperator::Erode => image_filters::erode(radius, input, None),
@@ -926,8 +929,8 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
         }
         FilterEffect::Turbulence(turbulence_filter) => {
             let base_frequency = (
-                turbulence_filter.base_frequency,
-                turbulence_filter.base_frequency,
+                turbulence_filter.base_frequency_x,
+                turbulence_filter.base_frequency_y,
             );
             let num_octaves = turbulence_filter.num_octaves as usize;
             let seed = turbulence_filter.seed as f32;
