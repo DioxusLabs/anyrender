@@ -415,7 +415,7 @@ fn to_transfer_function(func: &usvg::filter::TransferFunction) -> TransferFuncti
         usvg::filter::TransferFunction::Table(values) => match values.len() {
             // An empty table is an identity transform, and a single-value
             // table is a constant function.
-            // See <https://drafts.fxtf.org/filter-effects/#element-attrdef-fecomponenttransfer-tablevalues>
+            // See <https://www.w3.org/TR/filter-effects-1/#element-attrdef-fecomponenttransfer-tablevalues>
             0 => TransferFunction::Identity,
             1 => TransferFunction::Table([values[0], values[0]].into_iter().collect()),
             _ => TransferFunction::Table(values.iter().copied().collect()),

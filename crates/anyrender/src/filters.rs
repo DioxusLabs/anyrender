@@ -7,7 +7,7 @@
 //! CSS filter functions and low-level SVG filter primitives. The API is designed
 //! to follow the W3C Filter Effects Module Level 1 specification.
 //!
-//! See: <https://drafts.fxtf.org/filter-effects/>
+//! See: <https://www.w3.org/TR/filter-effects-1/>
 
 // ## Vello Implementation Status
 //
@@ -286,7 +286,7 @@ pub enum FilterSource {
 /// beyond the original image boundaries. This is particularly important for blur and
 /// convolution operations near edges.
 ///
-/// See: <https://drafts.fxtf.org/filter-effects/#element-attrdef-filter-primitive-edgemode>
+/// See: <https://www.w3.org/TR/filter-effects-1/#element-attrdef-feconvolvematrix-edgemode>
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EdgeMode {
@@ -319,7 +319,7 @@ pub enum EdgeMode {
 /// filter primitives. They can be combined in a `FilterGraph` to create sophisticated
 /// visual effects.
 ///
-/// See: <https://drafts.fxtf.org/filter-effects/#FilterPrimitivesOverview>
+/// See: <https://www.w3.org/TR/filter-effects-1/#FilterPrimitivesOverview>
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FilterEffect {
@@ -343,7 +343,7 @@ pub enum FilterEffect {
     /// and compositing it with the original. This is a compound operation that
     /// combines multiple primitive operations into one.
     ///
-    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    /// See: <https://www.w3.org/TR/filter-effects-1/#feDropShadowElement>
     DropShadow(DropShadow),
 
     /// Matrix-based color transformation.
@@ -453,7 +453,7 @@ impl FilterEffect {
     /// and compositing it with the original. This is a compound operation that
     /// combines multiple primitive operations into one.
     ///
-    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    /// See: <https://www.w3.org/TR/filter-effects-1/#feDropShadowElement>
     pub fn drop_shadow(dx: f32, dy: f32, std_deviation: f32, color: AlphaColor<Srgb>) -> Self {
         Self::DropShadow(DropShadow {
             dx,
@@ -578,7 +578,7 @@ mod offset_expansion_tests {
 /// of two layers. Unlike compositing operators which deal with alpha, blend modes
 /// focus on color mixing while preserving the compositing behavior.
 ///
-/// See: <https://drafts.fxtf.org/compositing/#blending>
+/// See: <https://www.w3.org/TR/compositing-1/#blending>
 pub type BlendMode = peniko::Mix;
 
 pub mod composite {
@@ -670,7 +670,7 @@ pub mod shadow {
     /// and compositing it with the original. This is a compound operation that
     /// combines multiple primitive operations into one.
     ///
-    /// See: <https://drafts.fxtf.org/filter-effects-2/#feDropShadowElement>
+    /// See: <https://www.w3.org/TR/filter-effects-1/#feDropShadowElement>
     #[derive(Debug, Clone, PartialEq)]
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     pub struct DropShadow {
@@ -951,7 +951,7 @@ pub mod color_transformation {
 
     impl ColorMatrix {
         /// Color matrix filter for the CSS opacity() filter
-        /// <https://drafts.fxtf.org/filter-effects/#opacityEquivalent>
+        /// <https://www.w3.org/TR/filter-effects-1/#opacityEquivalent>
         pub fn opacity(amount: f32) -> Self {
             Self([
                 1.0, 0.0, 0.0, 0.0, 0.0, // Red
@@ -962,7 +962,7 @@ pub mod color_transformation {
         }
 
         /// Color matrix filter for the CSS invert() filter
-        /// <https://drafts.fxtf.org/filter-effects/#invertEquivalent>
+        /// <https://www.w3.org/TR/filter-effects-1/#invertEquivalent>
         pub fn invert(amount: f32) -> Self {
             let slope = 1.0 - 2.0 * amount;
             Self([
@@ -974,7 +974,7 @@ pub mod color_transformation {
         }
 
         /// Color matrix filter for the CSS brightness() filter
-        /// <https://drafts.fxtf.org/filter-effects/#brightnessEquivalent>
+        /// <https://www.w3.org/TR/filter-effects-1/#brightnessEquivalent>
         pub fn brightness(amount: f32) -> Self {
             Self([
                 amount, 0.0, 0.0, 0.0, 0.0, // Red
@@ -985,7 +985,7 @@ pub mod color_transformation {
         }
 
         /// Color matrix filter for the CSS contrast() filter
-        /// <https://drafts.fxtf.org/filter-effects/#contrastEquivalent>
+        /// <https://www.w3.org/TR/filter-effects-1/#contrastEquivalent>
         pub fn contrast(amount: f32) -> Self {
             let intercept = 0.5 - 0.5 * amount;
             Self([
@@ -1130,7 +1130,7 @@ pub mod color_transformation {
         ]);
 
         /// `luminanceToAlpha`: alpha computed from RGB luminance, RGB zeroed.
-        /// <https://drafts.fxtf.org/filter-effects/#elementdef-fecolormatrix>
+        /// <https://www.w3.org/TR/filter-effects-1/#elementdef-fecolormatrix>
         pub const LUMINANCE_TO_ALPHA: Self = Self([
             0.0, 0.0, 0.0, 0.0, 0.0, // Red = 0
             0.0, 0.0, 0.0, 0.0, 0.0, // Green = 0
