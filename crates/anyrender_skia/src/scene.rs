@@ -709,19 +709,28 @@ fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
     convert_filter_effect(filter, filter.output())
 }
 
-fn resolve_input(filter: &Filter, input: &Option<FilterInput>) -> Option<ImageFilter> {
-    input.as_ref().and_then(|input| match input {
-        FilterInput::Source(_) => None,
-        FilterInput::Result(input_id) => convert_filter_effect(filter, *input_id),
-    })
+/// Resolves an input of the primitive `id`. Skia reads a `None` filter as the source graphic.
+fn resolve_input(
+    filter: &Filter,
+    id: FilterId,
+    input: &Option<FilterInput>,
+) -> Option<ImageFilter> {
+    match input {
+        None => {
+            id.0.checked_sub(1)
+                .and_then(|previous| convert_filter_effect(filter, FilterId(previous)))
+        }
+        Some(FilterInput::Source(_)) => None,
+        Some(FilterInput::Result(input_id)) => convert_filter_effect(filter, *input_id),
+    }
 }
 
 fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
     let node = &filter.nodes()[id.0 as usize];
-    let input = resolve_input(filter, &node.inputs.primary);
+    let input = resolve_input(filter, id, &node.inputs.primary);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(filter, &node.inputs.secondary);
+    let secondary = resolve_input(filter, id, &node.inputs.secondary);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();

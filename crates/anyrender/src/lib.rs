@@ -162,7 +162,9 @@ pub trait WindowRenderer: RenderContext {
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F);
 }
 
-/// Abstraction for rendering a scene to an image buffer
+/// Abstraction for rendering a scene to an image buffer.
+///
+/// Buffers hold premultiplied RGBA8 pixels.
 pub trait ImageRenderer: RenderContext {
     type ScenePainter<'a>: PaintScene
     where

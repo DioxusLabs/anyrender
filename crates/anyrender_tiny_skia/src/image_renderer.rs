@@ -36,7 +36,7 @@ impl ImageRenderer for TinySkiaImageRenderer {
         self.render(draw_fn, buffer);
     }
 
-    /// Renders into `buffer` as unpremultiplied RGBA8.
+    /// Renders into `buffer` as premultiplied RGBA8, like the other CPU backends.
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F, buffer: &mut [u8]) {
         debug_timer!(timer, feature = "log_frame_times");
         anyrender::PaintScene::reset(&mut self.scene);
@@ -50,16 +50,8 @@ impl ImageRenderer for TinySkiaImageRenderer {
             "buffer too small: {} < {len}",
             buffer.len()
         );
-        for (dst, pixel) in buffer[..len]
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(pixmap.pixels())
-        {
-            let c = pixel.demultiply();
-            dst.copy_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
-        }
-        timer.record_time("convert");
+        buffer[..len].copy_from_slice(pixmap.data());
+        timer.record_time("copy");
         timer.print_times("tiny-skia: ");
     }
 }

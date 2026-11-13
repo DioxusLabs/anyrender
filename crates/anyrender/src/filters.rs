@@ -192,8 +192,13 @@ pub struct FilterId(pub u16);
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FilterInputs {
     /// Primary input ("in" attribute in SVG).
+    ///
+    /// As in SVG, `None` means the result of the previous primitive in the graph, or
+    /// [`FilterSource::SourceGraphic`] for the first primitive.
     pub primary: Option<FilterInput>,
     /// Secondary input ("in2" attribute in SVG, for composite/blend operations).
+    ///
+    /// `None` is resolved like [`Self::primary`].
     pub secondary: Option<FilterInput>,
 }
 

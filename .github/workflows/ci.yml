@@ -106,7 +106,7 @@ jobs:
               os: windows-latest,
               cross: false,
               command: "test",
-              args: "--workspace --tests --features anyrender/serde,anyrender_skia/log_frame_times,anyrender_skia/pixels_window_renderer,anyrender_skia/softbuffer_window_renderer,pixels_window_renderer/log_frame_times,softbuffer_window_renderer/log_frame_times,anyrender_vello/log_frame_times,anyrender_vello_cpu/filters,anyrender_vello_cpu/log_frame_times,anyrender_vello_cpu/multithreading,anyrender_vello_cpu/pixels_window_renderer,anyrender_vello_cpu/softbuffer_window_renderer,anyrender_vello_hybrid/log_frame_times,anyrender_vello_hybrid/webgl,anyrender_svg/image",
+              args: "--workspace --tests --features anyrender/serde,anyrender_skia/log_frame_times,anyrender_skia/pixels_window_renderer,anyrender_skia/softbuffer_window_renderer,pixels_window_renderer/log_frame_times,softbuffer_window_renderer/log_frame_times,anyrender_vello/log_frame_times,anyrender_vello_cpu/filters,anyrender_vello_cpu/log_frame_times,anyrender_vello_cpu/multithreading,anyrender_vello_cpu/pixels_window_renderer,anyrender_vello_cpu/softbuffer_window_renderer,anyrender_vello_hybrid/log_frame_times,anyrender_vello_hybrid/webgl,anyrender_tiny_skia/log_frame_times,anyrender_tiny_skia/pixels_window_renderer,anyrender_tiny_skia/softbuffer_window_renderer,anyrender_svg/image",
               setup: perl -pi.bak -e 's/opt-level = 2/opt-level = 0/g' Cargo.toml
             }
           - {

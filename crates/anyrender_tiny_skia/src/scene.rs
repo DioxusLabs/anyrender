@@ -16,7 +16,8 @@ use anyrender::{
 use kurbo::{Affine, PathEl, Point, Shape, Stroke, Vec2};
 use peniko::{
     BlendMode, Color, Compose, Extend, Fill, FontData, Gradient, GradientKind, ImageAlphaType,
-    ImageBrushRef, ImageData, ImageFormat, ImageQuality, Mix, StyleRef, color::Srgb,
+    ImageBrushRef, ImageData, ImageFormat, ImageQuality, InterpolationAlphaSpace, Mix, StyleRef,
+    color::{AlphaColor, Srgb},
 };
 use skrifa::{
     GlyphId, MetadataProvider,
@@ -74,9 +75,14 @@ pub struct TinySkiaScenePainter {
     height: u32,
     layers: Vec<Layer>,
     spare_pixmaps: Vec<Pixmap>,
-    image_cache: HashMap<(u64, u32, u32), Arc<Pixmap>>,
-    glyph_cache: HashMap<GlyphKey, Option<Path>>,
+    /// Cached entries, each with the frame it was last used in.
+    image_cache: HashMap<(u64, u32, u32), (Arc<Pixmap>, u64)>,
+    glyph_cache: HashMap<GlyphKey, (Option<Path>, u64)>,
+    frame: u64,
 }
+
+/// Cache entries unused for this many frames are evicted.
+const CACHE_FRAMES: u64 = 4;
 
 impl TinySkiaScenePainter {
     pub fn new(width: u32, height: u32) -> Self {
@@ -87,6 +93,7 @@ impl TinySkiaScenePainter {
             spare_pixmaps: Vec::new(),
             image_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
+            frame: 0,
         };
         painter.reset();
         painter
@@ -164,8 +171,8 @@ impl TinySkiaScenePainter {
                     ..
                 }
         );
-        let bbox = transform.transform_rect_bbox(clip.bounding_box());
-        let clip_rect = round_out(bbox).and_then(|r| r.intersect(&parent));
+        let bbox = transform_bbox(transform, clip.bounding_box());
+        let clip_rect = round_out_within(bbox, parent);
         let rect = match clip_rect {
             _ if full_extent => parent,
             Some(r) => r,
@@ -177,7 +184,7 @@ impl TinySkiaScenePainter {
         let rect_clip = clip
             .as_rect()
             .filter(|_| is_axis_aligned(transform))
-            .map(|r| transform.transform_rect_bbox(r))
+            .map(|r| transform_bbox(transform, r))
             .filter(|r| is_pixel_aligned(*r));
         let needs_mask = !empty
             && !rect_clip.is_some_and(|r| {
@@ -206,11 +213,12 @@ impl TinySkiaScenePainter {
 
     fn image_pixmap(&mut self, image: &ImageData) -> Option<Arc<Pixmap>> {
         let key = (image.data.id(), image.width, image.height);
-        if let Some(pixmap) = self.image_cache.get(&key) {
+        if let Some((pixmap, used)) = self.image_cache.get_mut(&key) {
+            *used = self.frame;
             return Some(pixmap.clone());
         }
         let pixmap = Arc::new(image_to_pixmap(image)?);
-        self.image_cache.insert(key, pixmap.clone());
+        self.image_cache.insert(key, (pixmap.clone(), self.frame));
         Some(pixmap)
     }
 
@@ -298,9 +306,9 @@ impl TinySkiaScenePainter {
             size_bits: font_size.to_bits(),
             coords: coords.to_vec(),
         };
-        self.glyph_cache
-            .entry(key)
-            .or_insert_with(|| {
+        let frame = self.frame;
+        let (path, used) = self.glyph_cache.entry(key).or_insert_with(|| {
+            let path = (|| {
                 let font_ref = skrifa::FontRef::from_index(font.data.data(), font.index).ok()?;
                 let outline = font_ref.outline_glyphs().get(GlyphId::new(glyph_id))?;
                 let coords: Vec<F2Dot14> = coords.iter().map(|c| F2Dot14::from_bits(*c)).collect();
@@ -309,8 +317,11 @@ impl TinySkiaScenePainter {
                 let mut pen = SkiaPen(PathBuilder::new());
                 outline.draw(settings, &mut pen).ok()?;
                 pen.0.finish()
-            })
-            .clone()
+            })();
+            (path, frame)
+        });
+        *used = frame;
+        path.clone()
     }
 }
 
@@ -318,6 +329,12 @@ impl RenderContext for TinySkiaScenePainter {}
 
 impl PaintScene for TinySkiaScenePainter {
     fn reset(&mut self) {
+        self.frame += 1;
+        let frame = self.frame;
+        self.image_cache
+            .retain(|_, (_, used)| frame - *used <= CACHE_FRAMES);
+        self.glyph_cache
+            .retain(|_, (_, used)| frame - *used <= CACHE_FRAMES);
         while self.layers.len() > 1 {
             let layer = self.layers.pop().unwrap();
             self.recycle(layer.pixmap);
@@ -405,7 +422,9 @@ impl PaintScene for TinySkiaScenePainter {
                 ref filter,
             } => {
                 if let Some((filter, transform)) = filter {
-                    filter::apply(filter, *transform, layer.region, &mut layer.pixmap);
+                    let local = Affine::translate((-layer.rect.x() as f64, -layer.rect.y() as f64))
+                        * *transform;
+                    filter::apply(filter, local, layer.region, &mut layer.pixmap);
                 }
                 let paint = PixmapPaint {
                     opacity: alpha.clamp(0.0, 1.0),
@@ -556,16 +575,29 @@ impl PaintScene for TinySkiaScenePainter {
         let (sx, sy) = transform_scale(transform);
         let reach = 3.0 * geometry.std_dev * sx.max(sy) + 2.0;
         let b = path.bounds();
-        let bbox = transform
-            .transform_rect_bbox(kurbo::Rect::new(
+        let bbox = transform_bbox(
+            transform,
+            kurbo::Rect::new(
                 b.left() as f64,
                 b.top() as f64,
                 b.right() as f64,
                 b.bottom() as f64,
-            ))
-            .inflate(reach, reach);
+            ),
+        )
+        .inflate(reach, reach);
+        // Render the shadow wherever the blur can carry it into the top layer, so the blur
+        // sees the shape beyond the layer's edges.
         let top = self.top_rect();
-        let Some(rect) = round_out(bbox).and_then(|r| r.intersect(&top)) else {
+        let margin = reach.ceil() as i32;
+        let Some(area) = IntRect::from_ltrb(
+            top.left().saturating_sub(margin),
+            top.top().saturating_sub(margin),
+            top.right().saturating_add(margin),
+            top.bottom().saturating_add(margin),
+        ) else {
+            return;
+        };
+        let Some(rect) = round_out_within(bbox, area) else {
             return;
         };
         let offset = Affine::translate((-rect.x() as f64, -rect.y() as f64));
@@ -631,21 +663,45 @@ impl OutlinePen for SkiaPen {
     }
 }
 
-/// The smallest pixel rect containing `rect`.
-fn round_out(rect: kurbo::Rect) -> Option<IntRect> {
+/// The smallest pixel rect containing the part of `rect` inside `bounds`, or `None` if they
+/// don't intersect. NaN edges are treated as unbounded.
+fn round_out_within(rect: kurbo::Rect, bounds: IntRect) -> Option<IntRect> {
+    let clamp = |v: f64, default: i32| {
+        if v.is_nan() {
+            default
+        } else {
+            v.clamp(bounds.left() as f64, bounds.right() as f64) as i32
+        }
+    };
     IntRect::from_ltrb(
-        rect.x0.floor().max(i32::MIN as f64) as i32,
-        rect.y0.floor().max(i32::MIN as f64) as i32,
-        rect.x1.ceil().min(i32::MAX as f64) as i32,
-        rect.y1.ceil().min(i32::MAX as f64) as i32,
+        clamp(rect.x0.floor(), bounds.left()),
+        clamp(rect.y0.floor(), bounds.top()),
+        clamp(rect.x1.ceil(), bounds.right()),
+        clamp(rect.y1.ceil(), bounds.bottom()),
     )
+}
+
+/// The bounding box of `rect` under `transform`. Axis-aligned transforms are applied per axis, so
+/// infinite rects stay infinite instead of becoming NaN.
+fn transform_bbox(transform: Affine, rect: kurbo::Rect) -> kurbo::Rect {
+    if !is_axis_aligned(transform) {
+        return transform.transform_rect_bbox(rect);
+    }
+    let [a, _, _, d, e, f] = transform.as_coeffs();
+    kurbo::Rect::new(
+        a * rect.x0 + e,
+        d * rect.y0 + f,
+        a * rect.x1 + e,
+        d * rect.y1 + f,
+    )
+    .abs()
 }
 
 fn is_pixel_aligned(rect: kurbo::Rect) -> bool {
     const EPSILON: f64 = 1.0 / 256.0;
     [rect.x0, rect.y0, rect.x1, rect.y1]
         .iter()
-        .all(|v| (v - v.round()).abs() < EPSILON)
+        .all(|v| v.is_infinite() || (v - v.round()).abs() < EPSILON)
 }
 
 /// Rasterizes `shape` into a coverage mask the size of `rect`. `transform` maps the shape into
@@ -737,6 +793,8 @@ fn to_path(shape: &impl Shape) -> Option<Path> {
     pb.finish()
 }
 
+/// tiny-skia has a single cap for both ends, so `end_cap` is ignored and `start_cap` is used at
+/// both ends.
 fn to_skia_stroke(style: &Stroke) -> tiny_skia::Stroke {
     let cap = match style.start_cap {
         kurbo::Cap::Butt => tiny_skia::LineCap::Butt,
@@ -779,14 +837,30 @@ fn gradient_shader(
     alpha: f32,
     transform: Transform,
 ) -> Option<Shader<'static>> {
-    let stops: Vec<GradientStop> = gradient
+    let colors: Vec<(f32, AlphaColor<Srgb>)> = gradient
         .stops
         .iter()
-        .map(|stop| {
-            let color = stop.color.to_alpha_color::<Srgb>();
-            GradientStop::new(stop.offset, to_skia_color(color, alpha))
-        })
+        .map(|stop| (stop.offset, stop.color.to_alpha_color::<Srgb>()))
         .collect();
+    let mut stops = Vec::with_capacity(colors.len());
+    for (i, &(offset, color)) in colors.iter().enumerate() {
+        // tiny-skia interpolates unpremultiplied. For premultiplied interpolation, approximate
+        // each segment whose alpha changes with intermediate stops.
+        if gradient.interpolation_alpha_space == InterpolationAlphaSpace::Premultiplied
+            && let Some(&(prev_offset, prev)) = i.checked_sub(1).map(|i| &colors[i])
+            && prev.components[3] != color.components[3]
+        {
+            const STEPS: usize = 16;
+            let (from, to) = (prev.premultiply(), color.premultiply());
+            for step in 1..STEPS {
+                let t = step as f32 / STEPS as f32;
+                let mixed = from.lerp_rect(to, t).un_premultiply();
+                let offset = prev_offset + (offset - prev_offset) * t;
+                stops.push(GradientStop::new(offset, to_skia_color(mixed, alpha)));
+            }
+        }
+        stops.push(GradientStop::new(offset, to_skia_color(color, alpha)));
+    }
     if stops.is_empty() {
         return None;
     }
@@ -834,6 +908,7 @@ fn image_shader<'a>(
         ImageQuality::Medium => FilterQuality::Bilinear,
         ImageQuality::High => FilterQuality::Bicubic,
     };
+    // tiny-skia has a single spread mode for both axes, so `y_extend` is ignored.
     Pattern::new(
         image.as_ref(),
         spread_mode(brush.sampler.x_extend),
