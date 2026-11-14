@@ -8,26 +8,26 @@ use peniko::{BlendMode, Color, Fill};
 use std::sync::Arc;
 use usvg::{Node, Path};
 
-/// `base_transform` maps the root of the current usvg (sub)tree into the SVG's coordinate
-/// space: the identity for the document root, or the `<image>` placement for an embedded SVG.
-/// `global_transform` maps the SVG's coordinate space into the scene.
+/// `transform` maps the user space of `group`'s children into the scene.
+///
+/// Transforms are composed from each node's relative transform (like resvg does) rather
+/// than taken from usvg's `abs_transform`, which is not kept up to date for every node
+/// (e.g. the clipped group usvg creates for a `<use>` of a `<symbol>`).
 ///
 /// The error handler is called with the node's transform into scene space.
 pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     group: &usvg::Group,
-    base_transform: Affine,
-    global_transform: Affine,
+    transform: Affine,
     error_handler: &mut F,
 ) {
     for node in group.children() {
-        let transform = base_transform * util::to_affine(&node.abs_transform());
         match node {
             usvg::Node::Group(g) => {
                 let alpha = g.opacity().get();
                 let is_fully_opaque = alpha >= 1.0;
                 let blend_mode = util::to_blend_mode(g.blend_mode());
-                let group_transform = global_transform * transform;
+                let group_transform = transform * util::to_affine(&g.transform());
 
                 let clip = g.clip_path();
                 let clip_shape = clip.and_then(single_clip_shape);
@@ -113,8 +113,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                     }
                 }
 
-                // usvg's absolute transforms already include the ancestor groups
-                render_group(scene, g, base_transform, global_transform, error_handler);
+                render_group(scene, g, group_transform, error_handler);
 
                 if did_push_filter_layer {
                     scene.pop_layer();
@@ -140,7 +139,6 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                 }
                 let local_path = util::to_bez_path(path);
 
-                let transform = global_transform * transform;
                 match path.paint_order() {
                     usvg::PaintOrder::FillAndStroke => {
                         fill(scene, error_handler, path, transform, &local_path, node);
@@ -165,42 +163,28 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                         {
                             let Ok(decoded_image) = util::decode_raw_raster_image(img.kind())
                             else {
-                                error_handler(scene, node, global_transform * transform);
+                                error_handler(scene, node, transform);
                                 continue;
                             };
                             let image = util::into_image(decoded_image, img.rendering_mode());
-                            let image_ts = global_transform * transform;
-                            scene.draw_image(image.as_ref(), image_ts);
+                            scene.draw_image(image.as_ref(), transform);
                         }
 
                         #[cfg(not(feature = "image"))]
                         {
-                            error_handler(scene, node, global_transform * transform);
+                            error_handler(scene, node, transform);
                             continue;
                         }
                     }
                     usvg::ImageKind::SVG(svg) => {
-                        render_group(
-                            scene,
-                            svg.root(),
-                            transform,
-                            global_transform,
-                            error_handler,
-                        );
+                        render_group(scene, svg.root(), transform, error_handler);
                     }
                 }
             }
             usvg::Node::Text(text) => {
-                // The children of the flattened text group already carry the
-                // text node's absolute transform, so recurse with the base
-                // transform (like the group case) to avoid applying it twice.
-                render_group(
-                    scene,
-                    text.flattened(),
-                    base_transform,
-                    global_transform,
-                    error_handler,
-                );
+                let flattened = text.flattened();
+                let transform = transform * util::to_affine(&flattened.transform());
+                render_group(scene, flattened, transform, error_handler);
             }
         }
     }
@@ -212,28 +196,40 @@ fn single_clip_shape(clip: &usvg::ClipPath) -> Option<(&usvg::Path, Fill, Affine
     if clip.clip_path().is_some() {
         return None;
     }
-    let path = find_single_clip_shape(clip.root())?;
-    let transform = util::to_affine(&clip.transform()) * util::to_affine(&path.abs_transform());
+    let (path, transform) =
+        find_single_clip_shape(clip.root(), util::to_affine(&clip.transform()))?;
     Some((path, clip_fill_rule(path), transform))
 }
 
-/// Returns the only visible shape in a clip path group, if it has exactly one and no nested
-/// group has its own clip path.
-fn find_single_clip_shape(group: &usvg::Group) -> Option<&usvg::Path> {
-    find_clip_shape(group).ok().flatten()
+/// Returns the only visible shape in a clip path group and its transform (`transform`
+/// composed with those of its ancestor groups), if it has exactly one and no nested group
+/// has its own clip path.
+fn find_single_clip_shape(group: &usvg::Group, transform: Affine) -> Option<(&usvg::Path, Affine)> {
+    find_clip_shape(group, transform).ok().flatten()
 }
 
 /// A clip path group has more than one visible shape, or a nested clip path.
 struct NotSingleShape;
 
-fn find_clip_shape(group: &usvg::Group) -> Result<Option<&usvg::Path>, NotSingleShape> {
+fn find_clip_shape(
+    group: &usvg::Group,
+    transform: Affine,
+) -> Result<Option<(&usvg::Path, Affine)>, NotSingleShape> {
     let mut shape = None;
     for node in group.children() {
         let found = match node {
-            usvg::Node::Path(path) => path.is_visible().then_some(path.as_ref()),
+            usvg::Node::Path(path) => path.is_visible().then_some((path.as_ref(), transform)),
             usvg::Node::Group(g) if g.clip_path().is_some() => return Err(NotSingleShape),
-            usvg::Node::Group(g) => find_clip_shape(g)?,
-            usvg::Node::Text(text) => find_clip_shape(text.flattened())?,
+            usvg::Node::Group(g) => {
+                find_clip_shape(g, transform * util::to_affine(&g.transform()))?
+            }
+            usvg::Node::Text(text) => {
+                let flattened = text.flattened();
+                find_clip_shape(
+                    flattened,
+                    transform * util::to_affine(&flattened.transform()),
+                )?
+            }
             usvg::Node::Image(_) => None,
         };
         if let Some(found) = found
@@ -293,37 +289,39 @@ fn fill_clip_group<S: PaintScene>(
                 }
                 scene.fill(
                     clip_fill_rule(path),
-                    transform * util::to_affine(&path.abs_transform()),
+                    transform,
                     Color::BLACK,
                     None,
                     &util::to_bez_path(path),
                 );
             }
-            usvg::Node::Group(g) => match g.clip_path() {
-                // A clip path child with its own clip-path is drawn into a layer and clipped
-                // before being added to the clip path.
-                Some(clip) => {
-                    scene.push_layer(
-                        Fill::NonZero,
-                        BlendMode::default(),
-                        1.0,
-                        Affine::IDENTITY,
-                        &bounds,
-                        None,
-                        None,
-                    );
-                    fill_clip_group(scene, g, transform, bounds);
-                    apply_clip_mask(
-                        scene,
-                        clip,
-                        transform * util::to_affine(&g.abs_transform()),
-                        bounds,
-                    );
-                    scene.pop_layer();
+            usvg::Node::Group(g) => {
+                let transform = transform * util::to_affine(&g.transform());
+                match g.clip_path() {
+                    // A clip path child with its own clip-path is drawn into a layer and clipped
+                    // before being added to the clip path.
+                    Some(clip) => {
+                        scene.push_layer(
+                            Fill::NonZero,
+                            BlendMode::default(),
+                            1.0,
+                            Affine::IDENTITY,
+                            &bounds,
+                            None,
+                            None,
+                        );
+                        fill_clip_group(scene, g, transform, bounds);
+                        apply_clip_mask(scene, clip, transform, bounds);
+                        scene.pop_layer();
+                    }
+                    None => fill_clip_group(scene, g, transform, bounds),
                 }
-                None => fill_clip_group(scene, g, transform, bounds),
-            },
-            usvg::Node::Text(text) => fill_clip_group(scene, text.flattened(), transform, bounds),
+            }
+            usvg::Node::Text(text) => {
+                let flattened = text.flattened();
+                let transform = transform * util::to_affine(&flattened.transform());
+                fill_clip_group(scene, flattened, transform, bounds);
+            }
             usvg::Node::Image(_) => {}
         }
     }
@@ -344,13 +342,7 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     // Content outside of the mask's rect is masked out
     let rect = util::to_rect(mask.rect());
     scene.push_mask_layer(Fill::NonZero, mode, transform, &rect);
-    render_group(
-        scene,
-        mask.root(),
-        Affine::IDENTITY,
-        transform,
-        error_handler,
-    );
+    render_group(scene, mask.root(), transform, error_handler);
     scene.pop_layer();
 }
 
