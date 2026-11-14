@@ -63,7 +63,8 @@ impl NonUniformRoundedRect {
     /// Sharp corners stay sharp. Shrinking subtracts the spread from each radius (flooring at
     /// zero). Growing adds the spread to each radius, except that a radius `r` smaller than the
     /// spread grows by `spread * (1 + (r / spread - 1)^3)`, so that small radii stay small. The
-    /// resulting radii are then scaled down with [`Self::scale_overlapping_radii`].
+    /// resulting radii are then scaled down with `Self::scale_overlapping_radii`.
+    #[doc(hidden)]
     pub fn spread(&self, spread: f64) -> Self {
         let Rect { x0, y0, x1, y1 } = self.rect;
         let grow = |min: f64, max: f64| {
@@ -106,6 +107,7 @@ impl NonUniformRoundedRect {
 
     /// Scale all of the corner radii down by the same factor so that the radii of adjacent corners
     /// don't add up to more than the length of the side between them, as CSS does.
+    #[doc(hidden)]
     pub fn scale_overlapping_radii(&self) -> Self {
         let [tl, tr, br, bl] = self
             .radii
@@ -135,6 +137,7 @@ impl NonUniformRoundedRect {
 
     /// The average of the corners' radii (counting sharp corners as zero), for backends that only
     /// support a single radius.
+    #[doc(hidden)]
     pub fn average_radius(&self) -> f64 {
         self.radii
             .corners()
