@@ -233,21 +233,9 @@ impl TinySkiaScenePainter {
         pattern: &anyrender::Pattern,
         transform: Affine,
     ) -> Option<(Arc<Pixmap>, Affine)> {
-        /// Tiles are downscaled to at most this many pixels.
-        const MAX_TILE_PIXELS: f64 = 4096.0 * 4096.0;
-
         let tile = pattern.tile();
-        let [a, b, c, d, _, _] = transform.as_coeffs();
-        let mut width = (tile.width() * a.hypot(b)).round().max(1.0);
-        let mut height = (tile.height() * c.hypot(d)).round().max(1.0);
-        if !(width.is_finite() && height.is_finite() && tile.width() > 0.0 && tile.height() > 0.0) {
-            return None;
-        }
-        if width * height > MAX_TILE_PIXELS {
-            let scale = (MAX_TILE_PIXELS / (width * height)).sqrt();
-            width = (width * scale).floor().max(1.0);
-            height = (height * scale).floor().max(1.0);
-        }
+        let (width, height) = anyrender::pattern_raster_size(tile, transform)?;
+        let (width, height) = (f64::from(width), f64::from(height));
         // Scale so the tile exactly covers the pixmap, so tiles repeat without seams.
         let scale = Affine::scale_non_uniform(width / tile.width(), height / tile.height());
         let pixel_transform = Affine::translate(tile.origin().to_vec2()) * scale.inverse();

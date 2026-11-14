@@ -178,12 +178,17 @@ impl SkiaScenePainter<'_> {
             anyrender::Paint::Pattern(pattern) => {
                 // The picture is recorded by `record_pattern` before the paint is reset.
                 if let Some(picture) = self.cache.pattern_picture.hit(&pattern.id()) {
-                    let local_matrix = brush_transform.map(sk_kurbo::matrix_from_affine);
+                    // The picture has the tile's top-left corner at the origin.
+                    let tile = pattern.tile();
+                    let local_matrix = sk_kurbo::matrix_from_affine(
+                        brush_transform.unwrap_or(kurbo::Affine::IDENTITY)
+                            * kurbo::Affine::translate(tile.origin().to_vec2()),
+                    );
                     let shader = picture.to_shader(
                         (TileMode::Repeat, TileMode::Repeat),
                         skia_safe::FilterMode::Linear,
-                        local_matrix.as_ref(),
-                        &sk_kurbo::rect_from(pattern.tile()),
+                        Some(&local_matrix),
+                        &sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN)),
                     );
                     self.cache.paint.set_shader(shader);
                 }
@@ -208,14 +213,15 @@ impl SkiaScenePainter<'_> {
         if self.cache.pattern_picture.hit(&pattern.id()).is_some() {
             return;
         }
-        let tile = sk_kurbo::rect_from(pattern.tile());
+        let tile = pattern.tile();
+        let bounds = sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN));
         let mut recorder = PictureRecorder::new();
-        let canvas = recorder.begin_recording(tile, false);
+        let canvas = recorder.begin_recording(bounds, false);
         pattern.scene().replay(
             &mut SkiaScenePainter::new(canvas, self.cache),
-            kurbo::Affine::IDENTITY,
+            kurbo::Affine::translate(-tile.origin().to_vec2()),
         );
-        if let Some(picture) = recorder.finish_recording_as_picture(Some(&tile)) {
+        if let Some(picture) = recorder.finish_recording_as_picture(Some(&bounds)) {
             self.cache.pattern_picture.insert(pattern.id(), picture);
         }
     }
@@ -635,8 +641,17 @@ impl PaintScene for SkiaScenePainter<'_> {
             self.concat_matrix(glyph_transform);
         }
 
+        // Keep patterns in the run's space, not the glyphs'.
+        let brush_transform = match (&brush, glyph_transform) {
+            (anyrender::Paint::Pattern(_), Some(glyph_transform))
+                if glyph_transform.determinant() != 0.0 =>
+            {
+                Some(glyph_transform.inverse())
+            }
+            _ => None,
+        };
         self.reset_paint();
-        self.set_paint_brush(brush, None);
+        self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 

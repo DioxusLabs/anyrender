@@ -14,7 +14,34 @@ static PATTERN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Patterns covering more tiles than this are not drawn by [`fill_pattern_tiles`] and
 /// [`stroke_pattern_tiles`].
-const MAX_PATTERN_TILES: u64 = 10_000;
+/// The fallback draws nothing when it would draw more than this many commands (tiles times the
+/// commands in the pattern's scene).
+const MAX_PATTERN_COMMANDS: f64 = 4_000_000.0;
+
+/// Rasterized tiles are downscaled to at most this many pixels, and this many on each side.
+const MAX_TILE_PIXELS: f64 = 4096.0 * 4096.0;
+const MAX_TILE_SIDE: f64 = 16384.0;
+
+/// The pixel size at which backends rasterize one tile of a pattern drawn with `transform`
+/// (mapping pattern space to pixels), or `None` if the tile is empty.
+///
+/// This is intended for use by backends.
+#[doc(hidden)]
+pub fn pattern_raster_size(tile: Rect, transform: Affine) -> Option<(u32, u32)> {
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    let mut width = (tile.width() * a.hypot(b)).round().max(1.0);
+    let mut height = (tile.height() * c.hypot(d)).round().max(1.0);
+    if !(width.is_finite() && height.is_finite() && tile.width() > 0.0 && tile.height() > 0.0) {
+        return None;
+    }
+    let scale =
+        (MAX_TILE_SIDE / width.max(height)).min((MAX_TILE_PIXELS / (width * height)).sqrt());
+    if scale < 1.0 {
+        width = (width * scale).floor().max(1.0);
+        height = (height * scale).floor().max(1.0);
+    }
+    Some((width as u32, height as u32))
+}
 
 /// A paint that repeats the content of a [`Scene`] in a grid of tiles.
 ///
@@ -163,7 +190,16 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
     if style.width <= 0.0 {
         return;
     }
-    let outline = kurbo::stroke(shape.path_elements(0.1), style, &StrokeOpts::default(), 0.1);
+    // Flatten to 0.1px in the painter's space.
+    let [a, b, c, d, _, _] = (transform * brush_transform.unwrap_or(Affine::IDENTITY)).as_coeffs();
+    let scale = a.hypot(b).max(c.hypot(d));
+    let tolerance = if scale > 0.0 { 0.1 / scale } else { 0.1 };
+    let outline = kurbo::stroke(
+        shape.path_elements(tolerance),
+        style,
+        &StrokeOpts::default(),
+        tolerance,
+    );
     fill_pattern_tiles_with(
         painter,
         pattern,
@@ -236,9 +272,14 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     let style = style.into();
-    let Some(bounds) =
-        glyph_run_bounds(font_size, embolden, &style, glyph_transform, glyphs.clone())
-    else {
+    let Some(bounds) = glyph_run_bounds(
+        font,
+        font_size,
+        embolden,
+        &style,
+        glyph_transform,
+        glyphs.clone(),
+    ) else {
         return;
     };
     painter.push_layer(
@@ -278,16 +319,25 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
 }
 
 /// A conservative bounding box of a glyph run, in the run's space: each glyph is assumed to fit
-/// within two ems of its origin.
+/// within the font's bounding box (or two ems of its origin, if the font has none).
 fn glyph_run_bounds(
+    font: &FontData,
     font_size: f32,
     embolden: Vec2,
     style: &StyleRef<'_>,
     glyph_transform: Option<Affine>,
     glyphs: impl Iterator<Item = Glyph>,
 ) -> Option<Rect> {
-    let em = 2.0 * f64::from(font_size);
-    let glyph_box = Rect::new(-em, -em, em, em);
+    let em_box = font_bbox(font)
+        .map(|bbox| bbox.inflate(0.1, 0.1))
+        .unwrap_or(Rect::new(-2.0, -2.0, 2.0, 2.0));
+    let em = f64::from(font_size);
+    let glyph_box = Rect::new(
+        em_box.x0 * em,
+        em_box.y0 * em,
+        em_box.x1 * em,
+        em_box.y1 * em,
+    );
     let mut glyph_box = glyph_transform
         .unwrap_or(Affine::IDENTITY)
         .transform_rect_bbox(glyph_box)
@@ -302,6 +352,35 @@ fn glyph_run_bounds(
 
 /// Draws every tile of `pattern` that intersects `bounds` (in pattern space), with
 /// `transform` mapping pattern space to the painter's space.
+/// The bounding box of all glyphs in `font`, in ems with y pointing down, from its `head` table.
+fn font_bbox(font: &FontData) -> Option<Rect> {
+    let data = font.data.data();
+    let u16_at = |at: usize| Some(u16::from_be_bytes(data.get(at..at + 2)?.try_into().ok()?));
+    let i16_at = |at: usize| Some(f64::from(u16_at(at)? as i16));
+    let u32_at = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    let mut font_offset = 0;
+    if data.get(0..4)? == b"ttcf" {
+        font_offset = u32_at(12 + 4 * font.index as usize)? as usize;
+    }
+    let num_tables = u16_at(font_offset + 4)? as usize;
+    let head = (0..num_tables)
+        .map(|i| font_offset + 12 + 16 * i)
+        .find(|&record| data.get(record..record + 4) == Some(b"head"))?;
+    let head = u32_at(head + 8)? as usize;
+    let units_per_em = f64::from(u16_at(head + 18)?);
+    if units_per_em == 0.0 {
+        return None;
+    }
+    let [x0, y0, x1, y1] = [36, 38, 40, 42].map(|at| i16_at(head + at));
+    let scale = 1.0 / units_per_em;
+    Some(Rect::new(
+        x0? * scale,
+        -y1? * scale,
+        x1? * scale,
+        -y0? * scale,
+    ))
+}
+
 fn draw_tiles<S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
@@ -319,13 +398,26 @@ fn draw_tiles<S: PaintScene>(
     let first_y = ((bounds.y0 - tile.y0) / height).floor();
     let last_y = ((bounds.y1 - tile.y0) / height).ceil();
     let count = (last_x - first_x) * (last_y - first_y);
-    if !(count > 0.0 && count <= MAX_PATTERN_TILES as f64) {
+    let commands = pattern.scene().commands.len().max(1) as f64;
+    if !(count > 0.0 && count * commands <= MAX_PATTERN_COMMANDS) {
         return;
     }
+    // When pattern space is axis-aligned with the painter's space, snap tile edges to whole
+    // pixels, so adjacent tiles' antialiased clips don't leave seams between them.
+    let [a, b, c, d, e, f] = transform.as_coeffs();
+    let snap = b == 0.0 && c == 0.0 && (a * width).abs() >= 1.0 && (d * height).abs() >= 1.0;
     for y in first_y as i64..last_y as i64 {
         for x in first_x as i64..last_x as i64 {
-            let tile_transform =
-                transform * Affine::translate((x as f64 * width, y as f64 * height));
+            let tile_transform = if snap {
+                let left = (a * (tile.x0 + x as f64 * width) + e).round();
+                let right = (a * (tile.x0 + (x + 1) as f64 * width) + e).round();
+                let top = (d * (tile.y0 + y as f64 * height) + f).round();
+                let bottom = (d * (tile.y0 + (y + 1) as f64 * height) + f).round();
+                let (sx, sy) = ((right - left) / width, (bottom - top) / height);
+                Affine::new([sx, 0.0, 0.0, sy, left - sx * tile.x0, top - sy * tile.y0])
+            } else {
+                transform * Affine::translate((x as f64 * width, y as f64 * height))
+            };
             painter.push_clip_layer(Fill::NonZero, tile_transform, &tile);
             draw_tile(painter, tile_transform);
             painter.pop_layer();

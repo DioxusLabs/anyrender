@@ -5,6 +5,9 @@ use anyrender::{Paint, PaintScene, Pattern, recording::Scene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
 use peniko::{BlendMode, Color, Compose, Fill, InterpolationAlphaSpace, Mix};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{Arc, Weak};
 
 #[cfg(feature = "image")]
 use peniko::{Blob, ImageBrush};
@@ -241,34 +244,73 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
             // usvg resolves the pattern's units and view box, so its content is in the tile's
             // space, with the tile's top-left corner at the origin.
             let rect = pattern.rect();
-            let tile = Rect::new(0.0, 0.0, rect.width() as f64, rect.height() as f64);
-            let alpha = opacity.get();
-            let mut scene = Scene::new();
-            if alpha < 1.0 {
-                scene.push_layer(
-                    Fill::NonZero,
-                    BlendMode::default(),
-                    alpha,
-                    Affine::IDENTITY,
-                    &tile,
-                    None,
-                    None,
-                );
-            }
-            crate::render::render_group(
-                &mut scene,
-                pattern.root(),
-                Affine::IDENTITY,
-                &mut default_error_handler,
-            );
-            if alpha < 1.0 {
-                scene.pop_layer();
-            }
             let transform = to_affine(&pattern.transform())
                 * Affine::translate((rect.x() as f64, rect.y() as f64));
-            Some((Paint::Pattern(Pattern::new(scene, tile)), transform))
+            let alpha = opacity.get();
+            let pattern = cached_pattern(pattern, alpha, || {
+                let tile = Rect::new(0.0, 0.0, rect.width() as f64, rect.height() as f64);
+                to_pattern(pattern, tile, alpha)
+            });
+            Some((Paint::Pattern(pattern), transform))
         }
     }
+}
+
+thread_local! {
+    /// Patterns already converted, by usvg pattern and opacity, so that every shape using a
+    /// usvg pattern, in this and later renders of its tree, gets the same pattern id.
+    static PATTERNS: RefCell<HashMap<(usize, u32), CachedPattern>> = RefCell::default();
+}
+
+type CachedPattern = (Weak<usvg::Pattern>, Pattern);
+
+fn cached_pattern(
+    pattern: &Arc<usvg::Pattern>,
+    alpha: f32,
+    convert: impl FnOnce() -> Pattern,
+) -> Pattern {
+    let key = (Arc::as_ptr(pattern) as usize, alpha.to_bits());
+    let cached = PATTERNS.with_borrow(|patterns| {
+        patterns
+            .get(&key)
+            .filter(|(source, _)| source.upgrade().is_some_and(|p| Arc::ptr_eq(&p, pattern)))
+            .map(|(_, converted)| converted.clone())
+    });
+    if let Some(converted) = cached {
+        return converted;
+    }
+    // Not borrowed while converting, since the pattern's content can use other patterns.
+    let converted = convert();
+    PATTERNS.with_borrow_mut(|patterns| {
+        patterns.retain(|_, (source, _)| source.strong_count() > 0);
+        patterns.insert(key, (Arc::downgrade(pattern), converted.clone()));
+    });
+    converted
+}
+
+fn to_pattern(pattern: &usvg::Pattern, tile: Rect, alpha: f32) -> Pattern {
+    let mut scene = Scene::new();
+    if alpha < 1.0 {
+        scene.push_layer(
+            Fill::NonZero,
+            BlendMode::default(),
+            alpha,
+            Affine::IDENTITY,
+            &tile,
+            None,
+            None,
+        );
+    }
+    crate::render::render_group(
+        &mut scene,
+        pattern.root(),
+        Affine::IDENTITY,
+        &mut default_error_handler,
+    );
+    if alpha < 1.0 {
+        scene.pop_layer();
+    }
+    Pattern::new(scene, tile)
 }
 
 fn to_extend(spread_method: usvg::SpreadMethod) -> peniko::Extend {

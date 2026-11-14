@@ -178,7 +178,7 @@ impl VelloCpuScenePainter {
                             image: ImageSource::Pixmap(pixmap),
                             sampler: peniko::ImageSampler::new()
                                 .with_extend(peniko::Extend::Repeat)
-                                .with_quality(peniko::ImageQuality::High),
+                                .with_quality(peniko::ImageQuality::Medium),
                         });
                         return (paint, brush_transform * pixel_transform);
                     }
@@ -212,20 +212,9 @@ impl VelloCpuScenePainter {
         pattern: &anyrender::Pattern,
         transform: Affine,
     ) -> Option<(Arc<Pixmap>, Affine)> {
-        /// Tiles are downscaled to at most this many pixels on each side.
-        const MAX_TILE_SIZE: f64 = 4096.0;
-
         let tile = pattern.tile();
-        let [a, b, c, d, _, _] = transform.as_coeffs();
-        let width = (tile.width() * a.hypot(b))
-            .round()
-            .clamp(1.0, MAX_TILE_SIZE);
-        let height = (tile.height() * c.hypot(d))
-            .round()
-            .clamp(1.0, MAX_TILE_SIZE);
-        if !(width.is_finite() && height.is_finite() && tile.width() > 0.0 && tile.height() > 0.0) {
-            return None;
-        }
+        let (width, height) = anyrender::pattern_raster_size(tile, transform)?;
+        let (width, height) = (f64::from(width), f64::from(height));
         // Scale so the tile exactly covers the pixmap, so tiles repeat without seams.
         let scale = Affine::scale_non_uniform(width / tile.width(), height / tile.height());
         let pixel_transform = Affine::translate(tile.origin().to_vec2()) * scale.inverse();
