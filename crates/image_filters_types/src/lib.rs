@@ -162,6 +162,26 @@ impl<I> Filter<I> {
         &self.primitives
     }
 
+    /// The content of every [`FilterEffect::Image`] primitive, in node order.
+    pub fn images(&self) -> impl Iterator<Item = &I> {
+        self.primitives
+            .iter()
+            .filter_map(|node| match &node.effect {
+                FilterEffect::Image(image) => Some(image),
+                _ => None,
+            })
+    }
+
+    /// Mutable access to the content of every [`FilterEffect::Image`] primitive, in node order.
+    pub fn images_mut(&mut self) -> impl Iterator<Item = &mut I> {
+        self.primitives
+            .iter_mut()
+            .filter_map(|node| match &mut node.effect {
+                FilterEffect::Image(image) => Some(image),
+                _ => None,
+            })
+    }
+
     /// The output filter for the graph.
     pub fn output(&self) -> FilterId {
         self.output
