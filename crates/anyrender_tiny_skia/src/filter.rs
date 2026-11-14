@@ -7,7 +7,6 @@ use anyrender::Filter;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::{
     FilterColorSpace, FilterEffect, FilterInput, FilterSource,
-    component_transfer::TransferFunction,
     lighting::{LightSource, PointLightSource, SpotLightSource},
     turbulence::TurbulenceType,
 };
@@ -17,9 +16,9 @@ use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 
 use crate::scene::{to_skia_blend, to_skia_color, transform_scale};
 use anyrender_image_filters::{
-    ImageRef, ImageRefMut, box_blur, composite, convolve_matrix, demultiply_alpha,
-    displacement_map, from_linear_rgb, iir_blur, into_linear_rgb, lighting, morphology,
-    multiply_alpha, turbulence,
+    ImageRef, ImageRefMut, box_blur, color_matrix, component_transfer, composite, convolve_matrix,
+    demultiply_alpha, displacement_map, from_linear_rgb, iir_blur, into_linear_rgb, lighting,
+    morphology, multiply_alpha, turbulence,
 };
 
 #[derive(Clone)]
@@ -114,56 +113,11 @@ fn offset(pixmap: &Pixmap, dx: f64, dy: f64) -> Pixmap {
     out
 }
 
-fn map_unpremultiplied(pixmap: &mut Pixmap, mut f: impl FnMut(&mut [f32; 4])) {
-    let data = pixmap.data_mut().as_rgba_mut();
-    demultiply_alpha(data);
-    for p in data.iter_mut() {
-        let mut c = [
-            p.r as f32 / 255.0,
-            p.g as f32 / 255.0,
-            p.b as f32 / 255.0,
-            p.a as f32 / 255.0,
-        ];
-        f(&mut c);
-        let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-        p.r = to_u8(c[0]);
-        p.g = to_u8(c[1]);
-        p.b = to_u8(c[2]);
-        p.a = to_u8(c[3]);
-    }
-    multiply_alpha(data);
-}
-
-fn transfer(func: &TransferFunction, c: f32) -> f32 {
-    match func {
-        TransferFunction::Identity => c,
-        TransferFunction::Table(values) => {
-            let n = values.len();
-            if n == 0 {
-                return c;
-            }
-            if n == 1 {
-                return values[0];
-            }
-            let c = c.clamp(0.0, 1.0);
-            let k = ((c * (n - 1) as f32) as usize).min(n - 2);
-            let vk = values[k];
-            let vk1 = values[k + 1];
-            let k = k as f32;
-            let n = (n - 1) as f32;
-            vk + (c - k / n) * n * (vk1 - vk)
-        }
-        TransferFunction::Discrete(values) => {
-            let n = values.len();
-            if n == 0 {
-                return c;
-            }
-            let k = ((c.clamp(0.0, 1.0) * n as f32) as usize).min(n - 1);
-            values[k]
-        }
-        TransferFunction::Linear(l) => l.slope * c + l.intercept,
-        TransferFunction::Gamma(g) => g.amplitude * c.powf(g.exponent) + g.offset,
-    }
+/// Runs `f` on the pixmap with its alpha unpremultiplied.
+fn unpremultiplied(pixmap: &mut Pixmap, f: impl FnOnce(ImageRefMut)) {
+    demultiply_alpha(pixmap.data_mut().as_rgba_mut());
+    f(image_mut(pixmap));
+    multiply_alpha(pixmap.data_mut().as_rgba_mut());
 }
 
 /// Maps a light source from user space into the pixel space of `region`.
@@ -336,24 +290,12 @@ pub(crate) fn apply(filter: &Filter, transform: Affine, region: IntRect, pixmap:
             }
             FilterEffect::ColorMatrix(matrix) => {
                 let mut pixmap = input().into_color_space(linear);
-                let m = &matrix.0;
-                map_unpremultiplied(&mut pixmap, |c| {
-                    let [r, g, b, a] = *c;
-                    for (i, out) in c.iter_mut().enumerate() {
-                        let row = &m[i * 5..i * 5 + 5];
-                        *out = row[0] * r + row[1] * g + row[2] * b + row[3] * a + row[4];
-                    }
-                });
+                unpremultiplied(&mut pixmap, |img| color_matrix::apply(matrix, img));
                 Image { pixmap, linear }
             }
             FilterEffect::ComponentTransfer(ct) => {
                 let mut pixmap = input().into_color_space(linear);
-                map_unpremultiplied(&mut pixmap, |c| {
-                    c[0] = transfer(&ct.red_function, c[0]);
-                    c[1] = transfer(&ct.green_function, c[1]);
-                    c[2] = transfer(&ct.blue_function, c[2]);
-                    c[3] = transfer(&ct.alpha_function, c[3]);
-                });
+                unpremultiplied(&mut pixmap, |img| component_transfer::apply(ct, img));
                 Image { pixmap, linear }
             }
             FilterEffect::Composite(op) => {
