@@ -175,16 +175,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyrender_image_filters"
-version = "0.1.0"
-dependencies = [
- "anyrender",
- "bytemuck",
- "peniko",
- "rgb",
-]
-
-[[package]]
 name = "anyrender_serialize"
 version = "0.8.0"
 dependencies = [
@@ -1735,6 +1725,18 @@ checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
  "quick-error",
+]
+
+[[package]]
+name = "image_filters"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "image_filters_types",
+ "kurbo",
+ "peniko",
+ "rgb",
+ "tiny-skia 0.12.0",
 ]
 
 [[package]]
@@ -3303,7 +3305,7 @@ dependencies = [
  "log",
  "memmap2",
  "smithay-client-toolkit",
- "tiny-skia",
+ "tiny-skia 0.11.4",
 ]
 
 [[package]]
@@ -3795,6 +3797,21 @@ dependencies = [
  "cfg-if",
  "log",
  "tiny-skia-path 0.11.4",
+]
+
+[[package]]
+name = "tiny-skia"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "bytemuck",
+ "cfg-if",
+ "log",
+ "png",
+ "tiny-skia-path 0.12.0",
 ]
 
 [[package]]

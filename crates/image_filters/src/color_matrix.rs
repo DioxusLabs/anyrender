@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{ImageRefMut, f32_bound};
-use anyrender::filters::color_transformation::ColorMatrix;
+use image_filters_types::color_transformation::ColorMatrix;
 use rgb::RGBA8;
 
 /// Applies a color matrix filter.

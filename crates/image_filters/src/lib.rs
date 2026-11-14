@@ -1,8 +1,9 @@
 // Copyright 2018 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! CPU implementations of SVG filter primitives on RGBA8 images, for anyrender backends that
-//! render on the CPU. Ported from resvg (`crates/resvg/src/filter`).
+//! CPU implementation of SVG/CSS filter graphs ([`image_filters_types::Filter`]): the pixel
+//! kernels of each filter primitive on RGBA8 images, and [`apply`], which evaluates a whole graph
+//! on a tiny-skia [`Pixmap`](tiny_skia::Pixmap). Ported from resvg (`crates/resvg/src/filter`).
 
 use rgb::RGBA8;
 
@@ -12,10 +13,13 @@ pub mod component_transfer;
 pub mod composite;
 pub mod convolve_matrix;
 pub mod displacement_map;
+mod graph;
 pub mod iir_blur;
 pub mod lighting;
 pub mod morphology;
 pub mod turbulence;
+
+pub use graph::{apply, blur};
 
 /// An image reference.
 ///
