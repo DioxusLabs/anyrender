@@ -461,9 +461,6 @@ fn test_archive_contains_expected_files() {
         .unwrap();
     let commands: Vec<SerializableRenderCommand> = serde_json::from_str(&commands_json).unwrap();
     assert_eq!(commands.len(), 1);
-
-    // Only written when the scene has feImage primitives
-    assert!(zip.by_name("filter_images.json").is_err());
 }
 
 /// Builds a layer whose filter draws `content` with an feImage primitive.
@@ -528,7 +525,24 @@ fn filter_image_scenes_roundtrip() {
     scene.pop_layer();
 
     let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
-    assert_eq!(archive.filter_images.len(), 3);
+    // feImage scenes are stored inline in their filter graph node.
+    let SerializableRenderCommand::PushLayer(layer) = &archive.commands[0] else {
+        panic!("expected a layer");
+    };
+    let outer_image = layer.filter.as_ref().unwrap().images().next().unwrap();
+    assert_eq!(outer_image.commands.len(), 4);
+    let SerializableRenderCommand::PushLayer(nested_layer) = &outer_image.commands[2] else {
+        panic!("expected a nested layer");
+    };
+    let inner_image = nested_layer
+        .filter
+        .as_ref()
+        .unwrap()
+        .images()
+        .next()
+        .unwrap();
+    assert_eq!(inner_image.tolerance, 0.25);
+    assert_eq!(inner_image.commands.len(), 1);
     assert_eq!(archive.images.len(), 1);
     assert_eq!(archive.fonts.len(), 1);
 
@@ -536,7 +550,6 @@ fn filter_image_scenes_roundtrip() {
     let restored = deserialize_from_slice(&archive_serialize_to_vec(&archive).unwrap()).unwrap();
     let restored_archive = SceneArchive::from_scene(&restored, &default_config()).unwrap();
     assert_eq!(restored_archive.commands, archive.commands);
-    assert_eq!(restored_archive.filter_images, archive.filter_images);
     assert_eq!(restored_archive.images[0].data.data(), &[255, 0, 0, 255]);
     assert_eq!(restored_archive.fonts[0].data(), archive.fonts[0].data());
 
