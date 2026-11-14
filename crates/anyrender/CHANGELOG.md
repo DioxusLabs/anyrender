@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The filter types now live in the new `image_filters_types` crate, generic over the content of `feImage` primitives, and `anyrender::filters` re-exports them. `Filter`, `FilterGraphNode` and `FilterEffect` are aliases that use `ExternalImageSource` for `feImage`, so existing code keeps compiling.
 - `Filter::add` now makes the added primitive the graph's output, so graphs built with `Filter::empty` and `add` output their last node instead of their first.
 
 ## [0.14.0] - 2026-10-03
