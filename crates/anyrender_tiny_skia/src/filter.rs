@@ -15,12 +15,12 @@ use kurbo::Affine;
 use rgb::FromSlice;
 use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 
-use super::{
+use crate::scene::{to_skia_blend, to_skia_color, transform_scale};
+use anyrender_image_filters::{
     ImageRef, ImageRefMut, box_blur, composite, convolve_matrix, demultiply_alpha,
     displacement_map, from_linear_rgb, iir_blur, into_linear_rgb, lighting, morphology,
     multiply_alpha, turbulence,
 };
-use crate::scene::{to_skia_blend, to_skia_color, transform_scale};
 
 #[derive(Clone)]
 struct Image {

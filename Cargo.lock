@@ -248,6 +248,7 @@ name = "anyrender_tiny_skia"
 version = "0.1.0"
 dependencies = [
  "anyrender",
+ "anyrender_image_filters",
  "bytemuck",
  "debug_timer",
  "kurbo",
