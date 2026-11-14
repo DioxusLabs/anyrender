@@ -56,6 +56,13 @@ pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Opti
         chain_input = Some(convert_filter(&mut graph, filter, chain_input)?);
     }
     let output = chain_input?;
+    // Each filter's primitives are clipped to its own region below, so the graph's region is
+    // the union of them.
+    let region = filters
+        .iter()
+        .map(|filter| to_rect(filter.rect()))
+        .reduce(|a, b| a.union(b));
+    graph.set_region(region);
     // `Filter::add` makes each new node the output, but the result can be an
     // earlier node (e.g. a single-input `feMerge` of a named result).
     if graph.output() != output {
@@ -75,6 +82,7 @@ fn convert_filter(
     filter: &usvg::filter::Filter,
     chain_input: Option<FilterId>,
 ) -> Option<FilterId> {
+    let region = to_rect(filter.rect());
     let mut ctx = FilterContext {
         graph,
         chain_input,
@@ -92,15 +100,7 @@ fn convert_filter(
         };
         ctx.subregion = match primitive.kind() {
             usvg::filter::Kind::Offset(_) => None,
-            _ => {
-                let rect = primitive.rect();
-                Some(Rect::new(
-                    rect.left() as f64,
-                    rect.top() as f64,
-                    rect.right() as f64,
-                    rect.bottom() as f64,
-                ))
-            }
+            _ => Some(to_rect(primitive.rect()).intersect(region)),
         };
         let id = convert_primitive(&mut ctx, primitive)?;
         if !primitive.result().is_empty() {
@@ -110,6 +110,15 @@ fn convert_filter(
     }
 
     last
+}
+
+fn to_rect(rect: usvg::NonZeroRect) -> Rect {
+    Rect::new(
+        rect.left() as f64,
+        rect.top() as f64,
+        rect.right() as f64,
+        rect.bottom() as f64,
+    )
 }
 
 struct FilterContext<'a> {
@@ -720,6 +729,42 @@ mod tests {
 
         let offset = single_node(r#"<feOffset x="10" dx="5"/>"#);
         assert_eq!(offset.subregion, None);
+    }
+
+    #[test]
+    fn filter_region() {
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g filter="url(#f)">
+                    <filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="20" height="30">
+                        <feFlood x="10" y="10" width="40" height="40" flood-color="green"/>
+                    </filter>
+                    <rect width="50" height="50" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 20.0, 30.0)));
+        // Subregions are clipped to the filter region.
+        assert_eq!(
+            graph.nodes()[0].subregion,
+            Some(Rect::new(10.0, 10.0, 20.0, 30.0))
+        );
+
+        // Without x/y/width/height, the region is the bounding box grown by 10% on each side.
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g filter="url(#f)">
+                    <filter id="f"><feGaussianBlur stdDeviation="3"/></filter>
+                    <rect width="50" height="50" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(
+            rounded(graph.region()),
+            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
+        );
     }
 
     #[test]

@@ -745,13 +745,17 @@ fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
 
 /// Resolves an input of the primitive `id` from the results of the primitives before it, converted
 /// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
+/// The source graphic is clipped to the filter `region`.
 fn resolve_input(
     results: &[(Option<ImageFilter>, FilterColorSpace)],
     id: FilterId,
     input: &Option<FilterInput>,
     color_space: FilterColorSpace,
+    region: Option<kurbo::Rect>,
 ) -> Option<ImageFilter> {
-    let source = (None, FilterColorSpace::Srgb);
+    let source =
+        region.and_then(|r| skia_safe::image_filters::crop(sk_kurbo::rect_from(r), None, None));
+    let source = (source, FilterColorSpace::Srgb);
     let result = |id: u16| results.get(id as usize).cloned().unwrap_or(source.clone());
     let (input, input_color_space) = match input {
         None => id.0.checked_sub(1).map_or(source.clone(), result),
@@ -796,10 +800,13 @@ fn convert_filter_effect(
 ) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
     let color_space = node.color_space;
-    let input = resolve_input(results, id, &node.inputs.primary, color_space);
+    let region = filter.region();
+    let input = resolve_input(results, id, &node.inputs.primary, color_space, region);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(results, id, &node.inputs.secondary, color_space);
+    let secondary = resolve_input(results, id, &node.inputs.secondary, color_space, region);
+    // The result is clipped to the primitive subregion and the filter region.
+    let crop = filter.clip_to_region(node.subregion);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -1122,8 +1129,8 @@ fn convert_filter_effect(
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
     let filter = filter.or(input_clone);
-    let filter = match node.subregion {
-        Some(subregion) => image_filters::crop(sk_kurbo::rect_from(subregion), None, filter),
+    let filter = match crop {
+        Some(crop) => image_filters::crop(sk_kurbo::rect_from(crop), None, filter),
         None => filter,
     };
     (filter, color_space)

@@ -178,12 +178,25 @@ pub fn apply<I>(
         pixmap: Pixmap::new(w, h).unwrap(),
         linear: false,
     };
-    let source = Image {
+    let mut source = Image {
         pixmap: source,
         linear: false,
     };
 
     let full = IntRect::from_xywh(0, 0, w, h).unwrap();
+    // The filter region, in the pixel space of `source`. It clips the source graphic and every
+    // result.
+    let full = match filter.region() {
+        Some(rect) => {
+            let Some(filter_region) = pixel_region(rect, transform, region, full) else {
+                pixmap.fill(tiny_skia::Color::TRANSPARENT);
+                return;
+            };
+            clip_to(&mut source.pixmap, Some(filter_region));
+            filter_region
+        }
+        None => full,
+    };
     let mut results: Vec<Image> = Vec::with_capacity(filter.nodes().len());
     // Each result's primitive subregion, in the pixel space of `source`.
     let mut regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
@@ -466,9 +479,11 @@ pub fn apply<I>(
             }
         };
         let mut result = result;
-        // As in resvg, results are only clipped to explicit subregions.
+        // As in resvg, results are only clipped to explicit subregions (and the filter region).
         if node.subregion.is_some() {
             clip_to(&mut result.pixmap, subregion);
+        } else if filter.region().is_some() {
+            clip_to(&mut result.pixmap, Some(full));
         }
         results.push(result);
         regions.push(subregion.unwrap_or(full));

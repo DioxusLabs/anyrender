@@ -206,10 +206,15 @@ impl PaintScene for WebGlScenePainter<'_> {
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
-        let filter = filter.and_then(crate::common::convert_filter);
+        let (filter, region) = match filter.as_deref().and_then(crate::common::convert_filter) {
+            Some(converted) => (Some(converted), filter.and_then(|f| f.region())),
+            None => (None, None),
+        };
         self.scene.set_transform(transform);
+        if let Some(region) = &region {
+            self.scene.push_clip_rect(region);
+        }
         self.scene.set_fill_rule(fill);
-        self.layer_stack.push(LayerKind::Layer);
         if let Some(rect) = clip.as_rect() {
             self.scene.push_clip_rect(&rect);
         } else {
@@ -218,6 +223,13 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         self.scene
             .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+        match &region {
+            Some(region) => {
+                self.scene.push_clip_rect(region);
+                self.layer_stack.push(LayerKind::FilterRegionLayer);
+            }
+            None => self.layer_stack.push(LayerKind::Layer),
+        }
     }
 
     fn push_mask_layer(
@@ -267,6 +279,12 @@ impl PaintScene for WebGlScenePainter<'_> {
                     self.scene.pop_clip();
                 }
                 LayerKind::Clip => self.scene.pop_clip(),
+                LayerKind::FilterRegionLayer => {
+                    self.scene.pop_clip();
+                    self.scene.pop_layer();
+                    self.scene.pop_clip();
+                    self.scene.pop_clip();
+                }
             }
         }
     }

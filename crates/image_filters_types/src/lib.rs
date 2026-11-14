@@ -57,10 +57,8 @@ pub struct Filter<I> {
     /// This is the axis-aligned bounding box of the expansion region (centered at origin),
     /// which can be transformed to device space when needed.
     expansion_rect: Rect,
-    // TODO: Add bounds restricting where the filter applies.
-    // Optional bounds restricting where the filter applies.
-    // If `None`, the filter applies to the entire filtered element.
-    // pub bounds: Option<Rect>,
+    /// The filter region. See [`Self::region`].
+    region: Option<Rect>,
 }
 
 impl<I> Default for Filter<I> {
@@ -76,6 +74,43 @@ impl<I> Filter<I> {
             primitives: SmallVec::new(),
             output: FilterId(0),
             expansion_rect: Rect::ZERO,
+            region: None,
+        }
+    }
+
+    /// Set the filter region. See [`Self::region`].
+    pub fn with_region(mut self, region: Option<Rect>) -> Self {
+        self.region = region;
+        self
+    }
+
+    /// Set the filter region. See [`Self::region`].
+    pub fn set_region(&mut self, region: Option<Rect>) {
+        self.region = region;
+    }
+
+    /// The filter region (`x`/`y`/`width`/`height` on an SVG `<filter>`), in the user space of
+    /// the filtered layer's transform, the same space as [`FilterGraphNode::subregion`].
+    ///
+    /// The region is a hard clip on the filter: the source graphic is clipped to it before
+    /// any primitive reads it, every primitive's result is clipped to it, and primitives
+    /// without an explicit subregion that fill an area (such as flood, turbulence and image)
+    /// fill the region.
+    ///
+    /// `None` means the filter is unbounded (as for CSS filter functions), and is limited only
+    /// by the clip of the layer it is applied to.
+    ///
+    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterEffectsRegion>
+    pub fn region(&self) -> Option<Rect> {
+        self.region
+    }
+
+    /// The area a primitive's result covers: its subregion (or `None`, all of it) clipped to the
+    /// filter region.
+    pub fn clip_to_region(&self, subregion: Option<Rect>) -> Option<Rect> {
+        match (subregion, self.region) {
+            (Some(subregion), Some(region)) => Some(subregion.intersect(region)),
+            (subregion, region) => subregion.or(region),
         }
     }
 
@@ -222,6 +257,8 @@ pub struct FilterGraphNode<I> {
     /// The filter primitive subregion (`x`/`y`/`width`/`height` in SVG), in the same user space
     /// as the filter's other coordinates. The result is clipped to it, and [`FilterEffect::Tile`]
     /// uses its input's subregion as the tile.
+    ///
+    /// The subregion is clipped to the filter region ([`Filter::region`]).
     ///
     /// `None` means the union of the input primitives' subregions, or the whole filter region
     /// for primitives without primitive inputs (such as flood, turbulence, or a source graphic
@@ -614,6 +651,27 @@ impl<I> FilterEffect<I> {
             // Most other filters don't expand bounds
             _ => Rect::ZERO,
         }
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    type Filter = super::Filter<()>;
+    use kurbo::Rect;
+
+    #[test]
+    fn clip_to_region() {
+        let region = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let subregion = Rect::new(5.0, 5.0, 20.0, 20.0);
+        let unbounded = Filter::empty();
+        let bounded = Filter::empty().with_region(Some(region));
+        assert_eq!(unbounded.clip_to_region(None), None);
+        assert_eq!(unbounded.clip_to_region(Some(subregion)), Some(subregion));
+        assert_eq!(bounded.clip_to_region(None), Some(region));
+        assert_eq!(
+            bounded.clip_to_region(Some(subregion)),
+            Some(Rect::new(5.0, 5.0, 10.0, 10.0))
+        );
     }
 }
 
