@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterInput, FilterInputs,
+    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
 };
 use anyrender::{PaintScene, render_to_buffer};
@@ -10,10 +10,11 @@ use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
 
 const SIZE: u32 = 16;
+const FULL: Rect = Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64);
 
 /// Halves the red channel of an opaque red square in `color_space`.
 fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
-    let mut filter = Filter::empty();
+    let mut filter = Filter::new(FULL);
     #[rustfmt::skip]
     let matrix = ColorMatrix([
         0.5, 0.0, 0.0, 0.0, 0.0,
@@ -103,20 +104,19 @@ fn pixel(buffer: &[u8], x: u32, y: u32) -> [u8; 4] {
     buffer[i..i + 4].try_into().unwrap()
 }
 
-fn green_flood(subregion: Rect) -> FilterGraphNode {
-    FilterGraphNode {
-        effect: FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
-        inputs: FilterInputs::NONE,
-        color_space: FilterColorSpace::Srgb,
-        subregion: Some(subregion),
-        region: None,
-    }
+fn green_flood(filter: &mut Filter, subregion: Rect) -> FilterId {
+    filter.add_with_subregion(
+        FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
+        FilterInputs::NONE,
+        FilterColorSpace::Srgb,
+        Some(subregion),
+    )
 }
 
 #[test]
 fn results_are_clipped_to_subregions() {
-    let mut filter = Filter::empty();
-    filter.add_node(green_flood(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    let mut filter = Filter::new(FULL);
+    green_flood(&mut filter, Rect::new(0.0, 0.0, 4.0, 4.0));
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 1, 1), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 9, 9), [0, 0, 0, 0]);
@@ -124,7 +124,7 @@ fn results_are_clipped_to_subregions() {
 
 #[test]
 fn results_are_clipped_to_the_filter_region() {
-    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    let mut filter = Filter::new(Rect::new(0.0, 0.0, 4.0, 4.0));
     filter.add(
         FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
         FilterInputs::NONE,
@@ -137,7 +137,7 @@ fn results_are_clipped_to_the_filter_region() {
 #[test]
 fn source_graphic_is_clipped_to_the_filter_region() {
     let half = Rect::new(0.0, 0.0, 8.0, SIZE as f64);
-    let mut filter = Filter::empty().with_region(Some(half));
+    let mut filter = Filter::new(half);
     filter.add(
         FilterEffect::Offset(Vec2::new(8.0, 0.0)),
         FilterInputs::NONE,
@@ -146,7 +146,7 @@ fn source_graphic_is_clipped_to_the_filter_region() {
     // The source right of the region is not shifted into it.
     assert_close(pixel(&buffer, 4, 8), [0, 0, 0, 0]);
 
-    let mut filter = Filter::empty().with_region(Some(half.with_origin((8.0, 0.0))));
+    let mut filter = Filter::new(half.with_origin((8.0, 0.0)));
     filter.add(
         FilterEffect::Offset(Vec2::new(4.0, 0.0)),
         FilterInputs::NONE,
@@ -158,21 +158,16 @@ fn source_graphic_is_clipped_to_the_filter_region() {
 
 #[test]
 fn primitives_are_clipped_to_their_own_filter_region() {
-    let mut filter = Filter::empty();
-    let shifted = filter.add_node(FilterGraphNode {
-        effect: FilterEffect::Offset(Vec2::new(4.0, 0.0)),
-        inputs: FilterInputs::NONE,
-        color_space: FilterColorSpace::Srgb,
-        subregion: None,
-        region: Some(Rect::new(4.0, 0.0, 12.0, SIZE as f64)),
-    });
-    filter.add_node(FilterGraphNode {
-        effect: FilterEffect::Offset(Vec2::ZERO),
-        inputs: FilterInputs::single(FilterInput::Result(shifted)),
-        color_space: FilterColorSpace::Srgb,
-        subregion: None,
-        region: None,
-    });
+    let mut filter = Filter::new(Rect::new(4.0, 0.0, 12.0, SIZE as f64));
+    let shifted = filter.add(
+        FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    filter.set_region(FULL);
+    filter.add(
+        FilterEffect::Offset(Vec2::ZERO),
+        FilterInputs::single(FilterInput::Result(shifted)),
+    );
     let buffer = render_filter(filter);
     // The result is clipped to the region.
     assert_close(pixel(&buffer, 2, 8), [0, 0, 0, 0]);
@@ -184,15 +179,14 @@ fn primitives_are_clipped_to_their_own_filter_region() {
 
 #[test]
 fn tile_repeats_its_input_subregion() {
-    let mut filter = Filter::empty();
-    let flood = filter.add_node(green_flood(Rect::new(0.0, 0.0, 4.0, 4.0)));
-    filter.add_node(FilterGraphNode {
-        effect: FilterEffect::Tile,
-        inputs: FilterInputs::single(FilterInput::Result(flood)),
-        color_space: FilterColorSpace::Srgb,
-        subregion: Some(Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64)),
-        region: None,
-    });
+    let mut filter = Filter::new(FULL);
+    let flood = green_flood(&mut filter, Rect::new(0.0, 0.0, 4.0, 4.0));
+    filter.add_with_subregion(
+        FilterEffect::Tile,
+        FilterInputs::single(FilterInput::Result(flood)),
+        FilterColorSpace::Srgb,
+        Some(FULL),
+    );
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 14, 2), [0, 255, 0, 255]);

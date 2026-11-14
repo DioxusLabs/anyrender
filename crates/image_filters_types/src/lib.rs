@@ -57,81 +57,49 @@ pub struct Filter<I> {
     /// This is the axis-aligned bounding box of the expansion region (centered at origin),
     /// which can be transformed to device space when needed.
     expansion_rect: Rect,
-    /// The filter region. See [`Self::region`].
-    region: Option<Rect>,
-}
-
-impl<I> Default for Filter<I> {
-    fn default() -> Self {
-        Self::empty()
-    }
+    /// The filter region given to primitives added next. See [`Self::set_region`].
+    region: Rect,
 }
 
 impl<I> Filter<I> {
-    /// Create a new empty filter graph.
-    pub fn empty() -> Self {
+    /// Create an empty filter graph whose primitives get the filter `region`.
+    /// See [`FilterGraphNode::region`].
+    pub fn new(region: Rect) -> Self {
         Self {
             primitives: SmallVec::new(),
             output: FilterId(0),
             expansion_rect: Rect::ZERO,
-            region: None,
+            region,
         }
     }
 
-    /// Set the filter region. See [`Self::region`].
-    pub fn with_region(mut self, region: Option<Rect>) -> Self {
-        self.region = region;
-        self
-    }
-
-    /// Set the filter region. See [`Self::region`].
-    pub fn set_region(&mut self, region: Option<Rect>) {
+    /// Set the filter region of the primitives added after this call. A chain of SVG filters
+    /// (`filter="url(#a) url(#b)"`) is one graph whose primitives keep their own filter's region.
+    /// See [`FilterGraphNode::region`].
+    pub fn set_region(&mut self, region: Rect) {
         self.region = region;
     }
 
-    /// The filter region (`x`/`y`/`width`/`height` on an SVG `<filter>`), in the user space of
-    /// the filtered layer's transform, the same space as [`FilterGraphNode::subregion`].
+    /// Create a filter from a single filter effect applied to content within `bounds`, as for a
+    /// CSS filter function.
     ///
-    /// The region is a hard clip on the filter: the source graphic is clipped to it before
-    /// any primitive reads it, every primitive's result is clipped to it, and primitives
-    /// without an explicit subregion that fill an area (such as flood, turbulence and image)
-    /// fill the region.
-    ///
-    /// `None` means the filter is unbounded (as for CSS filter functions), and is limited only
-    /// by the clip of the layer it is applied to.
-    ///
-    /// A primitive with its own [`FilterGraphNode::region`] uses that region instead.
-    ///
-    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterEffectsRegion>
-    pub fn region(&self) -> Option<Rect> {
-        self.region
+    /// The filter region is `bounds` grown by the effect's expansion (see
+    /// [`Self::region_for_bounds`]). The primitive operates in sRGB, as CSS filter functions do.
+    pub fn single(primitive: FilterEffect<I>, bounds: Rect) -> Self {
+        Self::linear_list(core::iter::once(primitive), bounds)
     }
 
-    /// The area a primitive's result covers: its subregion (or `None`, all of it) clipped to the
-    /// filter region.
-    pub fn clip_to_region(&self, subregion: Option<Rect>) -> Option<Rect> {
-        match (subregion, self.region) {
-            (Some(subregion), Some(region)) => Some(subregion.intersect(region)),
-            (subregion, region) => subregion.or(region),
-        }
-    }
-
-    /// Create a filter from a single filter effect.
+    /// Create a filter from effects applied in order to content within `bounds`, as for a list of
+    /// CSS filter functions.
     ///
-    /// Creates a simple filter graph with a single primitive.
-    /// The primitive operates in sRGB, as CSS filter functions do.
-    pub fn single(primitive: FilterEffect<I>) -> Self {
-        let mut graph = Self::empty();
-        graph.add_with_color_space(primitive, FilterInputs::NONE, FilterColorSpace::Srgb);
-        graph
-    }
-
-    /// Create a filter from an iterator of filter effects.
-    ///
-    /// Creates a filter graph where the effects are applied in order. The effects operate in
-    /// sRGB, as CSS filter functions do.
-    pub fn linear_list(primitives: impl Iterator<Item = FilterEffect<I>>) -> Self {
-        let mut graph = Self::empty();
+    /// The filter region is `bounds` grown by the effects' expansion (see
+    /// [`Self::region_for_bounds`]). The effects operate in sRGB, as CSS filter functions do.
+    pub fn linear_list(
+        primitives: impl IntoIterator<Item = FilterEffect<I>>,
+        bounds: Rect,
+    ) -> Self {
+        let primitives: SmallVec<[FilterEffect<I>; 1]> = primitives.into_iter().collect();
+        let mut graph = Self::new(Self::region_for_bounds(bounds, primitives.iter()));
         let mut last_id = None;
         for primitive in primitives {
             let inputs = FilterInputs {
@@ -143,7 +111,29 @@ impl<I> Filter<I> {
         graph
     }
 
-    /// Add a filter primitive with optional inputs.
+    /// The filter region of effects applied in order to content within `bounds`: `bounds` grown
+    /// by each effect's [`FilterEffect::expansion_rect`] in turn, so nothing the effects draw is
+    /// clipped. This is the region CSS filter functions use, which have no filter region of
+    /// their own.
+    pub fn region_for_bounds<'a>(
+        bounds: Rect,
+        effects: impl IntoIterator<Item = &'a FilterEffect<I>>,
+    ) -> Rect
+    where
+        I: 'a,
+    {
+        effects.into_iter().fold(bounds, |region, effect| {
+            let e = effect.expansion_rect();
+            Rect::new(
+                region.x0 + e.x0,
+                region.y0 + e.y0,
+                region.x1 + e.x1,
+                region.y1 + e.y1,
+            )
+        })
+    }
+
+    /// Add a filter primitive with optional inputs and the default subregion.
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
     /// The added primitive becomes the output of the graph.
@@ -161,16 +151,65 @@ impl<I> Filter<I> {
         inputs: FilterInputs,
         color_space: FilterColorSpace,
     ) -> FilterId {
+        self.add_with_subregion(effect, inputs, color_space, None)
+    }
+
+    /// Add a filter primitive with a primitive `subregion` (`x`/`y`/`width`/`height` in SVG).
+    ///
+    /// The subregion is clipped to the filter region. `None` resolves to the spec default: the
+    /// union of the subregions of the primitive's inputs, or the whole filter region for
+    /// primitives without inputs (such as flood and turbulence) or with a source input.
+    ///
+    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterPrimitiveSubRegion>
+    pub fn add_with_subregion(
+        &mut self,
+        effect: FilterEffect<I>,
+        inputs: FilterInputs,
+        color_space: FilterColorSpace,
+        subregion: Option<Rect>,
+    ) -> FilterId {
+        let subregion = match subregion {
+            Some(subregion) => subregion.intersect(self.region),
+            None => self.default_subregion(&effect, &inputs),
+        };
         self.add_node(FilterGraphNode {
             effect,
             inputs,
             color_space,
-            subregion: None,
-            region: None,
+            subregion,
+            region: self.region,
         })
     }
 
-    /// Add a fully specified filter primitive, such as one with a [`FilterGraphNode::subregion`].
+    /// The default subregion of a primitive added next with `inputs`.
+    fn default_subregion(&self, effect: &FilterEffect<I>, inputs: &FilterInputs) -> Rect {
+        // The subregion of an input. Inputs from another filter's primitives are the source
+        // graphic of this filter.
+        let input_subregion = |input: &Option<FilterInput>| {
+            let id = match input {
+                None => self.primitives.len().checked_sub(1),
+                Some(FilterInput::Result(id)) => Some(id.0 as usize),
+                Some(FilterInput::Source(_)) => None,
+            };
+            match id.and_then(|id| self.primitives.get(id)) {
+                Some(node) if node.region == self.region => node.subregion,
+                _ => self.region,
+            }
+        };
+        match effect {
+            FilterEffect::Flood(_) | FilterEffect::Turbulence(_) | FilterEffect::Image(_) => {
+                self.region
+            }
+            FilterEffect::Composite(_)
+            | FilterEffect::Blend(_)
+            | FilterEffect::DisplacementMap(_) => {
+                input_subregion(&inputs.primary).union(input_subregion(&inputs.secondary))
+            }
+            _ => input_subregion(&inputs.primary),
+        }
+    }
+
+    /// Add a fully specified filter primitive.
     ///
     /// Returns a `FilterId` that can be referenced by other primitives.
     /// The added primitive becomes the output of the graph.
@@ -258,28 +297,22 @@ pub struct FilterGraphNode<I> {
     /// The color space the primitive operates in.
     pub color_space: FilterColorSpace,
     /// The filter primitive subregion (`x`/`y`/`width`/`height` in SVG), in the same user space
-    /// as the filter's other coordinates. The result is clipped to it, and [`FilterEffect::Tile`]
-    /// uses its input's subregion as the tile.
+    /// as the filter's other coordinates, within [`Self::region`]. The result is clipped to it,
+    /// and [`FilterEffect::Tile`] uses its input's subregion as the tile.
     ///
-    /// The subregion is clipped to the primitive's filter region ([`Self::region`]).
-    ///
-    /// `None` means the union of the input primitives' subregions, or the whole filter region
-    /// for primitives without primitive inputs (such as flood, turbulence, or a source graphic
-    /// input).
+    /// [`Filter::add_with_subregion`] resolves the spec default.
     ///
     /// See: <https://www.w3.org/TR/filter-effects-1/#FilterPrimitiveSubRegion>
-    pub subregion: Option<Rect>,
-    /// The filter region of the filter this primitive belongs to, in the same user space as the
-    /// subregion. A chain of SVG filters (`filter="url(#a) url(#b)"`) is one graph whose
-    /// primitives keep their own filter's region.
+    pub subregion: Rect,
+    /// The filter region (`x`/`y`/`width`/`height` on an SVG `<filter>`) of the filter this
+    /// primitive belongs to, in the same user space as the subregion.
     ///
-    /// It is a hard clip like [`Filter::region`]: the primitive's inputs (the source graphic,
-    /// or results of primitives with a different region) are clipped to it before it reads
-    /// them, and its result is clipped to it.
+    /// The region is a hard clip: the primitive's inputs (the source graphic, or results of
+    /// primitives with a different region) are clipped to it before it reads them, and its result
+    /// is clipped to it.
     ///
-    /// `None` means [`Filter::region`].
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub region: Option<Rect>,
+    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterEffectsRegion>
+    pub region: Rect,
 }
 
 /// The color space a filter primitive operates in (`color-interpolation-filters` in SVG).
@@ -671,21 +704,74 @@ impl<I> FilterEffect<I> {
 #[cfg(test)]
 mod region_tests {
     type Filter = super::Filter<()>;
-    use kurbo::Rect;
+    use super::{FilterColorSpace, FilterEffect, FilterInput, FilterInputs, FilterSource};
+    use kurbo::{Rect, Vec2};
+
+    const REGION: Rect = Rect::new(0.0, 0.0, 10.0, 10.0);
 
     #[test]
-    fn clip_to_region() {
-        let region = Rect::new(0.0, 0.0, 10.0, 10.0);
-        let subregion = Rect::new(5.0, 5.0, 20.0, 20.0);
-        let unbounded = Filter::empty();
-        let bounded = Filter::empty().with_region(Some(region));
-        assert_eq!(unbounded.clip_to_region(None), None);
-        assert_eq!(unbounded.clip_to_region(Some(subregion)), Some(subregion));
-        assert_eq!(bounded.clip_to_region(None), Some(region));
-        assert_eq!(
-            bounded.clip_to_region(Some(subregion)),
-            Some(Rect::new(5.0, 5.0, 10.0, 10.0))
+    fn explicit_subregion_is_clipped_to_region() {
+        let mut filter = Filter::new(REGION);
+        filter.add_with_subregion(
+            FilterEffect::Offset(Vec2::ZERO),
+            FilterInputs::NONE,
+            FilterColorSpace::Srgb,
+            Some(Rect::new(5.0, 5.0, 20.0, 20.0)),
         );
+        assert_eq!(filter.nodes()[0].subregion, Rect::new(5.0, 5.0, 10.0, 10.0));
+        assert_eq!(filter.nodes()[0].region, REGION);
+    }
+
+    #[test]
+    fn css_region_grows_bounds_by_each_effect() {
+        let bounds = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let filter = Filter::linear_list(
+            [
+                FilterEffect::Offset(Vec2::new(2.0, 0.0)),
+                FilterEffect::Offset(Vec2::new(0.0, -3.0)),
+            ],
+            bounds,
+        );
+        let region = Rect::new(0.0, -3.0, 12.0, 10.0);
+        assert!(filter.nodes().iter().all(|n| n.region == region));
+        assert_eq!(filter.nodes()[1].subregion, region);
+    }
+
+    #[test]
+    fn default_subregion() {
+        let small = Rect::new(0.0, 0.0, 2.0, 2.0);
+        let other = Rect::new(4.0, 4.0, 6.0, 6.0);
+        let mut filter = Filter::new(REGION);
+        let srgb = FilterColorSpace::Srgb;
+        let offset = || FilterEffect::Offset(Vec2::ZERO);
+        let a = filter.add_with_subregion(offset(), FilterInputs::NONE, srgb, Some(small));
+        let b = filter.add_with_subregion(offset(), FilterInputs::NONE, srgb, Some(other));
+        // The previous result's subregion.
+        let c = filter.add(offset(), FilterInputs::NONE);
+        // The union of both inputs' subregions.
+        let d = filter.add(
+            FilterEffect::Blend(peniko::Mix::Normal),
+            FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
+        );
+        // A source input fills the filter region.
+        let e = filter.add(
+            offset(),
+            FilterInputs::single(FilterInput::Source(FilterSource::SourceGraphic)),
+        );
+        // A primitive without inputs fills the filter region.
+        let f = filter.add(
+            FilterEffect::Flood(peniko::color::palette::css::GREEN),
+            FilterInputs::single(FilterInput::Result(a)),
+        );
+        // A result from another filter acts as the source graphic.
+        filter.set_region(Rect::new(1.0, 1.0, 3.0, 3.0));
+        let g = filter.add(offset(), FilterInputs::single(FilterInput::Result(a)));
+        let subregion = |id: super::FilterId| filter.nodes()[id.0 as usize].subregion;
+        assert_eq!(subregion(c), other);
+        assert_eq!(subregion(d), small.union(other));
+        assert_eq!(subregion(e), REGION);
+        assert_eq!(subregion(f), REGION);
+        assert_eq!(subregion(g), Rect::new(1.0, 1.0, 3.0, 3.0));
     }
 }
 
