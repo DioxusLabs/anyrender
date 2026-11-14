@@ -70,7 +70,6 @@ pub fn render_svg_tree<S: PaintScene>(scene: &mut S, svg: &usvg::Tree, transform
     render::render_group(
         scene,
         svg.root(),
-        Affine::IDENTITY,
         transform,
         &mut util::default_error_handler,
     );
@@ -85,13 +84,9 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     transform: Affine,
     error_handler: &mut F,
 ) {
-    render::render_group(
-        scene,
-        svg.root(),
-        Affine::IDENTITY,
-        transform,
-        &mut |scene, node, _| error_handler(scene, node),
-    );
+    render::render_group(scene, svg.root(), transform, &mut |scene, node, _| {
+        error_handler(scene, node)
+    });
 }
 
 #[cfg(test)]
@@ -231,10 +226,48 @@ mod tests {
     }
 
     #[test]
+    fn symbol_clip_follows_use_transform() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="200">
+            <defs><symbol id="s"><rect x="-20" y="-10" width="120" height="120"/></symbol></defs>
+            <use xlink:href="#s" transform="translate(50 50)"/>
+        </svg>"##;
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, svg, Affine::IDENTITY).unwrap();
+        let clip_transform = scene
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                RenderCommand::PushLayer(layer) => Some(layer.transform),
+                _ => None,
+            })
+            .expect("symbol viewport should produce a clipping layer");
+        assert_eq!(clip_transform, Affine::translate((50.0, 50.0)));
+        assert_eq!(
+            fill_transforms(svg, Affine::IDENTITY),
+            [Affine::translate((50.0, 50.0))]
+        );
+    }
+
+    #[test]
     fn mask_layer_is_isolated() {
         let commands = render_mask("");
         assert!(matches!(commands[0], RenderCommand::PushLayer(_)));
         assert!(matches!(commands[2], RenderCommand::PushMaskLayer(_)));
         assert!(matches!(commands.last(), Some(RenderCommand::PopLayer)));
+    }
+
+    #[test]
+    fn isolation_isolate_pushes_layer() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+            <g style="isolation:isolate"><rect width="10" height="10"/></g>
+        </svg>"##;
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, svg, Affine::IDENTITY).unwrap();
+        assert!(
+            scene
+                .commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::PushLayer(_)))
+        );
     }
 }

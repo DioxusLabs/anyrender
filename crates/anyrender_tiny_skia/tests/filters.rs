@@ -111,6 +111,7 @@ fn green_flood(subregion: Rect) -> FilterGraphNode {
         inputs: FilterInputs::NONE,
         color_space: FilterColorSpace::Srgb,
         subregion: Some(subregion),
+        region: None,
     }
 }
 
@@ -158,6 +159,32 @@ fn source_graphic_is_clipped_to_the_filter_region() {
 }
 
 #[test]
+fn primitives_are_clipped_to_their_own_filter_region() {
+    let mut filter = Filter::empty();
+    let shifted = filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        inputs: FilterInputs::NONE,
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+        region: Some(Rect::new(4.0, 0.0, 12.0, SIZE as f64)),
+    });
+    filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Offset(Vec2::ZERO),
+        inputs: FilterInputs::single(FilterInput::Result(shifted)),
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+        region: None,
+    });
+    let buffer = render_filter(filter);
+    // The result is clipped to the region.
+    assert_close(pixel(&buffer, 2, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 13, 8), [0, 0, 0, 0]);
+    // The source left of the region is not shifted into it.
+    assert_close(pixel(&buffer, 6, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 10, 8), [255, 0, 0, 255]);
+}
+
+#[test]
 fn tile_repeats_its_input_subregion() {
     let mut filter = Filter::empty();
     let flood = filter.add_node(green_flood(Rect::new(0.0, 0.0, 4.0, 4.0)));
@@ -166,6 +193,7 @@ fn tile_repeats_its_input_subregion() {
         inputs: FilterInputs::single(FilterInput::Result(flood)),
         color_space: FilterColorSpace::Srgb,
         subregion: Some(Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64)),
+        region: None,
     });
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
@@ -205,6 +233,7 @@ fn composite_lighter_adds_its_inputs() {
             inputs: FilterInputs::NONE,
             color_space: FilterColorSpace::Srgb,
             subregion: None,
+            region: None,
         })
     };
     let a = flood(&mut filter, Color::from_rgb8(100, 200, 0));
@@ -214,7 +243,55 @@ fn composite_lighter_adds_its_inputs() {
         inputs: FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
         color_space: FilterColorSpace::Srgb,
         subregion: None,
+        region: None,
     });
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 8, 8), [200, 255, 50, 255]);
+}
+
+/// Renders a red square through an empty filter whose layer is clipped to `clip` under
+/// `transform`, returning the number of partially transparent pixels.
+fn partial_alpha_pixels(transform: Affine, clip: Rect) -> usize {
+    let filter = Arc::new(Filter::empty());
+    let size = SIZE as f64;
+    let buffer = render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            scene.push_layer(
+                Fill::NonZero,
+                Mix::Normal,
+                1.0,
+                transform,
+                &clip,
+                Some(filter.clone()),
+                None,
+            );
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
+            );
+            scene.pop_layer();
+        },
+        SIZE,
+        SIZE,
+    );
+    buffer
+        .chunks(4)
+        .filter(|p| p[3] != 0 && p[3] != 255)
+        .count()
+}
+
+#[test]
+fn axis_aligned_filter_region_is_a_hard_clip() {
+    let clip = Rect::new(2.5, 2.5, 12.25, 12.75);
+    assert_eq!(partial_alpha_pixels(Affine::IDENTITY, clip), 0);
+}
+
+#[test]
+fn rotated_filter_region_keeps_antialiased_edges() {
+    let clip = Rect::new(-4.0, -4.0, 4.0, 4.0);
+    let transform = Affine::translate((8.0, 8.0)) * Affine::rotate(0.5);
+    assert!(partial_alpha_pixels(transform, clip) > 0);
 }
