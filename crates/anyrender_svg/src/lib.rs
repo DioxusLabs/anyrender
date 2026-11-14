@@ -4,7 +4,7 @@
 //! Render an SVG into any impl of [`anyrender::PaintScene`].
 //!
 //! This currently lacks support for some important SVG features. Known missing features include: group backgrounds
-//! path shape-rendering, and patterns. Luminance masks are rendered as alpha masks by backends without luminance mask support.
+//! and path shape-rendering. Luminance masks are rendered as alpha masks by backends without luminance mask support.
 //!
 //! Filter effects are translated into [`anyrender::Filter`] graphs attached to layers.
 //! Whether (and how faithfully) they are applied depends on the rendering backend.
@@ -72,6 +72,7 @@ pub fn render_svg_tree<S: PaintScene>(scene: &mut S, svg: &usvg::Tree, transform
         svg.root(),
         transform,
         &mut util::default_error_handler,
+        &mut util::PatternCache::default(),
     );
 }
 
@@ -84,9 +85,13 @@ pub fn render_svg_tree_with<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
     transform: Affine,
     error_handler: &mut F,
 ) {
-    render::render_group(scene, svg.root(), transform, &mut |scene, node, _| {
-        error_handler(scene, node)
-    });
+    render::render_group(
+        scene,
+        svg.root(),
+        transform,
+        &mut |scene, node, _| error_handler(scene, node),
+        &mut util::PatternCache::default(),
+    );
 }
 
 #[cfg(test)]

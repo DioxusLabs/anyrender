@@ -77,6 +77,8 @@ pub struct TinySkiaScenePainter {
     spare_pixmaps: Vec<Pixmap>,
     /// Cached entries, each with the frame it was last used in.
     image_cache: HashMap<(u64, u32, u32), (Arc<Pixmap>, u64)>,
+    /// Rasterized pattern tiles, by pattern id and pixel size.
+    pattern_cache: HashMap<(u64, u32, u32), (Arc<Pixmap>, u64)>,
     glyph_cache: HashMap<GlyphKey, (Option<Path>, u64)>,
     frame: u64,
 }
@@ -92,6 +94,7 @@ impl TinySkiaScenePainter {
             layers: Vec::new(),
             spare_pixmaps: Vec::new(),
             image_cache: HashMap::new(),
+            pattern_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             frame: 0,
         };
@@ -222,16 +225,52 @@ impl TinySkiaScenePainter {
         Some(pixmap)
     }
 
+    /// Rasterizes one tile of `pattern` at the resolution it is drawn at with `transform` (the
+    /// local transform of the shape, including the brush transform). Returns the tile and the
+    /// transform mapping its pixels into pattern space.
+    fn pattern_pixmap(
+        &mut self,
+        pattern: &anyrender::Pattern,
+        transform: Affine,
+    ) -> Option<(Arc<Pixmap>, Affine)> {
+        let tile = pattern.tile();
+        let (width, height) = anyrender::pattern_raster_size(tile, transform)?;
+        let (width, height) = (f64::from(width), f64::from(height));
+        // Scale so the tile exactly covers the pixmap, so tiles repeat without seams.
+        let scale = Affine::scale_non_uniform(width / tile.width(), height / tile.height());
+        let pixel_transform = Affine::translate(tile.origin().to_vec2()) * scale.inverse();
+        let (width, height) = (width as u32, height as u32);
+
+        let key = (pattern.id(), width, height);
+        if let Some((pixmap, used)) = self.pattern_cache.get_mut(&key) {
+            *used = self.frame;
+            return Some((pixmap.clone(), pixel_transform));
+        }
+        let mut painter = TinySkiaScenePainter::new(width, height);
+        pattern.scene().replay(
+            &mut painter,
+            scale * Affine::translate(-tile.origin().to_vec2()),
+        );
+        while painter.layers.len() > 1 {
+            painter.pop_layer();
+        }
+        let pixmap = Arc::new(painter.layers.swap_remove(0).pixmap);
+        self.pattern_cache.insert(key, (pixmap.clone(), self.frame));
+        Some((pixmap, pixel_transform))
+    }
+
     /// Builds a tiny-skia paint for `brush` and passes it, along with the current target pixmap,
-    /// to `draw`.
+    /// to `draw`. `transform` is the local transform of the shape being drawn.
     fn with_paint(
         &mut self,
         brush: PaintRef<'_>,
         brush_alpha: f32,
+        transform: Affine,
         brush_transform: Option<Affine>,
         draw: impl FnOnce(&mut Pixmap, &Paint<'_>),
     ) {
-        let brush_transform = skia_transform(brush_transform.unwrap_or(Affine::IDENTITY));
+        let brush_affine = brush_transform.unwrap_or(Affine::IDENTITY);
+        let brush_transform = skia_transform(brush_affine);
         let image;
         let shader = match brush {
             AnyPaint::Solid(color) => Shader::SolidColor(to_skia_color(color, brush_alpha)),
@@ -247,6 +286,21 @@ impl TinySkiaScenePainter {
                     None => return,
                 };
                 image_shader(&image, &brush, brush_alpha, brush_transform)
+            }
+            AnyPaint::Pattern(pattern) => {
+                let pixel_transform;
+                (image, pixel_transform) =
+                    match self.pattern_pixmap(pattern, transform * brush_affine) {
+                        Some(tile) => tile,
+                        None => return,
+                    };
+                Pattern::new(
+                    image.as_ref().as_ref(),
+                    SpreadMode::Repeat,
+                    FilterQuality::Bicubic,
+                    brush_alpha.clamp(0.0, 1.0),
+                    skia_transform(brush_affine * pixel_transform),
+                )
             }
             AnyPaint::Resource(_) | AnyPaint::Custom(_) => return,
         };
@@ -267,10 +321,17 @@ impl TinySkiaScenePainter {
         brush_transform: Option<Affine>,
         path: &Path,
     ) {
-        let transform = skia_transform(self.local(transform));
-        self.with_paint(brush, brush_alpha, brush_transform, |pixmap, paint| {
-            pixmap.fill_path(path, paint, fill_rule(fill), transform, None);
-        });
+        let local = self.local(transform);
+        let transform = skia_transform(local);
+        self.with_paint(
+            brush,
+            brush_alpha,
+            local,
+            brush_transform,
+            |pixmap, paint| {
+                pixmap.fill_path(path, paint, fill_rule(fill), transform, None);
+            },
+        );
     }
 
     fn stroke_path(
@@ -286,10 +347,17 @@ impl TinySkiaScenePainter {
             return;
         }
         let stroke = to_skia_stroke(style);
-        let transform = skia_transform(self.local(transform));
-        self.with_paint(brush, brush_alpha, brush_transform, |pixmap, paint| {
-            pixmap.stroke_path(path, paint, &stroke, transform, None);
-        });
+        let local = self.local(transform);
+        let transform = skia_transform(local);
+        self.with_paint(
+            brush,
+            brush_alpha,
+            local,
+            brush_transform,
+            |pixmap, paint| {
+                pixmap.stroke_path(path, paint, &stroke, transform, None);
+            },
+        );
     }
 
     fn glyph_path(
@@ -332,6 +400,8 @@ impl PaintScene for TinySkiaScenePainter {
         self.frame += 1;
         let frame = self.frame;
         self.image_cache
+            .retain(|_, (_, used)| frame - *used <= CACHE_FRAMES);
+        self.pattern_cache
             .retain(|_, (_, used)| frame - *used <= CACHE_FRAMES);
         self.glyph_cache
             .retain(|_, (_, used)| frame - *used <= CACHE_FRAMES);

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Paint::Pattern` support. Each pattern tile is converted once per frame into a `vello::Scene`, which is appended at each repeat.
 - `push_mask_layer` support, using Vello's native luminance mask layers for luminance masks.
 
 ## [0.15.0] - 2026-10-03
