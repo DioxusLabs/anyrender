@@ -100,6 +100,8 @@ impl<I> Filter<I> {
     /// `None` means the filter is unbounded (as for CSS filter functions), and is limited only
     /// by the clip of the layer it is applied to.
     ///
+    /// A primitive with its own [`FilterGraphNode::region`] uses that region instead.
+    ///
     /// See: <https://www.w3.org/TR/filter-effects-1/#FilterEffectsRegion>
     pub fn region(&self) -> Option<Rect> {
         self.region
@@ -164,6 +166,7 @@ impl<I> Filter<I> {
             inputs,
             color_space,
             subregion: None,
+            region: None,
         })
     }
 
@@ -258,7 +261,7 @@ pub struct FilterGraphNode<I> {
     /// as the filter's other coordinates. The result is clipped to it, and [`FilterEffect::Tile`]
     /// uses its input's subregion as the tile.
     ///
-    /// The subregion is clipped to the filter region ([`Filter::region`]).
+    /// The subregion is clipped to the primitive's filter region ([`Self::region`]).
     ///
     /// `None` means the union of the input primitives' subregions, or the whole filter region
     /// for primitives without primitive inputs (such as flood, turbulence, or a source graphic
@@ -266,6 +269,17 @@ pub struct FilterGraphNode<I> {
     ///
     /// See: <https://www.w3.org/TR/filter-effects-1/#FilterPrimitiveSubRegion>
     pub subregion: Option<Rect>,
+    /// The filter region of the filter this primitive belongs to, in the same user space as the
+    /// subregion. A chain of SVG filters (`filter="url(#a) url(#b)"`) is one graph whose
+    /// primitives keep their own filter's region.
+    ///
+    /// It is a hard clip like [`Filter::region`]: the primitive's inputs (the source graphic,
+    /// or results of primitives with a different region) are clipped to it before it reads
+    /// them, and its result is clipped to it.
+    ///
+    /// `None` means [`Filter::region`].
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub region: Option<Rect>,
 }
 
 /// The color space a filter primitive operates in (`color-interpolation-filters` in SVG).

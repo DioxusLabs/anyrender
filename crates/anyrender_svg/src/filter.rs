@@ -52,13 +52,11 @@ pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Opti
     // Output of the previous filter in the chain. It acts as `SourceGraphic`
     // for the next filter.
     let mut chain_input: Option<FilterId> = None;
-    let chained = filters.len() > 1;
     for filter in filters {
-        chain_input = Some(convert_filter(&mut graph, filter, chain_input, chained)?);
+        chain_input = Some(convert_filter(&mut graph, filter, chain_input)?);
     }
     let output = chain_input?;
-    // Each filter's primitives are clipped to its own region below, so the graph's region is
-    // the union of them.
+    // Each filter's primitives carry its own region, so the graph's region is the union of them.
     let region = filters
         .iter()
         .map(|filter| to_rect(filter.rect()))
@@ -82,7 +80,6 @@ fn convert_filter(
     graph: &mut Filter,
     filter: &usvg::filter::Filter,
     chain_input: Option<FilterId>,
-    chained: bool,
 ) -> Option<FilterId> {
     let region = to_rect(filter.rect());
     let mut ctx = FilterContext {
@@ -92,6 +89,7 @@ fn convert_filter(
         results: HashMap::new(),
         color_space: FilterColorSpace::default(),
         subregion: None,
+        region,
     };
 
     let mut last: Option<FilterId> = None;
@@ -109,19 +107,6 @@ fn convert_filter(
             ctx.results.insert(primitive.result().to_string(), id);
         }
         last = Some(id);
-    }
-
-    // In a chain the graph's region is the union of every filter's region, so a final
-    // `feOffset` (which has no subregion) needs its own filter's region as an explicit clip.
-    if chained
-        && let Some(primitive) = filter.primitives().last()
-        && matches!(primitive.kind(), usvg::filter::Kind::Offset(_))
-    {
-        ctx.subregion = Some(region);
-        last = Some(ctx.add(
-            FilterEffect::Offset(Vec2::ZERO),
-            FilterInputs::single(FilterInput::Result(last?)),
-        ));
     }
 
     last
@@ -148,6 +133,8 @@ struct FilterContext<'a> {
     color_space: FilterColorSpace,
     /// Subregion of the primitive being converted.
     subregion: Option<Rect>,
+    /// Region of the filter being converted.
+    region: Rect,
 }
 
 impl FilterContext<'_> {
@@ -157,6 +144,7 @@ impl FilterContext<'_> {
             inputs,
             color_space: self.color_space,
             subregion: self.subregion,
+            region: Some(self.region),
         })
     }
 
@@ -783,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn chained_offset_is_clipped_to_its_filter_region() {
+    fn chained_filters_keep_their_own_regions() {
         let graph = convert(
             r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
                 <g filter="url(#small) url(#large)">
@@ -799,14 +787,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 200.0, 200.0)));
-        let subregions: Vec<_> = graph.nodes().iter().map(|n| n.subregion).collect();
+        let regions: Vec<_> = graph
+            .nodes()
+            .iter()
+            .map(|n| (n.subregion, n.region))
+            .collect();
         assert_eq!(
-            subregions,
+            regions,
             [
-                None,
-                Some(Rect::new(40.0, 40.0, 160.0, 160.0)),
-                None,
-                Some(Rect::new(0.0, 0.0, 200.0, 200.0)),
+                (None, Some(Rect::new(40.0, 40.0, 160.0, 160.0))),
+                (None, Some(Rect::new(0.0, 0.0, 200.0, 200.0))),
             ]
         );
     }

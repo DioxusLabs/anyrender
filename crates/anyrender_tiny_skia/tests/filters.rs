@@ -111,6 +111,7 @@ fn green_flood(subregion: Rect) -> FilterGraphNode {
         inputs: FilterInputs::NONE,
         color_space: FilterColorSpace::Srgb,
         subregion: Some(subregion),
+        region: None,
     }
 }
 
@@ -158,6 +159,32 @@ fn source_graphic_is_clipped_to_the_filter_region() {
 }
 
 #[test]
+fn primitives_are_clipped_to_their_own_filter_region() {
+    let mut filter = Filter::empty();
+    let shifted = filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        inputs: FilterInputs::NONE,
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+        region: Some(Rect::new(4.0, 0.0, 12.0, SIZE as f64)),
+    });
+    filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Offset(Vec2::ZERO),
+        inputs: FilterInputs::single(FilterInput::Result(shifted)),
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+        region: None,
+    });
+    let buffer = render_filter(filter);
+    // The result is clipped to the region.
+    assert_close(pixel(&buffer, 2, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 13, 8), [0, 0, 0, 0]);
+    // The source left of the region is not shifted into it.
+    assert_close(pixel(&buffer, 6, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 10, 8), [255, 0, 0, 255]);
+}
+
+#[test]
 fn tile_repeats_its_input_subregion() {
     let mut filter = Filter::empty();
     let flood = filter.add_node(green_flood(Rect::new(0.0, 0.0, 4.0, 4.0)));
@@ -166,6 +193,7 @@ fn tile_repeats_its_input_subregion() {
         inputs: FilterInputs::single(FilterInput::Result(flood)),
         color_space: FilterColorSpace::Srgb,
         subregion: Some(Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64)),
+        region: None,
     });
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
@@ -205,6 +233,7 @@ fn composite_lighter_adds_its_inputs() {
             inputs: FilterInputs::NONE,
             color_space: FilterColorSpace::Srgb,
             subregion: None,
+            region: None,
         })
     };
     let a = flood(&mut filter, Color::from_rgb8(100, 200, 0));
@@ -214,6 +243,7 @@ fn composite_lighter_adds_its_inputs() {
         inputs: FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
         color_space: FilterColorSpace::Srgb,
         subregion: None,
+        region: None,
     });
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 8, 8), [200, 255, 50, 255]);
