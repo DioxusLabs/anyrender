@@ -213,15 +213,7 @@ fn convert_primitive(
                 usvg::filter::CompositeOperator::Out => CompositeOperator::Out,
                 usvg::filter::CompositeOperator::Atop => CompositeOperator::Atop,
                 usvg::filter::CompositeOperator::Xor => CompositeOperator::Xor,
-                // `lighter` is the sum of both inputs.
-                usvg::filter::CompositeOperator::Lighter => {
-                    CompositeOperator::Arithmetic(ArithmeticCompositeOperator {
-                        k1: 0.0,
-                        k2: 1.0,
-                        k3: 1.0,
-                        k4: 0.0,
-                    })
-                }
+                usvg::filter::CompositeOperator::Lighter => CompositeOperator::Lighter,
                 usvg::filter::CompositeOperator::Arithmetic { k1, k2, k3, k4 } => {
                     CompositeOperator::Arithmetic(ArithmeticCompositeOperator { k1, k2, k3, k4 })
                 }
