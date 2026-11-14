@@ -7,6 +7,8 @@
 use rgb::RGBA8;
 
 pub mod box_blur;
+pub mod color_matrix;
+pub mod component_transfer;
 pub mod composite;
 pub mod convolve_matrix;
 pub mod displacement_map;
