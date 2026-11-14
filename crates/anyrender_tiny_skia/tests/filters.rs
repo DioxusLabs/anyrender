@@ -9,7 +9,7 @@ use anyrender::filters::{
 };
 use anyrender::{PaintScene, render_to_buffer};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
-use kurbo::{Affine, Rect};
+use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
 
 const SIZE: u32 = 16;
@@ -122,6 +122,40 @@ fn results_are_clipped_to_subregions() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 1, 1), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 9, 9), [0, 0, 0, 0]);
+}
+
+#[test]
+fn results_are_clipped_to_the_filter_region() {
+    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    filter.add(
+        FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 1, 1), [0, 255, 0, 255]);
+    assert_close(pixel(&buffer, 9, 9), [0, 0, 0, 0]);
+}
+
+#[test]
+fn source_graphic_is_clipped_to_the_filter_region() {
+    let half = Rect::new(0.0, 0.0, 8.0, SIZE as f64);
+    let mut filter = Filter::empty().with_region(Some(half));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(8.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    // The source right of the region is not shifted into it.
+    assert_close(pixel(&buffer, 4, 8), [0, 0, 0, 0]);
+
+    let mut filter = Filter::empty().with_region(Some(half.with_origin((8.0, 0.0))));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 10, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 13, 8), [255, 0, 0, 255]);
 }
 
 #[test]
