@@ -28,3 +28,4 @@ image = { workspace = true, default-features = false, optional = true }
 
 [dev-dependencies]
 anyrender_vello_cpu = { workspace = true }
+anyrender_tiny_skia = { workspace = true }

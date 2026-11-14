@@ -124,7 +124,18 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let paint_ref: PaintRef<'_> = paint_ref.into();
+        let paint_ref: anyrender::PaintRef<'a> = paint_ref.into();
+        if let anyrender::Paint::Pattern(pattern) = paint_ref {
+            anyrender::stroke_pattern_tiles(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+            );
+            return;
+        }
         let brush_ref: BrushRef<'_> = paint_ref.into();
         self.inner
             .stroke(style, transform, brush_ref, brush_transform, shape);
@@ -138,7 +149,11 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
-        let paint: PaintRef<'_> = paint.into();
+        let paint: anyrender::PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            anyrender::fill_pattern_tiles(self, pattern, style, transform, brush_transform, shape);
+            return;
+        }
         let brush_ref: BrushRef<'_> = match paint {
             Paint::Solid(color) => BrushRef::Solid(color),
             Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
@@ -158,7 +173,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                     BrushRef::Solid(Color::TRANSPARENT)
                 }
             }
-            Paint::Custom(_) => BrushRef::Solid(Color::TRANSPARENT),
+            Paint::Custom(_) | Paint::Pattern(_) => BrushRef::Solid(Color::TRANSPARENT),
         };
 
         self.inner

@@ -1,7 +1,7 @@
 // Copyright 2023 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::{Paint, PaintScene};
+use anyrender::{Paint, PaintScene, Pattern, recording::Scene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
 use peniko::{BlendMode, Color, Compose, Fill, InterpolationAlphaSpace, Mix};
@@ -237,7 +237,37 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
             .with_interpolation_alpha_space(InterpolationAlphaSpace::Unpremultiplied);
             Some((Paint::Gradient(gradient), transform))
         }
-        usvg::Paint::Pattern(_) => None,
+        usvg::Paint::Pattern(pattern) => {
+            // usvg resolves the pattern's units and view box, so its content is in the tile's
+            // space, with the tile's top-left corner at the origin.
+            let rect = pattern.rect();
+            let tile = Rect::new(0.0, 0.0, rect.width() as f64, rect.height() as f64);
+            let alpha = opacity.get();
+            let mut scene = Scene::new();
+            if alpha < 1.0 {
+                scene.push_layer(
+                    Fill::NonZero,
+                    BlendMode::default(),
+                    alpha,
+                    Affine::IDENTITY,
+                    &tile,
+                    None,
+                    None,
+                );
+            }
+            crate::render::render_group(
+                &mut scene,
+                pattern.root(),
+                Affine::IDENTITY,
+                &mut default_error_handler,
+            );
+            if alpha < 1.0 {
+                scene.pop_layer();
+            }
+            let transform = to_affine(&pattern.transform())
+                * Affine::translate((rect.x() as f64, rect.y() as f64));
+            Some((Paint::Pattern(Pattern::new(scene, tile)), transform))
+        }
     }
 }
 

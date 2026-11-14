@@ -145,6 +145,8 @@ fn anyrender_paint_to_vello_hybrid_paint<'a>(
 
         // TODO: custom paint
         Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
+        // Patterns are drawn with `fill_pattern_tiles`
+        Paint::Pattern(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
     }
 }
 
@@ -467,9 +469,21 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
+        let paint: anyrender::PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            anyrender::stroke_pattern_tiles(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+            );
+            return;
+        }
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
-        let paint = self.convert_paint(paint.into());
+        let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
@@ -484,9 +498,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         brush_transform: Option<Affine>,
         shape: &impl Shape,
     ) {
+        let paint: anyrender::PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            anyrender::fill_pattern_tiles(self, pattern, style, transform, brush_transform, shape);
+            return;
+        }
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
-        let paint = self.convert_paint(paint.into());
+        let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));

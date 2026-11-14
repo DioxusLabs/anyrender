@@ -184,6 +184,8 @@ impl ResourceCollector {
             }
             Paint::Resource(_) => None,
             Paint::Custom(_) => None,
+            // TODO: serialize the pattern's scene
+            Paint::Pattern(_) => None,
         }
     }
 

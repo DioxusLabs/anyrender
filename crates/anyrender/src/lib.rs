@@ -43,7 +43,6 @@
 
 use kurbo::{Affine, Rect, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
-use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
 pub mod filters;
@@ -60,6 +59,8 @@ mod null_backend;
 pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
+mod pattern;
+pub use pattern::*;
 
 mod resource_id;
 pub use resource_id::ResourceId;
@@ -295,83 +296,7 @@ pub trait PaintScene: RenderContext {
 
     /// Append a recorded Scene Fragment to the current scene
     fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
-        for cmd in scene.commands {
-            match cmd {
-                RenderCommand::PushLayer(cmd) => self.push_layer(
-                    cmd.fill,
-                    cmd.blend,
-                    cmd.alpha,
-                    scene_transform * cmd.transform,
-                    &cmd.clip,
-                    cmd.filter,
-                    cmd.backdrop_filter,
-                ),
-                RenderCommand::PushClipLayer(cmd) => {
-                    self.push_clip_layer(cmd.fill, scene_transform * cmd.transform, &cmd.clip)
-                }
-                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer(
-                    cmd.fill,
-                    cmd.mode,
-                    scene_transform * cmd.transform,
-                    &cmd.clip,
-                ),
-                RenderCommand::PopLayer => self.pop_layer(),
-                RenderCommand::Stroke(cmd) => self.stroke(
-                    &cmd.style,
-                    scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_transform,
-                    &cmd.shape,
-                ),
-                RenderCommand::Fill(cmd) => self.fill(
-                    cmd.fill,
-                    scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_transform,
-                    &cmd.shape,
-                ),
-                RenderCommand::GlyphRun(cmd) => self.draw_glyphs(
-                    &cmd.font_data,
-                    cmd.font_size,
-                    cmd.hint,
-                    &cmd.normalized_coords,
-                    cmd.embolden,
-                    &cmd.style,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_alpha,
-                    scene_transform * cmd.transform,
-                    cmd.glyph_transform,
-                    cmd.glyphs.into_iter(),
-                ),
-                RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
-                    scene_transform * cmd.transform,
-                    &cmd.box_shape,
-                    cmd.offset,
-                    cmd.spread,
-                    cmd.std_dev,
-                    cmd.color,
-                    cmd.kind,
-                ),
-            }
-        }
+        scene.replay(self, scene_transform);
     }
 
     /// Utility method to draw an image at it's natural size. For more advanced image drawing use the `fill` method

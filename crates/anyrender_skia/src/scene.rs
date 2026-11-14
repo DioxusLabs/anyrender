@@ -172,7 +172,9 @@ impl SkiaScenePainter<'_> {
             }
 
             // Render unsupported custom paints as transparent
-            anyrender::Paint::Resource(_) | anyrender::Paint::Custom(_) => {
+            anyrender::Paint::Resource(_)
+            | anyrender::Paint::Custom(_)
+            | anyrender::Paint::Pattern(_) => {
                 self.cache.paint.set_color4f(
                     sk_peniko::color4f_from_alpha_color(AlphaColor::TRANSPARENT),
                     &ColorSpace::new_srgb(),
@@ -546,6 +548,18 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        if let anyrender::Paint::Pattern(pattern) = brush {
+            anyrender::stroke_pattern_tiles(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+            );
+            return;
+        }
         self.set_matrix(transform);
 
         self.reset_paint();
@@ -562,6 +576,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        if let anyrender::Paint::Pattern(pattern) = brush {
+            anyrender::fill_pattern_tiles(self, pattern, style, transform, brush_transform, shape);
+            return;
+        }
         self.set_matrix(transform);
 
         self.reset_paint();
