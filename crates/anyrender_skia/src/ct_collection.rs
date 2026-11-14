@@ -81,37 +81,63 @@ fn postscript_name(font: &FontRef<'_>) -> Option<String> {
     Some(name.chars().collect())
 }
 
-/// Opens face `font.index` of a collection, or `None` if CoreText cannot open it from the bytes or
-/// no CoreText face can be matched to it by PostScript name.
-pub(crate) fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
-    let face = FontRef::from_index(font.data.data(), font.index).ok()?;
-    // Without a name the index is no guide: a variable face has a descriptor per named instance.
-    let name = Some(postscript_name(&face)?);
+/// CoreText's descriptors for every face of one collection, built once since CoreText has to
+/// make one for every named instance of every variable face (1053 for `ADTNumeric.ttc`).
+pub(crate) struct CollectionDescriptors {
+    descriptors: CFRetained<CFArray>,
+    names: Vec<Option<String>>,
+}
 
-    let data = cf_data_no_copy(&font.data)?;
-    let descriptors =
-        unsafe { CFRetained::from_raw(CTFontManagerCreateFontDescriptorsFromData(&data)?) };
-    let descriptor = |i: CFIndex| unsafe { &*descriptors.value_at_index(i).cast::<CFType>() };
-    let matches = |i: CFIndex| descriptor_postscript_name(descriptor(i)) == name;
+impl CollectionDescriptors {
+    /// `None` if CoreText cannot open the collection from the bytes.
+    pub(crate) fn new(blob: &Blob<u8>) -> Option<Self> {
+        let data = cf_data_no_copy(blob)?;
+        let descriptors =
+            unsafe { CFRetained::from_raw(CTFontManagerCreateFontDescriptorsFromData(&data)?) };
+        let mut collection = Self {
+            descriptors,
+            names: Vec::new(),
+        };
+        collection.names = (0..collection.descriptors.count())
+            .map(|i| descriptor_postscript_name(collection.descriptor(i)))
+            .collect();
+        Some(collection)
+    }
 
-    // CoreText returns the faces in collection order, but gives a variable face one descriptor
-    // per named instance, so search by PostScript name where the index misses.
-    let count = descriptors.count();
-    let index = font.index as CFIndex;
-    let found = if index < count && matches(index) {
-        index
-    } else {
-        (0..count).find(|&i| matches(i))?
-    };
+    fn descriptor(&self, index: CFIndex) -> &CFType {
+        unsafe { &*self.descriptors.value_at_index(index).cast::<CFType>() }
+    }
 
-    let ct_font = unsafe {
-        CFRetained::from_raw(CTFontCreateWithFontDescriptor(
-            descriptor(found),
-            0.0,
-            std::ptr::null(),
-        )?)
-    };
-    unsafe { Typeface::from_ct_font(CFRetained::as_ptr(&ct_font).as_ptr().cast()) }
+    /// Opens face `font.index`, or `None` if no CoreText face can be matched to it by PostScript
+    /// name. `font.data` must be the blob the descriptors were made from.
+    pub(crate) fn typeface(&self, font: &FontData) -> Option<Typeface> {
+        let face = FontRef::from_index(font.data.data(), font.index).ok()?;
+        // Without a name the index is no guide: a variable face has a descriptor per named instance.
+        let name = Some(postscript_name(&face)?);
+
+        // CoreText returns the faces in collection order, but gives a variable face one
+        // descriptor per named instance, so search by PostScript name where the index misses.
+        let index = font.index as usize;
+        let found = if self.names.get(index) == Some(&name) {
+            index
+        } else {
+            self.names.iter().position(|n| *n == name)?
+        };
+
+        let ct_font = unsafe {
+            CFRetained::from_raw(CTFontCreateWithFontDescriptor(
+                self.descriptor(found as CFIndex),
+                0.0,
+                std::ptr::null(),
+            )?)
+        };
+        unsafe { Typeface::from_ct_font(CFRetained::as_ptr(&ct_font).as_ptr().cast()) }
+    }
+}
+
+#[cfg(test)]
+fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
+    CollectionDescriptors::new(&font.data)?.typeface(font)
 }
 
 #[cfg(test)]
@@ -200,9 +226,12 @@ mod tests {
             else {
                 continue;
             };
+            let descriptors = CollectionDescriptors::new(&blob)
+                .unwrap_or_else(|| panic!("{}: not opened", path.display()));
             for index in 0..faces.len() {
                 let what = format!("{} {index}", path.display());
-                let typeface = typeface_from_collection(&FontData::new(blob.clone(), index))
+                let typeface = descriptors
+                    .typeface(&FontData::new(blob.clone(), index))
                     .unwrap_or_else(|| panic!("{what}: not opened"));
                 let face = FontRef::from_index(blob.data(), index).unwrap();
                 assert_eq!(
@@ -282,9 +311,9 @@ mod cache_tests {
         let bytes = Arc::new(std::fs::read("/System/Library/Fonts/Menlo.ttc").unwrap());
         let weak = Arc::downgrade(&bytes);
         let font = FontData::new(Blob::new(bytes), 2);
-        let old = skia_safe::graphics::set_typeface_cache_count_limit(0);
+        // Not restored: another test may be relying on the limit of 0 at the same time.
+        skia_safe::graphics::set_typeface_cache_count_limit(0);
         let typeface = typeface_from_collection(&font).unwrap();
-        skia_safe::graphics::set_typeface_cache_count_limit(old);
         drop(font);
         assert_eq!(typeface.post_script_name().as_deref(), Some("Menlo-Italic"));
         assert!(weak.upgrade().is_some());
