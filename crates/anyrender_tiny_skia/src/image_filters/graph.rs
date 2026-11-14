@@ -399,7 +399,14 @@ pub fn apply<I>(
                     demultiply_alpha(pixmap.data_mut().as_rgba_mut());
                 }
                 // Edge modes see the edges of the filter region, not of the rounded-out layer.
-                if let Some(mut sub) = pixmap.clone_rect(full) {
+                let covers_pixmap = full.x() == 0
+                    && full.y() == 0
+                    && full.width() == pixmap.width()
+                    && full.height() == pixmap.height();
+                if covers_pixmap {
+                    convolve_matrix::apply(kernel, image_mut(&mut pixmap));
+                } else if let Some(mut sub) = pixmap.clone_rect(full) {
+                    // TODO: convolve the region in place instead of copying it out and back.
                     convolve_matrix::apply(kernel, image_mut(&mut sub));
                     replace_region(&mut pixmap, full, &sub);
                 }
