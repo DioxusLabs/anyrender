@@ -938,16 +938,21 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
                 turbulence_filter.base_frequency_x,
                 turbulence_filter.base_frequency_y,
             );
-            // TODO: `stitch_tiles` needs the primitive subregion, which Skia takes as the tile
-            // size. The filter API doesn't carry subregions yet.
+            // Skia stitches over a tile the size of the primitive subregion.
+            let tile_size = node
+                .subregion
+                .filter(|_| turbulence_filter.stitch_tiles)
+                .map(|r| {
+                    skia_safe::ISize::new(r.width().round() as i32, r.height().round() as i32)
+                });
             let num_octaves = turbulence_filter.num_octaves as usize;
             let seed = turbulence_filter.seed as f32;
             let shader = match turbulence_filter.turbulence_type {
                 TurbulenceType::FractalNoise => {
-                    shaders::fractal_noise(base_frequency, num_octaves, seed, None)
+                    shaders::fractal_noise(base_frequency, num_octaves, seed, tile_size)
                 }
                 TurbulenceType::Turbulence => {
-                    shaders::turbulence(base_frequency, num_octaves, seed, None)
+                    shaders::turbulence(base_frequency, num_octaves, seed, tile_size)
                 }
             };
             shader.and_then(|shader| image_filters::shader(shader, None))
@@ -1050,15 +1055,33 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
         // These require resources or bounds that aren't available at this layer, so they are
         // not yet implemented.
         // - `Image` needs to resolve an external image by id from a resource registry.
-        // - `Tile` needs the filter primitive subregion (src/dst rects) to tile into.
         FilterEffect::Image(_external_image_source) => None,
-        FilterEffect::Tile => None,
+        FilterEffect::Tile => {
+            // Like `resolve_input`, which reads a missing input as the source graphic.
+            let input_subregion = match node.inputs.primary {
+                Some(FilterInput::Result(input_id)) => {
+                    filter.nodes()[input_id.0 as usize].subregion
+                }
+                Some(FilterInput::Source(_)) | None => None,
+            };
+            match (input_subregion, node.subregion) {
+                (Some(src), Some(dst)) => {
+                    image_filters::tile(sk_kurbo::rect_from(src), sk_kurbo::rect_from(dst), input)
+                }
+                _ => None,
+            }
+        }
     };
 
     // If we do not implement given type of filter then the match statement above returns None
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
-    (filter.or(input_clone), color_space)
+    let filter = filter.or(input_clone);
+    let filter = match node.subregion {
+        Some(subregion) => image_filters::crop(sk_kurbo::rect_from(subregion), None, filter),
+        None => filter,
+    };
+    (filter, color_space)
 }
 
 /// Convert an anyrender displacement-map [`ColorChannel`] to the corresponding Skia channel.
