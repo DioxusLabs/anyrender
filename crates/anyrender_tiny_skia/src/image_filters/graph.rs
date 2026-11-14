@@ -316,6 +316,7 @@ pub fn apply<I>(
                     CompositeOperator::Out => Some(tiny_skia::BlendMode::SourceOut),
                     CompositeOperator::Atop => Some(tiny_skia::BlendMode::SourceAtop),
                     CompositeOperator::Xor => Some(tiny_skia::BlendMode::Xor),
+                    CompositeOperator::Lighter => Some(tiny_skia::BlendMode::Plus),
                     CompositeOperator::Arithmetic(_) => None,
                 };
                 let pixmap = match (blend_mode, op) {

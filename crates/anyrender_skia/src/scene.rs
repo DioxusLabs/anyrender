@@ -898,6 +898,7 @@ fn convert_filter_effect(
                     CompositeOperator::Out => SkBlendMode::SrcOut,
                     CompositeOperator::Atop => SkBlendMode::SrcATop,
                     CompositeOperator::Xor => SkBlendMode::Xor,
+                    CompositeOperator::Lighter => SkBlendMode::Plus,
                     CompositeOperator::Arithmetic(_) => unreachable!(),
                 };
                 image_filters::blend(mode, secondary, input, None)
