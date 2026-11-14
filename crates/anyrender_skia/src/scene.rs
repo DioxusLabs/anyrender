@@ -6,9 +6,7 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{
-    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterInput,
-};
+use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
 use anyrender::{PaintScene, PaintShape, RenderContext};
 use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
@@ -761,11 +759,6 @@ fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
     convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
-/// The filter region of `node`, which clips its inputs and its result.
-fn node_region(filter: &Filter, node: &FilterGraphNode) -> Option<kurbo::Rect> {
-    node.region.or(filter.region())
-}
-
 /// Resolves an input of the primitive `id` from the results of the primitives before it, converted
 /// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
 /// The source graphic, and results of primitives with a different filter region, are clipped to
@@ -776,17 +769,15 @@ fn resolve_input(
     id: FilterId,
     input: &Option<FilterInput>,
     color_space: FilterColorSpace,
-    region: Option<kurbo::Rect>,
+    region: kurbo::Rect,
 ) -> Option<ImageFilter> {
-    let crop = |input: Option<ImageFilter>| match region {
-        Some(r) => skia_safe::image_filters::crop(sk_kurbo::rect_from(r), None, input),
-        None => input,
+    let crop = |input: Option<ImageFilter>| {
+        skia_safe::image_filters::crop(sk_kurbo::rect_from(region), None, input)
     };
     let source = (crop(None), FilterColorSpace::Srgb);
     let result = |id: u16| match results.get(id as usize) {
         Some((result, result_color_space)) => {
-            let result_region = node_region(filter, &filter.nodes()[id as usize]);
-            let result = match result_region == region {
+            let result = match filter.nodes()[id as usize].region == region {
                 true => result.clone(),
                 false => crop(result.clone()),
             };
@@ -837,7 +828,7 @@ fn convert_filter_effect(
 ) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
     let color_space = node.color_space;
-    let region = node_region(filter, node);
+    let region = node.region;
     let input = resolve_input(
         filter,
         results,
@@ -856,11 +847,8 @@ fn convert_filter_effect(
         color_space,
         region,
     );
-    // The result is clipped to the primitive subregion and the filter region.
-    let crop = match (node.subregion, region) {
-        (Some(subregion), Some(region)) => Some(subregion.intersect(region)),
-        (subregion, region) => subregion.or(region),
-    };
+    // The result is clipped to the primitive subregion, which is within the filter region.
+    let crop = node.subregion;
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -1042,12 +1030,10 @@ fn convert_filter_effect(
                 turbulence_filter.base_frequency_y,
             );
             // Skia stitches over a tile the size of the primitive subregion.
-            let tile_size = node
-                .subregion
-                .filter(|_| turbulence_filter.stitch_tiles)
-                .map(|r| {
-                    skia_safe::ISize::new(r.width().round() as i32, r.height().round() as i32)
-                });
+            let tile_size = turbulence_filter.stitch_tiles.then(|| {
+                let r = node.subregion;
+                skia_safe::ISize::new(r.width().round() as i32, r.height().round() as i32)
+            });
             let num_octaves = turbulence_filter.num_octaves as usize;
             let seed = turbulence_filter.seed.trunc();
             let shader = match turbulence_filter.turbulence_type {
@@ -1160,22 +1146,21 @@ fn convert_filter_effect(
         // - `Image` needs to resolve an external image by id from a resource registry.
         FilterEffect::Image(_external_image_source) => None,
         FilterEffect::Tile => {
-            let input_subregion = match node.inputs.primary {
-                Some(FilterInput::Result(input_id)) => {
-                    filter.nodes()[input_id.0 as usize].subregion
-                }
-                None => {
-                    id.0.checked_sub(1)
-                        .and_then(|prev| filter.nodes()[prev as usize].subregion)
-                }
+            let input_node = match node.inputs.primary {
+                Some(FilterInput::Result(input_id)) => Some(input_id.0),
+                None => id.0.checked_sub(1),
                 Some(FilterInput::Source(_)) => None,
             };
-            match (input_subregion, node.subregion) {
-                (Some(src), Some(dst)) => {
-                    image_filters::tile(sk_kurbo::rect_from(src), sk_kurbo::rect_from(dst), input)
-                }
-                _ => None,
-            }
+            // The source graphic fills the filter region.
+            let src = match input_node.map(|id| &filter.nodes()[id as usize]) {
+                Some(input) if input.region == region => input.subregion,
+                _ => region,
+            };
+            image_filters::tile(
+                sk_kurbo::rect_from(src),
+                sk_kurbo::rect_from(node.subregion),
+                input,
+            )
         }
     };
 
@@ -1183,10 +1168,7 @@ fn convert_filter_effect(
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
     let filter = filter.or(input_clone);
-    let filter = match crop {
-        Some(crop) => image_filters::crop(sk_kurbo::rect_from(crop), None, filter),
-        None => filter,
-    };
+    let filter = image_filters::crop(sk_kurbo::rect_from(crop), None, filter);
     (filter, color_space)
 }
 

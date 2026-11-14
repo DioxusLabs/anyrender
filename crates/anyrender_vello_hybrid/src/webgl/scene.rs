@@ -208,7 +208,10 @@ impl PaintScene for WebGlScenePainter<'_> {
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
         let (filter, region) = match filter.as_deref().and_then(crate::common::convert_filter) {
-            Some(converted) => (Some(converted), filter.and_then(|f| f.region())),
+            Some(converted) => (
+                Some(converted),
+                filter.and_then(|f| Some(f.nodes().first()?.region)),
+            ),
             None => (None, None),
         };
         self.scene.set_transform(transform);

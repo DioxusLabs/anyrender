@@ -7,7 +7,7 @@
 //! Whether (and how faithfully) the filter is actually applied depends on the backend.
 //!
 //! Every primitive gets its resolved subregion, except `feOffset`, which (as in resvg)
-//! inherits its input's subregion and isn't clipped by its own.
+//! inherits its input's subregion.
 //!
 //! Known approximations (accepted silently):
 //!
@@ -18,8 +18,8 @@
 //! renders the group unfiltered.
 
 use anyrender::filters::{
-    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterInput,
-    FilterInputs, FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    FilterSource,
     blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     component_transfer::{
@@ -48,7 +48,7 @@ use crate::util;
 ///
 /// Returns `None` if any primitive cannot be expressed with [`FilterEffect`].
 pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Option<Filter> {
-    let mut graph = Filter::empty();
+    let mut graph = Filter::new(to_rect(filters.first()?.rect()));
     // Output of the previous filter in the chain. It acts as `SourceGraphic`
     // for the next filter.
     let mut chain_input: Option<FilterId> = None;
@@ -56,12 +56,6 @@ pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Opti
         chain_input = Some(convert_filter(&mut graph, filter, chain_input)?);
     }
     let output = chain_input?;
-    // Each filter's primitives carry its own region, so the graph's region is the union of them.
-    let region = filters
-        .iter()
-        .map(|filter| to_rect(filter.rect()))
-        .reduce(|a, b| a.union(b));
-    graph.set_region(region);
     // `Filter::add` makes each new node the output, but the result can be an
     // earlier node (e.g. a single-input `feMerge` of a named result).
     if graph.output() != output {
@@ -81,7 +75,7 @@ fn convert_filter(
     filter: &usvg::filter::Filter,
     chain_input: Option<FilterId>,
 ) -> Option<FilterId> {
-    let region = to_rect(filter.rect());
+    graph.set_region(to_rect(filter.rect()));
     let mut ctx = FilterContext {
         graph,
         chain_input,
@@ -89,7 +83,6 @@ fn convert_filter(
         results: HashMap::new(),
         color_space: FilterColorSpace::default(),
         subregion: None,
-        region,
     };
 
     let mut last: Option<FilterId> = None;
@@ -100,7 +93,7 @@ fn convert_filter(
         };
         ctx.subregion = match primitive.kind() {
             usvg::filter::Kind::Offset(_) => None,
-            _ => Some(to_rect(primitive.rect()).intersect(region)),
+            _ => Some(to_rect(primitive.rect())),
         };
         let id = convert_primitive(&mut ctx, primitive)?;
         if !primitive.result().is_empty() {
@@ -131,21 +124,14 @@ struct FilterContext<'a> {
     results: HashMap<String, FilterId>,
     /// Color space of the primitive being converted.
     color_space: FilterColorSpace,
-    /// Subregion of the primitive being converted.
+    /// Subregion of the primitive being converted, `None` for the default.
     subregion: Option<Rect>,
-    /// Region of the filter being converted.
-    region: Rect,
 }
 
 impl FilterContext<'_> {
     fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
-        self.graph.add_node(FilterGraphNode {
-            effect,
-            inputs,
-            color_space: self.color_space,
-            subregion: self.subregion,
-            region: Some(self.region),
-        })
+        self.graph
+            .add_with_subregion(effect, inputs, self.color_space, self.subregion)
     }
 
     fn resolve_input(&mut self, input: &usvg::filter::Input) -> FilterInput {
@@ -713,25 +699,23 @@ mod tests {
     }
 
     /// usvg computes the filter region in f32.
-    fn rounded(rect: Option<Rect>) -> Option<Rect> {
-        rect.map(|r| Rect::new(r.x0.round(), r.y0.round(), r.x1.round(), r.y1.round()))
+    fn rounded(r: Rect) -> Rect {
+        Rect::new(r.x0.round(), r.y0.round(), r.x1.round(), r.y1.round())
     }
 
     #[test]
     fn primitive_subregions() {
         let flood = single_node(r#"<feFlood x="10" y="20" width="30" height="5"/>"#);
-        assert_eq!(flood.subregion, Some(Rect::new(10.0, 20.0, 40.0, 25.0)));
+        assert_eq!(flood.subregion, Rect::new(10.0, 20.0, 40.0, 25.0));
 
         // Without x/y/width/height, the subregion is the filter region: by default the
         // 50x50 bounding box grown by 10% on each side.
         let blur = single_node(r#"<feGaussianBlur stdDeviation="3"/>"#);
-        assert_eq!(
-            rounded(blur.subregion),
-            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
-        );
+        assert_eq!(rounded(blur.subregion), Rect::new(-5.0, -5.0, 55.0, 55.0));
 
+        // `feOffset` inherits its input's subregion, here the source graphic's filter region.
         let offset = single_node(r#"<feOffset x="10" dx="5"/>"#);
-        assert_eq!(offset.subregion, None);
+        assert_eq!(offset.subregion, offset.region);
     }
 
     #[test]
@@ -747,11 +731,11 @@ mod tests {
             </svg>"##,
         )
         .unwrap();
-        assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 20.0, 30.0)));
+        assert_eq!(graph.nodes()[0].region, Rect::new(0.0, 0.0, 20.0, 30.0));
         // Subregions are clipped to the filter region.
         assert_eq!(
             graph.nodes()[0].subregion,
-            Some(Rect::new(10.0, 10.0, 20.0, 30.0))
+            Rect::new(10.0, 10.0, 20.0, 30.0)
         );
 
         // Without x/y/width/height, the region is the bounding box grown by 10% on each side.
@@ -765,8 +749,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            rounded(graph.region()),
-            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
+            rounded(graph.nodes()[0].region),
+            Rect::new(-5.0, -5.0, 55.0, 55.0)
         );
     }
 
@@ -786,7 +770,6 @@ mod tests {
             </svg>"##,
         )
         .unwrap();
-        assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 200.0, 200.0)));
         let regions: Vec<_> = graph
             .nodes()
             .iter()
@@ -795,8 +778,15 @@ mod tests {
         assert_eq!(
             regions,
             [
-                (None, Some(Rect::new(40.0, 40.0, 160.0, 160.0))),
-                (None, Some(Rect::new(0.0, 0.0, 200.0, 200.0))),
+                (
+                    Rect::new(40.0, 40.0, 160.0, 160.0),
+                    Rect::new(40.0, 40.0, 160.0, 160.0)
+                ),
+                // The previous filter's result is this filter's source graphic.
+                (
+                    Rect::new(0.0, 0.0, 200.0, 200.0),
+                    Rect::new(0.0, 0.0, 200.0, 200.0)
+                ),
             ]
         );
     }
@@ -818,13 +808,10 @@ mod tests {
         let [flood, tile] = graph.nodes() else {
             panic!("expected two nodes, got {:?}", graph.nodes());
         };
-        assert_eq!(flood.subregion, Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        assert_eq!(flood.subregion, Rect::new(0.0, 0.0, 10.0, 10.0));
         assert_eq!(tile.effect, FilterEffect::Tile);
         assert_eq!(tile.inputs.primary, Some(FilterInput::Result(FilterId(0))));
-        assert_eq!(
-            rounded(tile.subregion),
-            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
-        );
+        assert_eq!(rounded(tile.subregion), Rect::new(-5.0, -5.0, 55.0, 55.0));
     }
 
     #[test]
