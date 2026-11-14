@@ -11,7 +11,6 @@
 //! - Filter primitive subregions (`x`/`y`/`width`/`height` on a primitive) are ignored.
 //!   The overall filter region *is* honoured (it is used as the layer clip).
 //! - `feConvolveMatrix` `kernelUnitLength` is ignored.
-//! - `feTurbulence` `stitchTiles` is ignored.
 //!
 //! Filters that cannot be expressed at all (see [`convert_primitive`]) cause the whole
 //! conversion to fail, in which case the caller falls back to the error handler and
@@ -374,6 +373,7 @@ fn convert_primitive(
             let filter = TurbulenceFilter {
                 base_frequency_x: fe.base_frequency_x().get(),
                 base_frequency_y: fe.base_frequency_y().get(),
+                stitch_tiles: fe.stitch_tiles(),
                 num_octaves: fe.num_octaves(),
                 seed: fe.seed().max(0) as u32,
                 turbulence_type: match fe.kind() {
@@ -676,8 +676,8 @@ mod tests {
     }
 
     #[test]
-    fn turbulence_frequency_pair() {
-        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2"/>"#);
+    fn turbulence_frequency_pair_and_stitch_tiles() {
+        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2" stitchTiles="stitch"/>"#);
         let FilterEffect::Turbulence(turbulence) = node.effect else {
             panic!("expected turbulence, got {:?}", node.effect);
         };
@@ -685,6 +685,7 @@ mod tests {
             (turbulence.base_frequency_x, turbulence.base_frequency_y),
             (0.05, 0.2)
         );
+        assert!(turbulence.stitch_tiles);
     }
 
     #[test]
