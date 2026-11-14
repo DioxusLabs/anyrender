@@ -228,6 +228,7 @@ name = "anyrender_svg"
 version = "0.15.0"
 dependencies = [
  "anyrender",
+ "anyrender_skia",
  "anyrender_tiny_skia",
  "anyrender_vello_cpu",
  "image",

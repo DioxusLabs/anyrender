@@ -450,6 +450,7 @@ impl WindowRenderer for VelloWindowRenderer {
             renderer: Some(&mut state.renderer),
             device_handle: Some(&render_surface.device_handle),
             texture_handles: Some(&mut self.texture_handles),
+            pattern_scenes: Default::default(),
         });
         timer.record_time("cmd");
 

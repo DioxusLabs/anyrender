@@ -1,6 +1,7 @@
 //! SVG patterns repeat their tile across the painted shape.
 
 use anyrender::{ImageRenderer, render_to_buffer};
+use anyrender_skia::SkiaImageRenderer;
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use kurbo::Affine;
@@ -66,8 +67,13 @@ fn pattern_fill_tiny_skia() {
 }
 
 #[test]
-fn pattern_fill_tiles() {
+fn pattern_fill_vello_cpu() {
     check_fill::<VelloCpuImageRenderer>();
+}
+
+#[test]
+fn pattern_fill_skia() {
+    check_fill::<SkiaImageRenderer>();
 }
 
 fn check_transform_and_opacity<R: ImageRenderer>() {
@@ -86,8 +92,13 @@ fn pattern_transform_and_opacity_tiny_skia() {
 }
 
 #[test]
-fn pattern_transform_and_opacity_tiles() {
+fn pattern_transform_and_opacity_vello_cpu() {
     check_transform_and_opacity::<VelloCpuImageRenderer>();
+}
+
+#[test]
+fn pattern_transform_and_opacity_skia() {
+    check_transform_and_opacity::<SkiaImageRenderer>();
 }
 
 fn check_stroke<R: ImageRenderer>() {
@@ -108,6 +119,45 @@ fn pattern_stroke_tiny_skia() {
 }
 
 #[test]
-fn pattern_stroke_tiles() {
+fn pattern_stroke_vello_cpu() {
     check_stroke::<VelloCpuImageRenderer>();
+}
+
+#[test]
+fn pattern_stroke_skia() {
+    check_stroke::<SkiaImageRenderer>();
+}
+
+/// The generic tile-by-tile fallback, which vello and vello_hybrid use.
+#[test]
+fn pattern_fill_fallback_tiles() {
+    use anyrender::{PaintScene, Pattern, recording::Scene};
+    use kurbo::Rect;
+    use peniko::{Color, Fill};
+
+    let mut tile_scene = Scene::new();
+    tile_scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(255, 0, 0),
+        None,
+        &Rect::new(0.0, 0.0, 10.0, 10.0),
+    );
+    let pattern = Pattern::new(tile_scene, Rect::new(0.0, 0.0, 20.0, 20.0));
+    let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| {
+            anyrender::fill_pattern_tiles(
+                scene,
+                &pattern,
+                Fill::NonZero,
+                Affine::IDENTITY,
+                None,
+                &Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64),
+            );
+        },
+        SIZE,
+        SIZE,
+    );
+    assert_close(pixel(&buffer, 45, 65), RED);
+    assert_close(pixel(&buffer, 55, 65), CLEAR);
 }

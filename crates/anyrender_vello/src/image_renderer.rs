@@ -95,6 +95,7 @@ impl ImageRenderer for VelloImageRenderer {
             renderer: Some(&mut self.vello_renderer),
             device_handle: Some(&self.buffer_renderer.device_handle),
             texture_handles: Some(&mut self.texture_handles),
+            pattern_scenes: Default::default(),
         });
 
         for handle in self.texture_handles.values() {
