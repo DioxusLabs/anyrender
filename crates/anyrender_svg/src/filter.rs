@@ -52,8 +52,9 @@ pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Opti
     // Output of the previous filter in the chain. It acts as `SourceGraphic`
     // for the next filter.
     let mut chain_input: Option<FilterId> = None;
+    let chained = filters.len() > 1;
     for filter in filters {
-        chain_input = Some(convert_filter(&mut graph, filter, chain_input)?);
+        chain_input = Some(convert_filter(&mut graph, filter, chain_input, chained)?);
     }
     let output = chain_input?;
     // Each filter's primitives are clipped to its own region below, so the graph's region is
@@ -81,6 +82,7 @@ fn convert_filter(
     graph: &mut Filter,
     filter: &usvg::filter::Filter,
     chain_input: Option<FilterId>,
+    chained: bool,
 ) -> Option<FilterId> {
     let region = to_rect(filter.rect());
     let mut ctx = FilterContext {
@@ -107,6 +109,19 @@ fn convert_filter(
             ctx.results.insert(primitive.result().to_string(), id);
         }
         last = Some(id);
+    }
+
+    // In a chain the graph's region is the union of every filter's region, so a final
+    // `feOffset` (which has no subregion) needs its own filter's region as an explicit clip.
+    if chained
+        && let Some(primitive) = filter.primitives().last()
+        && matches!(primitive.kind(), usvg::filter::Kind::Offset(_))
+    {
+        ctx.subregion = Some(region);
+        last = Some(ctx.add(
+            FilterEffect::Offset(Vec2::ZERO),
+            FilterInputs::single(FilterInput::Result(last?)),
+        ));
     }
 
     last
@@ -764,6 +779,35 @@ mod tests {
         assert_eq!(
             rounded(graph.region()),
             Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
+        );
+    }
+
+    #[test]
+    fn chained_offset_is_clipped_to_its_filter_region() {
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+                <g filter="url(#small) url(#large)">
+                    <filter id="small" filterUnits="userSpaceOnUse" x="40" y="40" width="120" height="120">
+                        <feOffset/>
+                    </filter>
+                    <filter id="large" filterUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+                        <feOffset/>
+                    </filter>
+                    <rect width="200" height="200" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 200.0, 200.0)));
+        let subregions: Vec<_> = graph.nodes().iter().map(|n| n.subregion).collect();
+        assert_eq!(
+            subregions,
+            [
+                None,
+                Some(Rect::new(40.0, 40.0, 160.0, 160.0)),
+                None,
+                Some(Rect::new(0.0, 0.0, 200.0, 200.0)),
+            ]
         );
     }
 
