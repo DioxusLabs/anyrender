@@ -32,8 +32,9 @@ Currently existing backends are:
 - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu) which draws using [vello_cpu](https://docs.rs/vello_cpu)
 - [anyrender_vello](https://docs.rs/anyrender_vello) which draws using [vello](https://docs.rs/vello)
 - [anyrender_skia](https://crates.io/crates/anyrender_skia) which draws using Skia (via the [skia-safe](https://github.com/rust-skia/rust-skia) crate)
+- [anyrender_tiny_skia](https://docs.rs/anyrender_tiny_skia) which draws using [tiny-skia](https://docs.rs/tiny-skia)
 
-Contributions for other backends (tiny-skia, femtovg, etc) would be very welcome.
+Contributions for other backends (femtovg, etc) would be very welcome.
 
 ### Content renderers
 
@@ -48,6 +49,7 @@ These crates sit on top of the the AnyRender abstraction, and allow you render c
 - [wgpu_context](https://docs.rs/wgpu_context) is a utility for managing `Device`s and other WGPU types
 - [pixels_window_renderer](https://docs.rs/pixels_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [pixels](https://docs.rs/pixels) crate.
 - [softbuffer_window_renderer](https://docs.rs/softbuffer_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [softbuffer](https://docs.rs/softbuffer) crate.
+- [image_filters_types](https://docs.rs/image_filters_types) defines the filter graph types (`Filter`, `FilterEffect` and the primitive parameters) that `anyrender::filters` re-exports, generic over the content of `feImage`.
 
 
 ## Version compatibility

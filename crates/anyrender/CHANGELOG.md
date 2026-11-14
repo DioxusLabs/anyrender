@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `ColorMatrix::SOURCE_ALPHA` and `ColorMatrix::LUMINANCE_TO_ALPHA` constants.
 - `PaintScene::push_mask_layer` with `MaskMode::Alpha` and `MaskMode::Luminance`, and the recorded `MaskLayerCommand` (breaking for `PaintScene` implementors).
+- `Filter::region`, an optional filter region that clips the source graphic and every primitive result, and is the default subregion of primitives that fill an area. `None` (the default) is unbounded.
 
 ### Changed
 
+- The filter types now live in the new `image_filters_types` crate, generic over the content of `feImage` primitives, and `anyrender::filters` re-exports them. `Filter`, `FilterGraphNode` and `FilterEffect` are aliases that use `ExternalImageSource` for `feImage`, so existing code keeps compiling.
 - `Filter::add` now makes the added primitive the graph's output, so graphs built with `Filter::empty` and `add` output their last node instead of their first.
 
 ## [0.14.0] - 2026-10-03

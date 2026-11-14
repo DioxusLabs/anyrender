@@ -4,7 +4,7 @@ use anyrender::{
     Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape, RenderContext,
 };
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Stroke};
+use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
 use vello_cpu::{PaintType, Pixmap};
 
@@ -111,6 +111,8 @@ impl GlyphOriginSnap {
 enum LayerKind {
     Layer,
     Clip,
+    /// A filter layer whose input and output are clipped to its filter region.
+    FilterRegionLayer,
 }
 
 pub struct VelloCpuScenePainter {
@@ -197,19 +199,28 @@ impl PaintScene for VelloCpuScenePainter {
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
         #[cfg(feature = "filters")]
-        let filter = filter
+        let (filter, region) = match filter
+            .as_deref()
             .and_then(crate::filters::convert_filter)
-            .filter(|_| cfg!(not(feature = "multithreading")));
+            .filter(|_| cfg!(not(feature = "multithreading")))
+        {
+            Some(converted) => (Some(converted), filter.and_then(|f| f.region())),
+            None => (None, None),
+        };
 
         #[cfg(not(feature = "filters"))]
-        let filter = {
+        let (filter, region): (_, Option<Rect>) = {
             let _ = filter;
-            None
+            (None, None)
         };
 
         self.render_ctx.set_transform(transform);
+        let region = region.map(|region| region.to_path(DEFAULT_TOLERANCE));
+        if let Some(region) = &region {
+            self.render_ctx.set_fill_rule(Fill::NonZero);
+            self.render_ctx.push_clip_path(region);
+        }
         self.render_ctx.set_fill_rule(fill);
-        self.layer_stack.push(LayerKind::Layer);
         self.render_ctx.push_layer(
             Some(&clip.into_bez_path(DEFAULT_TOLERANCE)),
             Some(blend),
@@ -217,6 +228,14 @@ impl PaintScene for VelloCpuScenePainter {
             None,
             filter,
         );
+        match &region {
+            Some(region) => {
+                self.render_ctx.set_fill_rule(Fill::NonZero);
+                self.render_ctx.push_clip_path(region);
+                self.layer_stack.push(LayerKind::FilterRegionLayer);
+            }
+            None => self.layer_stack.push(LayerKind::Layer),
+        }
     }
 
     fn push_mask_layer_shape(
@@ -265,6 +284,11 @@ impl PaintScene for VelloCpuScenePainter {
         match self.layer_stack.pop() {
             Some(LayerKind::Layer) => self.render_ctx.pop_layer(),
             Some(LayerKind::Clip) => self.render_ctx.pop_clip(),
+            Some(LayerKind::FilterRegionLayer) => {
+                self.render_ctx.pop_clip();
+                self.render_ctx.pop_layer();
+                self.render_ctx.pop_clip();
+            }
             None => {}
         }
     }
