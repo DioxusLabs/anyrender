@@ -1,0 +1,15 @@
+[package]
+name = "anyrender_image_filters"
+description = "CPU implementations of SVG filter primitives for anyrender backends"
+version = "0.1.0"
+documentation = "https://docs.rs/anyrender_image_filters"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyrender = { workspace = true }
+peniko = { workspace = true }
+bytemuck = "1"
+rgb = "0.8"
