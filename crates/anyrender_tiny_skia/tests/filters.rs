@@ -3,10 +3,12 @@ use std::sync::Arc;
 use anyrender::filters::{
     Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
+    composite::CompositeOperator,
+    turbulence::{TurbulenceFilter, TurbulenceType},
 };
 use anyrender::{PaintScene, render_to_buffer};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
-use kurbo::{Affine, Rect};
+use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
 
 const SIZE: u32 = 16;
@@ -122,6 +124,40 @@ fn results_are_clipped_to_subregions() {
 }
 
 #[test]
+fn results_are_clipped_to_the_filter_region() {
+    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    filter.add(
+        FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 1, 1), [0, 255, 0, 255]);
+    assert_close(pixel(&buffer, 9, 9), [0, 0, 0, 0]);
+}
+
+#[test]
+fn source_graphic_is_clipped_to_the_filter_region() {
+    let half = Rect::new(0.0, 0.0, 8.0, SIZE as f64);
+    let mut filter = Filter::empty().with_region(Some(half));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(8.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    // The source right of the region is not shifted into it.
+    assert_close(pixel(&buffer, 4, 8), [0, 0, 0, 0]);
+
+    let mut filter = Filter::empty().with_region(Some(half.with_origin((8.0, 0.0))));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 10, 8), [0, 0, 0, 0]);
+    assert_close(pixel(&buffer, 13, 8), [255, 0, 0, 255]);
+}
+
+#[test]
 fn tile_repeats_its_input_subregion() {
     let mut filter = Filter::empty();
     let flood = filter.add_node(green_flood(Rect::new(0.0, 0.0, 4.0, 4.0)));
@@ -134,4 +170,51 @@ fn tile_repeats_its_input_subregion() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 14, 2), [0, 255, 0, 255]);
+}
+
+fn turbulence(seed: f32) -> Vec<u8> {
+    let mut filter = Filter::empty();
+    filter.add(
+        FilterEffect::Turbulence(TurbulenceFilter {
+            base_frequency_x: 0.1,
+            base_frequency_y: 0.1,
+            num_octaves: 2,
+            seed,
+            turbulence_type: TurbulenceType::Turbulence,
+            stitch_tiles: false,
+        }),
+        FilterInputs::NONE,
+    );
+    render_filter(filter)
+}
+
+#[test]
+fn turbulence_seed_is_truncated_toward_zero() {
+    assert_eq!(turbulence(-5.7), turbulence(-5.0));
+    assert_eq!(turbulence(3.9), turbulence(3.0));
+    assert_ne!(turbulence(-5.0), turbulence(0.0));
+    assert_ne!(turbulence(-5.0), turbulence(5.0));
+}
+
+#[test]
+fn composite_lighter_adds_its_inputs() {
+    let mut filter = Filter::empty();
+    let flood = |filter: &mut Filter, color| {
+        filter.add_node(FilterGraphNode {
+            effect: FilterEffect::Flood(color),
+            inputs: FilterInputs::NONE,
+            color_space: FilterColorSpace::Srgb,
+            subregion: None,
+        })
+    };
+    let a = flood(&mut filter, Color::from_rgb8(100, 200, 0));
+    let b = flood(&mut filter, Color::from_rgb8(100, 100, 50));
+    filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Composite(CompositeOperator::Lighter),
+        inputs: FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+    });
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [200, 255, 50, 255]);
 }

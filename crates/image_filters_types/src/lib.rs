@@ -57,10 +57,8 @@ pub struct Filter<I> {
     /// This is the axis-aligned bounding box of the expansion region (centered at origin),
     /// which can be transformed to device space when needed.
     expansion_rect: Rect,
-    // TODO: Add bounds restricting where the filter applies.
-    // Optional bounds restricting where the filter applies.
-    // If `None`, the filter applies to the entire filtered element.
-    // pub bounds: Option<Rect>,
+    /// The filter region. See [`Self::region`].
+    region: Option<Rect>,
 }
 
 impl<I> Default for Filter<I> {
@@ -76,6 +74,43 @@ impl<I> Filter<I> {
             primitives: SmallVec::new(),
             output: FilterId(0),
             expansion_rect: Rect::ZERO,
+            region: None,
+        }
+    }
+
+    /// Set the filter region. See [`Self::region`].
+    pub fn with_region(mut self, region: Option<Rect>) -> Self {
+        self.region = region;
+        self
+    }
+
+    /// Set the filter region. See [`Self::region`].
+    pub fn set_region(&mut self, region: Option<Rect>) {
+        self.region = region;
+    }
+
+    /// The filter region (`x`/`y`/`width`/`height` on an SVG `<filter>`), in the user space of
+    /// the filtered layer's transform, the same space as [`FilterGraphNode::subregion`].
+    ///
+    /// The region is a hard clip on the filter: the source graphic is clipped to it before
+    /// any primitive reads it, every primitive's result is clipped to it, and primitives
+    /// without an explicit subregion that fill an area (such as flood, turbulence and image)
+    /// fill the region.
+    ///
+    /// `None` means the filter is unbounded (as for CSS filter functions), and is limited only
+    /// by the clip of the layer it is applied to.
+    ///
+    /// See: <https://www.w3.org/TR/filter-effects-1/#FilterEffectsRegion>
+    pub fn region(&self) -> Option<Rect> {
+        self.region
+    }
+
+    /// The area a primitive's result covers: its subregion (or `None`, all of it) clipped to the
+    /// filter region.
+    pub fn clip_to_region(&self, subregion: Option<Rect>) -> Option<Rect> {
+        match (subregion, self.region) {
+            (Some(subregion), Some(region)) => Some(subregion.intersect(region)),
+            (subregion, region) => subregion.or(region),
         }
     }
 
@@ -228,7 +263,7 @@ impl<I: Clone> Filter<I> {
     /// `SourceGraphic`.
     pub fn without_noops(&self) -> Self {
         if self.primitives.is_empty() {
-            return Self::empty();
+            return Self::empty().with_region(self.region);
         }
 
         // A missing input is the source graphic.
@@ -280,7 +315,9 @@ impl<I: Clone> Filter<I> {
         }
 
         let output = match resolve(&aliases, &Some(FilterInput::Result(self.output))) {
-            FilterInput::Source(FilterSource::SourceGraphic) => return Self::empty(),
+            FilterInput::Source(FilterSource::SourceGraphic) => {
+                return Self::empty().with_region(self.region);
+            }
             FilterInput::Source(_) => return self.clone(),
             FilterInput::Result(id) => id,
         };
@@ -304,7 +341,7 @@ impl<I: Clone> Filter<I> {
             }
         }
 
-        let mut graph = Self::empty();
+        let mut graph = Self::empty().with_region(self.region);
         let mut new_ids = vec![FilterId(0); self.primitives.len()];
         for (index, node) in self.primitives.iter().enumerate() {
             if !kept[index] {
@@ -425,6 +462,25 @@ mod without_noops_tests {
     }
 
     #[test]
+    fn keeps_the_filter_region() {
+        let region = Some(Rect::new(0.0, 0.0, 10.0, 10.0));
+        let mut filter = Filter::empty().with_region(region);
+        let flood = filter.add(
+            FilterEffect::Flood(AlphaColor::TRANSPARENT),
+            FilterInputs::NONE,
+        );
+        let blend = filter.add(
+            FilterEffect::Blend(BlendMode::Normal),
+            FilterInputs::dual(SOURCE, FilterInput::Result(flood)),
+        );
+        filter.add(
+            FilterEffect::blur(2.0),
+            FilterInputs::single(FilterInput::Result(blend)),
+        );
+        assert_eq!(filter.without_noops().region(), region);
+    }
+
+    #[test]
     fn empty_graph_stays_empty() {
         assert!(Filter::empty().without_noops().nodes().is_empty());
     }
@@ -440,6 +496,8 @@ pub struct FilterGraphNode<I> {
     /// The filter primitive subregion (`x`/`y`/`width`/`height` in SVG), in the same user space
     /// as the filter's other coordinates. The result is clipped to it, and [`FilterEffect::Tile`]
     /// uses its input's subregion as the tile.
+    ///
+    /// The subregion is clipped to the filter region ([`Filter::region`]).
     ///
     /// `None` means the union of the input primitives' subregions, or the whole filter region
     /// for primitives without primitive inputs (such as flood, turbulence, or a source graphic
@@ -836,6 +894,27 @@ impl<I> FilterEffect<I> {
 }
 
 #[cfg(test)]
+mod region_tests {
+    type Filter = super::Filter<()>;
+    use kurbo::Rect;
+
+    #[test]
+    fn clip_to_region() {
+        let region = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let subregion = Rect::new(5.0, 5.0, 20.0, 20.0);
+        let unbounded = Filter::empty();
+        let bounded = Filter::empty().with_region(Some(region));
+        assert_eq!(unbounded.clip_to_region(None), None);
+        assert_eq!(unbounded.clip_to_region(Some(subregion)), Some(subregion));
+        assert_eq!(bounded.clip_to_region(None), Some(region));
+        assert_eq!(
+            bounded.clip_to_region(Some(subregion)),
+            Some(Rect::new(5.0, 5.0, 10.0, 10.0))
+        );
+    }
+}
+
+#[cfg(test)]
 mod offset_expansion_tests {
     type FilterEffect = super::FilterEffect<()>;
     use kurbo::{Rect, Vec2};
@@ -893,6 +972,11 @@ pub mod composite {
         /// Shows source where destination is transparent and vice versa,
         /// but not where both are opaque.
         Xor,
+        /// Source plus destination (`lighter` in SVG and CSS).
+        ///
+        /// Result = source + destination, clamped. The same as
+        /// `Arithmetic { k1: 0, k2: 1, k3: 1, k4: 0 }`.
+        Lighter,
 
         Arithmetic(ArithmeticCompositeOperator),
     }
@@ -1013,8 +1097,9 @@ pub mod turbulence {
         pub base_frequency_y: f32,
         /// Number of octaves for fractal noise. More octaves add finer detail.
         pub num_octaves: u32,
-        /// Random seed for reproducible noise generation.
-        pub seed: u32,
+        /// Seed for the pseudo-random number generator. As with SVG's `seed`, it is truncated
+        /// toward zero, and zero and negative values are valid seeds.
+        pub seed: f32,
         /// Type of noise: smooth fractal or more chaotic turbulence.
         pub turbulence_type: TurbulenceType,
         /// Whether to adjust the frequencies so that the noise tiles seamlessly across the

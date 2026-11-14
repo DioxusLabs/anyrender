@@ -158,3 +158,82 @@ fn rect_clip_around_a_filter_still_clips_later_draws() {
     assert_eq!(pixel(50, 175), [0, 0, 255, 255]);
     assert_eq!(pixel(150, 175)[3], 0);
 }
+
+/// Draws `filter` over a full-size layer containing an opaque red square.
+fn red_layer(scene: &mut VelloCpuScenePainter, filter: Filter) {
+    let rect = Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64);
+    scene.push_layer(
+        Fill::NonZero,
+        BlendMode::default(),
+        1.0,
+        Affine::IDENTITY,
+        &rect,
+        Some(Arc::new(filter)),
+        None,
+    );
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(255, 0, 0),
+        None,
+        &rect,
+    );
+    scene.pop_layer();
+}
+
+#[test]
+fn results_are_clipped_to_the_filter_region() {
+    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    filter.add(
+        FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
+        FilterInputs::NONE,
+    );
+    let pixel = render(|scene| red_layer(scene, filter));
+    assert_eq!(pixel(1, 1), [0, 255, 0, 255]);
+    assert_eq!(pixel(9, 9), [0, 0, 0, 0]);
+}
+
+#[test]
+fn source_graphic_is_clipped_to_the_filter_region() {
+    let region = Rect::new(8.0, 0.0, 16.0, 16.0);
+    let mut filter = Filter::empty().with_region(Some(region));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(4.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let pixel = render(|scene| red_layer(scene, filter));
+    assert_eq!(pixel(4, 8), [0, 0, 0, 0]);
+    assert_eq!(pixel(10, 8), [0, 0, 0, 0]);
+    assert_eq!(pixel(13, 8), [255, 0, 0, 255]);
+    assert_eq!(pixel(17, 8), [0, 0, 0, 0]);
+}
+
+#[test]
+fn filter_region_under_a_rect_clip() {
+    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 100.0, 100.0)));
+    filter.add(
+        FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
+        FilterInputs::NONE,
+    );
+    let pixel = render(|scene| {
+        scene.push_clip_layer(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &Rect::new(0.0, 0.0, 50.0, 200.0),
+        );
+        red_layer(scene, filter);
+        scene.pop_layer();
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(0, 0, 255),
+            None,
+            &Rect::new(0.0, 150.0, 200.0, 200.0),
+        );
+    });
+    assert_eq!(pixel(25, 25), [0, 255, 0, 255]);
+    assert_eq!(pixel(75, 25), [0, 0, 0, 0]);
+    assert_eq!(pixel(25, 125), [0, 0, 0, 0]);
+    assert_eq!(pixel(25, 175), [0, 0, 255, 255]);
+    assert_eq!(pixel(75, 175), [0, 0, 255, 255]);
+}

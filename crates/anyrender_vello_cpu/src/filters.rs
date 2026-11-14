@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyrender::{
     Filter,
     filters::{EdgeMode, FilterEffect, FilterInput, FilterSource},
@@ -12,7 +10,7 @@ pub(crate) struct ConvertedFilter {
     pub(crate) floods: bool,
 }
 
-pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<ConvertedFilter> {
+pub(crate) fn convert_filter(filter: &Filter) -> Option<ConvertedFilter> {
     // Vello CPU only supports single-node filters at the moment, so fold
     // away the primitives that do not change the result first.
     let filter = filter.without_noops();
