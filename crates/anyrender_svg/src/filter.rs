@@ -6,20 +6,20 @@
 //! The resulting graph is attached to a layer via [`anyrender::PaintScene::push_layer`].
 //! Whether (and how faithfully) the filter is actually applied depends on the backend.
 //!
+//! Every primitive gets its resolved subregion, except `feOffset`, which (as in resvg)
+//! inherits its input's subregion and isn't clipped by its own.
+//!
 //! Known approximations (accepted silently):
 //!
-//! - Filter primitive subregions (`x`/`y`/`width`/`height` on a primitive) are ignored.
-//!   The overall filter region *is* honoured (it is used as the layer clip).
 //! - `feConvolveMatrix` `kernelUnitLength` is ignored.
-//! - `feTurbulence` `stitchTiles` is ignored.
 //!
 //! Filters that cannot be expressed at all (see [`convert_primitive`]) cause the whole
 //! conversion to fail, in which case the caller falls back to the error handler and
 //! renders the group unfiltered.
 
 use anyrender::filters::{
-    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
-    FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterInput,
+    FilterInputs, FilterSource,
     blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     component_transfer::{
@@ -36,7 +36,7 @@ use anyrender::filters::{
     shadow::DropShadow,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
-use kurbo::Vec2;
+use kurbo::{Rect, Vec2};
 use peniko::Color;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -81,6 +81,7 @@ fn convert_filter(
         source_alpha: None,
         results: HashMap::new(),
         color_space: FilterColorSpace::default(),
+        subregion: None,
     };
 
     let mut last: Option<FilterId> = None;
@@ -88,6 +89,18 @@ fn convert_filter(
         ctx.color_space = match primitive.color_interpolation() {
             usvg::filter::ColorInterpolation::SRGB => FilterColorSpace::Srgb,
             usvg::filter::ColorInterpolation::LinearRGB => FilterColorSpace::LinearRgb,
+        };
+        ctx.subregion = match primitive.kind() {
+            usvg::filter::Kind::Offset(_) => None,
+            _ => {
+                let rect = primitive.rect();
+                Some(Rect::new(
+                    rect.left() as f64,
+                    rect.top() as f64,
+                    rect.right() as f64,
+                    rect.bottom() as f64,
+                ))
+            }
         };
         let id = convert_primitive(&mut ctx, primitive)?;
         if !primitive.result().is_empty() {
@@ -109,12 +122,18 @@ struct FilterContext<'a> {
     results: HashMap<String, FilterId>,
     /// Color space of the primitive being converted.
     color_space: FilterColorSpace,
+    /// Subregion of the primitive being converted.
+    subregion: Option<Rect>,
 }
 
 impl FilterContext<'_> {
     fn add(&mut self, effect: FilterEffect, inputs: FilterInputs) -> FilterId {
-        self.graph
-            .add_with_color_space(effect, inputs, self.color_space)
+        self.graph.add_node(FilterGraphNode {
+            effect,
+            inputs,
+            color_space: self.color_space,
+            subregion: self.subregion,
+        })
     }
 
     fn resolve_input(&mut self, input: &usvg::filter::Input) -> FilterInput {
@@ -374,6 +393,7 @@ fn convert_primitive(
             let filter = TurbulenceFilter {
                 base_frequency_x: fe.base_frequency_x().get(),
                 base_frequency_y: fe.base_frequency_y().get(),
+                stitch_tiles: fe.stitch_tiles(),
                 num_octaves: fe.num_octaves(),
                 seed: fe.seed().max(0) as u32,
                 turbulence_type: match fe.kind() {
@@ -676,14 +696,63 @@ mod tests {
     }
 
     #[test]
-    fn turbulence_frequency_pair() {
-        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2"/>"#);
+    fn turbulence_frequency_pair_and_stitch_tiles() {
+        let node = single_node(r#"<feTurbulence baseFrequency="0.05 0.2" stitchTiles="stitch"/>"#);
         let FilterEffect::Turbulence(turbulence) = node.effect else {
             panic!("expected turbulence, got {:?}", node.effect);
         };
         assert_eq!(
             (turbulence.base_frequency_x, turbulence.base_frequency_y),
             (0.05, 0.2)
+        );
+        assert!(turbulence.stitch_tiles);
+    }
+
+    /// usvg computes the filter region in f32.
+    fn rounded(rect: Option<Rect>) -> Option<Rect> {
+        rect.map(|r| Rect::new(r.x0.round(), r.y0.round(), r.x1.round(), r.y1.round()))
+    }
+
+    #[test]
+    fn primitive_subregions() {
+        let flood = single_node(r#"<feFlood x="10" y="20" width="30" height="5"/>"#);
+        assert_eq!(flood.subregion, Some(Rect::new(10.0, 20.0, 40.0, 25.0)));
+
+        // Without x/y/width/height, the subregion is the filter region: by default the
+        // 50x50 bounding box grown by 10% on each side.
+        let blur = single_node(r#"<feGaussianBlur stdDeviation="3"/>"#);
+        assert_eq!(
+            rounded(blur.subregion),
+            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
+        );
+
+        let offset = single_node(r#"<feOffset x="10" dx="5"/>"#);
+        assert_eq!(offset.subregion, None);
+    }
+
+    #[test]
+    fn tile_takes_its_input_subregion() {
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                <g filter="url(#f)">
+                    <filter id="f">
+                        <feFlood x="0" y="0" width="10" height="10" flood-color="green"/>
+                        <feTile/>
+                    </filter>
+                    <rect width="50" height="50" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        let [flood, tile] = graph.nodes() else {
+            panic!("expected two nodes, got {:?}", graph.nodes());
+        };
+        assert_eq!(flood.subregion, Some(Rect::new(0.0, 0.0, 10.0, 10.0)));
+        assert_eq!(tile.effect, FilterEffect::Tile);
+        assert_eq!(tile.inputs.primary, Some(FilterInput::Result(FilterId(0))));
+        assert_eq!(
+            rounded(tile.subregion),
+            Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
         );
     }
 

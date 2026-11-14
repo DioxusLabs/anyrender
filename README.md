@@ -48,6 +48,7 @@ These crates sit on top of the the AnyRender abstraction, and allow you render c
 - [wgpu_context](https://docs.rs/wgpu_context) is a utility for managing `Device`s and other WGPU types
 - [pixels_window_renderer](https://docs.rs/pixels_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [pixels](https://docs.rs/pixels) crate.
 - [softbuffer_window_renderer](https://docs.rs/softbuffer_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [softbuffer](https://docs.rs/softbuffer) crate.
+- [image_filters_types](https://docs.rs/image_filters_types) defines the filter graph types (`Filter`, `FilterEffect` and the primitive parameters) that `anyrender::filters` re-exports, generic over the content of `feImage`.
 
 
 ## Version compatibility
