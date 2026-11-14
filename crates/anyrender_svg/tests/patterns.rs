@@ -578,7 +578,7 @@ fn pattern_glyph_transform_fallback() {
     });
 }
 
-/// Shapes sharing an SVG pattern, in one render and across renders, share its pattern id.
+/// Shapes sharing an SVG pattern share its pattern id.
 #[test]
 fn svg_pattern_is_shared() {
     use anyrender::recording::{RenderCommand, Scene};
@@ -592,11 +592,12 @@ fn svg_pattern_is_shared() {
         <rect y="50" width="40" height="40" fill="none" stroke="url(#p)"/>
     </svg>"#;
     let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).unwrap();
-    let mut ids = Vec::new();
-    for _ in 0..2 {
-        let mut scene = Scene::new();
-        anyrender_svg::render_svg_tree(&mut scene, &tree, Affine::IDENTITY);
-        ids.extend(scene.commands.iter().filter_map(|command| match command {
+    let mut scene = Scene::new();
+    anyrender_svg::render_svg_tree(&mut scene, &tree, Affine::IDENTITY);
+    let ids: Vec<_> = scene
+        .commands
+        .iter()
+        .filter_map(|command| match command {
             RenderCommand::Fill(fill) => match &fill.brush {
                 anyrender::Paint::Pattern(pattern) => Some(pattern.id()),
                 _ => None,
@@ -606,8 +607,8 @@ fn svg_pattern_is_shared() {
                 _ => None,
             },
             _ => None,
-        }));
-    }
-    assert_eq!(ids.len(), 6);
+        })
+        .collect();
+    assert_eq!(ids.len(), 3);
     assert!(ids.iter().all(|&id| id == ids[0]), "{ids:?}");
 }
