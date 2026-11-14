@@ -1,8 +1,9 @@
 [workspace]
 members = [
   "crates/anyrender",
+  "crates/image_filters_types",
   "crates/anyrender_serialize",
-  "crates/anyrender_image_filters",
+  "crates/image_filters",
   "crates/anyrender_skia",
   "crates/anyrender_vello",
   "crates/anyrender_vello_cpu",
@@ -29,8 +30,9 @@ rust-version = "1.90.0"
 [workspace.dependencies]
 # AnyRender dependencies (in-repo)
 anyrender = { version = "0.14.0", path = "./crates/anyrender" }
+image_filters_types = { version = "0.1.0", path = "./crates/image_filters_types" }
 anyrender_serialize = { version = "0.8.0", path = "./crates/anyrender_serialize" }
-anyrender_image_filters = { version = "0.1.0", path = "./crates/anyrender_image_filters" }
+image_filters = { version = "0.1.0", path = "./crates/image_filters" }
 anyrender_skia = { version = "0.12.0", path = "./crates/anyrender_skia" }
 anyrender_tiny_skia = { version = "0.1.0", path = "./crates/anyrender_tiny_skia" }
 anyrender_vello = { version = "0.15.0", path = "./crates/anyrender_vello" }

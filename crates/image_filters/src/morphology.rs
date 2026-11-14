@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::ImageRefMut;
-use anyrender::filters::morphology::MorphologyOperator;
+use image_filters_types::morphology::MorphologyOperator;
 use rgb::RGBA8;
 
 /// Applies a morphology filter.

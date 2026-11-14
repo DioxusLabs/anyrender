@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{ImageRefMut, f32_bound};
-use anyrender::filters::component_transfer::{
+use image_filters_types::component_transfer::{
     ComponentTransferFilter, GammaTransferFunction, LinearTransferFunction, TransferFunction,
 };
 

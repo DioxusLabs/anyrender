@@ -166,21 +166,12 @@ dependencies = [
 name = "anyrender"
 version = "0.14.0"
 dependencies = [
+ "image_filters_types",
  "kurbo",
  "peniko",
  "raw-window-handle",
  "serde",
  "smallvec",
-]
-
-[[package]]
-name = "anyrender_image_filters"
-version = "0.1.0"
-dependencies = [
- "anyrender",
- "bytemuck",
- "peniko",
- "rgb",
 ]
 
 [[package]]
@@ -248,13 +239,11 @@ name = "anyrender_tiny_skia"
 version = "0.1.0"
 dependencies = [
  "anyrender",
- "anyrender_image_filters",
- "bytemuck",
  "debug_timer",
+ "image_filters",
  "kurbo",
  "peniko",
  "pixels_window_renderer",
- "rgb",
  "skrifa",
  "softbuffer_window_renderer",
  "tiny-skia 0.12.0",
@@ -1751,6 +1740,28 @@ checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
  "quick-error",
+]
+
+[[package]]
+name = "image_filters"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "image_filters_types",
+ "kurbo",
+ "peniko",
+ "rgb",
+ "tiny-skia 0.12.0",
+]
+
+[[package]]
+name = "image_filters_types"
+version = "0.1.0"
+dependencies = [
+ "kurbo",
+ "peniko",
+ "serde",
+ "smallvec",
 ]
 
 [[package]]

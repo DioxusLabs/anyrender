@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use super::{ImageRef, ImageRefMut, f32_bound};
-use anyrender::filters::lighting::{DiffuseLightingFilter, LightSource, SpecularLightingFilter};
+use image_filters_types::lighting::{DiffuseLightingFilter, LightSource, SpecularLightingFilter};
 use peniko::color::{AlphaColor, Srgb};
 use rgb::RGBA8;
 

@@ -1,7 +1,7 @@
 // Copyright 2020 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::filters::displacement::{ColorChannel, DisplacementMapFilter};
+use image_filters_types::displacement::{ColorChannel, DisplacementMapFilter};
 
 use super::{ImageRef, ImageRefMut};
 

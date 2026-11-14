@@ -1,7 +1,7 @@
 // Copyright 2020 the Resvg Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::filters::{EdgeMode, convolution::ConvolutionKernel};
+use image_filters_types::{EdgeMode, convolution::ConvolutionKernel};
 use rgb::RGBA8;
 
 use super::{ImageRefMut, f32_bound};
