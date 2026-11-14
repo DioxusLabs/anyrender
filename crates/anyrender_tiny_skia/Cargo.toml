@@ -10,12 +10,14 @@ edition.workspace = true
 
 [dependencies]
 anyrender = { workspace = true }
-image_filters = { workspace = true }
+image_filters_types = { workspace = true }
 
 debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 tiny-skia = "0.12"
+bytemuck = "1"
+rgb = "0.8"
 skrifa = { workspace = true }
 
 # WindowRenderer backends

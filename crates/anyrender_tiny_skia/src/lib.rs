@@ -2,6 +2,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod filter;
+mod image_filters;
 mod image_renderer;
 mod scene;
 mod window_renderer;
