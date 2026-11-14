@@ -4,10 +4,12 @@
 //! collection from one `CFData`, which wraps the blob's bytes without copying them.
 
 use std::ffi::c_void;
-use std::ptr::NonNull;
 
 use objc2_core_foundation::{
-    CFAllocator, CFAllocatorContext, CFArray, CFData, CFIndex, CFRetained, CFString, CFType,
+    CFAllocator, CFAllocatorContext, CFArray, CFData, CFIndex, CFRetained, CFString,
+};
+use objc2_core_text::{
+    CTFont, CTFontDescriptor, CTFontManagerCreateFontDescriptorsFromData, kCTFontNameAttribute,
 };
 use peniko::{Blob, FontData};
 #[cfg(test)]
@@ -16,21 +18,6 @@ use skia_safe::Typeface;
 use skrifa::raw::TableProvider;
 use skrifa::string::StringId;
 use skrifa::{FontRef, MetadataProvider};
-
-#[link(name = "CoreText", kind = "framework")]
-unsafe extern "C" {
-    static kCTFontNameAttribute: &'static CFString;
-    fn CTFontManagerCreateFontDescriptorsFromData(data: &CFData) -> Option<NonNull<CFArray>>;
-    fn CTFontDescriptorCopyAttribute(
-        descriptor: &CFType,
-        attribute: &CFString,
-    ) -> Option<NonNull<CFType>>;
-    fn CTFontCreateWithFontDescriptor(
-        descriptor: &CFType,
-        size: f64,
-        matrix: *const c_void,
-    ) -> Option<NonNull<CFType>>;
-}
 
 unsafe extern "C-unwind" fn release_blob(info: *const c_void) {
     drop(unsafe { Box::from_raw(info.cast_mut().cast::<Blob<u8>>()) });
@@ -66,9 +53,8 @@ fn cf_data_no_copy(blob: &Blob<u8>) -> Option<CFRetained<CFData>> {
     }
 }
 
-fn descriptor_postscript_name(descriptor: &CFType) -> Option<String> {
-    let name = unsafe { CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute) }?;
-    let name = unsafe { CFRetained::from_raw(name) };
+fn descriptor_postscript_name(descriptor: &CTFontDescriptor) -> Option<String> {
+    let name = unsafe { descriptor.attribute(kCTFontNameAttribute) }?;
     Some(name.downcast_ref::<CFString>()?.to_string())
 }
 
@@ -92,8 +78,7 @@ impl CollectionDescriptors {
     /// `None` if CoreText cannot open the collection from the bytes.
     pub(crate) fn new(blob: &Blob<u8>) -> Option<Self> {
         let data = cf_data_no_copy(blob)?;
-        let descriptors =
-            unsafe { CFRetained::from_raw(CTFontManagerCreateFontDescriptorsFromData(&data)?) };
+        let descriptors = unsafe { CTFontManagerCreateFontDescriptorsFromData(&data) };
         let mut collection = Self {
             descriptors,
             names: Vec::new(),
@@ -104,8 +89,13 @@ impl CollectionDescriptors {
         Some(collection)
     }
 
-    fn descriptor(&self, index: CFIndex) -> &CFType {
-        unsafe { &*self.descriptors.value_at_index(index).cast::<CFType>() }
+    fn descriptor(&self, index: CFIndex) -> &CTFontDescriptor {
+        unsafe {
+            &*self
+                .descriptors
+                .value_at_index(index)
+                .cast::<CTFontDescriptor>()
+        }
     }
 
     /// Opens face `font.index`, or `None` if no CoreText face can be matched to it by PostScript
@@ -125,11 +115,7 @@ impl CollectionDescriptors {
         };
 
         let ct_font = unsafe {
-            CFRetained::from_raw(CTFontCreateWithFontDescriptor(
-                self.descriptor(found as CFIndex),
-                0.0,
-                std::ptr::null(),
-            )?)
+            CTFont::with_font_descriptor(self.descriptor(found as CFIndex), 0.0, std::ptr::null())
         };
         unsafe { Typeface::from_ct_font(CFRetained::as_ptr(&ct_font).as_ptr().cast()) }
     }
@@ -143,13 +129,9 @@ fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use objc2_core_text::CTFontTableOptions;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-
-    #[link(name = "CoreText", kind = "framework")]
-    unsafe extern "C" {
-        fn CTFontCopyTable(font: *const c_void, tag: u32, options: u32) -> Option<NonNull<CFData>>;
-    }
 
     fn find_collections(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -254,16 +236,11 @@ mod tests {
                 let head = face
                     .table_data(skrifa::raw::types::Tag::new(b"head"))
                     .unwrap();
+                let ct_font = unsafe { &*typeface.ct_font().unwrap().cast::<CTFont>() };
                 let table = unsafe {
-                    CFRetained::from_raw(
-                        CTFontCopyTable(
-                            typeface.ct_font().unwrap(),
-                            u32::from_be_bytes(*b"head"),
-                            0,
-                        )
-                        .unwrap(),
-                    )
-                };
+                    ct_font.table(u32::from_be_bytes(*b"head"), CTFontTableOptions::NoOptions)
+                }
+                .unwrap();
                 let ptr = table.byte_ptr();
                 assert!(range.contains(&ptr), "{what}: table was copied");
                 assert_eq!(ptr, head.as_bytes().as_ptr(), "{what}");
