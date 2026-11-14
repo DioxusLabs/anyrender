@@ -6,6 +6,7 @@ members = [
   "crates/anyrender_skia",
   "crates/anyrender_vello",
   "crates/anyrender_vello_cpu",
+  "crates/anyrender_tiny_skia",
   "crates/anyrender_vello_hybrid",
   "crates/anyrender_svg",
   "crates/wgpu_context",
@@ -31,6 +32,7 @@ anyrender = { version = "0.14.0", path = "./crates/anyrender" }
 image_filters_types = { version = "0.1.0", path = "./crates/image_filters_types" }
 anyrender_serialize = { version = "0.8.0", path = "./crates/anyrender_serialize" }
 anyrender_skia = { version = "0.12.0", path = "./crates/anyrender_skia" }
+anyrender_tiny_skia = { version = "0.1.0", path = "./crates/anyrender_tiny_skia" }
 anyrender_vello = { version = "0.15.0", path = "./crates/anyrender_vello" }
 anyrender_vello_cpu = { version = "0.18.0", path = "./crates/anyrender_vello_cpu" }
 anyrender_vello_hybrid = { version = "0.11.0", path = "./crates/anyrender_vello_hybrid" }

@@ -706,20 +706,31 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
-    let (output, color_space) = convert_filter_effect(filter, filter.output());
+    // Convert each node once, in order, so that inputs are looked up rather than reconverted.
+    let mut results: Vec<(Option<ImageFilter>, FilterColorSpace)> =
+        Vec::with_capacity(filter.nodes().len());
+    for id in 0..=filter.output().0 {
+        let result = convert_filter_effect(filter, FilterId(id), &results);
+        results.push(result);
+    }
+    let (output, color_space) = results.pop().unwrap_or((None, FilterColorSpace::Srgb));
     convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
-/// Resolve a primitive's input, converted into the colour space the primitive operates in.
+/// Resolves an input of the primitive `id` from the results of the primitives before it, converted
+/// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
 fn resolve_input(
-    filter: &Filter,
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
+    id: FilterId,
     input: &Option<FilterInput>,
     color_space: FilterColorSpace,
 ) -> Option<ImageFilter> {
+    let source = (None, FilterColorSpace::Srgb);
+    let result = |id: u16| results.get(id as usize).cloned().unwrap_or(source.clone());
     let (input, input_color_space) = match input {
-        Some(FilterInput::Result(input_id)) => convert_filter_effect(filter, *input_id),
-        // Source graphics are sRGB-encoded.
-        Some(FilterInput::Source(_)) | None => (None, FilterColorSpace::Srgb),
+        None => id.0.checked_sub(1).map_or(source.clone(), result),
+        Some(FilterInput::Source(_)) => source.clone(),
+        Some(FilterInput::Result(input_id)) => result(input_id.0),
     };
     convert_color_space(input, input_color_space, color_space)
 }
@@ -752,13 +763,17 @@ fn color_in_space(color: AlphaColor<Srgb>, color_space: FilterColorSpace) -> Alp
 }
 
 /// Convert a filter node, returning the result and the colour space it is encoded in.
-fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>, FilterColorSpace) {
+fn convert_filter_effect(
+    filter: &Filter,
+    id: FilterId,
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
+) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
     let color_space = node.color_space;
-    let input = resolve_input(filter, &node.inputs.primary, color_space);
+    let input = resolve_input(results, id, &node.inputs.primary, color_space);
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(filter, &node.inputs.secondary, color_space);
+    let secondary = resolve_input(results, id, &node.inputs.secondary, color_space);
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -1057,12 +1072,15 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> (Option<ImageFilter>,
         // - `Image` needs to resolve an external image by id from a resource registry.
         FilterEffect::Image(_external_image_source) => None,
         FilterEffect::Tile => {
-            // Like `resolve_input`, which reads a missing input as the source graphic.
             let input_subregion = match node.inputs.primary {
                 Some(FilterInput::Result(input_id)) => {
                     filter.nodes()[input_id.0 as usize].subregion
                 }
-                Some(FilterInput::Source(_)) | None => None,
+                None => {
+                    id.0.checked_sub(1)
+                        .and_then(|prev| filter.nodes()[prev as usize].subregion)
+                }
+                Some(FilterInput::Source(_)) => None,
             };
             match (input_subregion, node.subregion) {
                 (Some(src), Some(dst)) => {

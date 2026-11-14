@@ -235,6 +235,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyrender_tiny_skia"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "bytemuck",
+ "debug_timer",
+ "image_filters_types",
+ "kurbo",
+ "peniko",
+ "pixels_window_renderer",
+ "rgb",
+ "skrifa",
+ "softbuffer_window_renderer",
+ "tiny-skia 0.12.0",
+]
+
+[[package]]
 name = "anyrender_vello"
 version = "0.15.0"
 dependencies = [
@@ -3177,6 +3194,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "rgb"
+version = "0.8.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3284,7 +3310,7 @@ dependencies = [
  "log",
  "memmap2",
  "smithay-client-toolkit",
- "tiny-skia",
+ "tiny-skia 0.11.4",
 ]
 
 [[package]]
@@ -3776,6 +3802,21 @@ dependencies = [
  "cfg-if",
  "log",
  "tiny-skia-path 0.11.4",
+]
+
+[[package]]
+name = "tiny-skia"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47ffee5eaaf5527f630fb0e356b90ebdec84d5d18d937c5e440350f88c5a91ea"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "bytemuck",
+ "cfg-if",
+ "log",
+ "png",
+ "tiny-skia-path 0.12.0",
 ]
 
 [[package]]
