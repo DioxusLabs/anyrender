@@ -750,7 +750,7 @@ mod region_tests {
         let c = filter.add(offset(), FilterInputs::NONE);
         // The union of both inputs' subregions.
         let d = filter.add(
-            FilterEffect::Blend(peniko::Mix::Normal.into()),
+            FilterEffect::Blend(peniko::Mix::Normal),
             FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
         );
         // A source input fills the filter region.
