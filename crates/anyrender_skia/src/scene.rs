@@ -6,7 +6,9 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterId, FilterInput,
+};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
@@ -743,20 +745,39 @@ fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
     convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
+/// The filter region of `node`, which clips its inputs and its result.
+fn node_region(filter: &Filter, node: &FilterGraphNode) -> Option<kurbo::Rect> {
+    node.region.or(filter.region())
+}
+
 /// Resolves an input of the primitive `id` from the results of the primitives before it, converted
 /// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
-/// The source graphic is clipped to the filter `region`.
+/// The source graphic, and results of primitives with a different filter region, are clipped to
+/// the primitive's filter `region`.
 fn resolve_input(
+    filter: &Filter,
     results: &[(Option<ImageFilter>, FilterColorSpace)],
     id: FilterId,
     input: &Option<FilterInput>,
     color_space: FilterColorSpace,
     region: Option<kurbo::Rect>,
 ) -> Option<ImageFilter> {
-    let source =
-        region.and_then(|r| skia_safe::image_filters::crop(sk_kurbo::rect_from(r), None, None));
-    let source = (source, FilterColorSpace::Srgb);
-    let result = |id: u16| results.get(id as usize).cloned().unwrap_or(source.clone());
+    let crop = |input: Option<ImageFilter>| match region {
+        Some(r) => skia_safe::image_filters::crop(sk_kurbo::rect_from(r), None, input),
+        None => input,
+    };
+    let source = (crop(None), FilterColorSpace::Srgb);
+    let result = |id: u16| match results.get(id as usize) {
+        Some((result, result_color_space)) => {
+            let result_region = node_region(filter, &filter.nodes()[id as usize]);
+            let result = match result_region == region {
+                true => result.clone(),
+                false => crop(result.clone()),
+            };
+            (result, *result_color_space)
+        }
+        None => source.clone(),
+    };
     let (input, input_color_space) = match input {
         None => id.0.checked_sub(1).map_or(source.clone(), result),
         Some(FilterInput::Source(_)) => source.clone(),
@@ -800,13 +821,30 @@ fn convert_filter_effect(
 ) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
     let color_space = node.color_space;
-    let region = filter.region();
-    let input = resolve_input(results, id, &node.inputs.primary, color_space, region);
+    let region = node_region(filter, node);
+    let input = resolve_input(
+        filter,
+        results,
+        id,
+        &node.inputs.primary,
+        color_space,
+        region,
+    );
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(results, id, &node.inputs.secondary, color_space, region);
+    let secondary = resolve_input(
+        filter,
+        results,
+        id,
+        &node.inputs.secondary,
+        color_space,
+        region,
+    );
     // The result is clipped to the primitive subregion and the filter region.
-    let crop = filter.clip_to_region(node.subregion);
+    let crop = match (node.subregion, region) {
+        (Some(subregion), Some(region)) => Some(subregion.intersect(region)),
+        (subregion, region) => subregion.or(region),
+    };
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();

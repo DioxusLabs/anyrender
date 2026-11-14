@@ -56,8 +56,7 @@ pub(crate) fn to_anyrender_filter(filters: &[Arc<usvg::filter::Filter>]) -> Opti
         chain_input = Some(convert_filter(&mut graph, filter, chain_input)?);
     }
     let output = chain_input?;
-    // Each filter's primitives are clipped to its own region below, so the graph's region is
-    // the union of them.
+    // Each filter's primitives carry its own region, so the graph's region is the union of them.
     let region = filters
         .iter()
         .map(|filter| to_rect(filter.rect()))
@@ -90,6 +89,7 @@ fn convert_filter(
         results: HashMap::new(),
         color_space: FilterColorSpace::default(),
         subregion: None,
+        region,
     };
 
     let mut last: Option<FilterId> = None;
@@ -133,6 +133,8 @@ struct FilterContext<'a> {
     color_space: FilterColorSpace,
     /// Subregion of the primitive being converted.
     subregion: Option<Rect>,
+    /// Region of the filter being converted.
+    region: Rect,
 }
 
 impl FilterContext<'_> {
@@ -142,6 +144,7 @@ impl FilterContext<'_> {
             inputs,
             color_space: self.color_space,
             subregion: self.subregion,
+            region: Some(self.region),
         })
     }
 
@@ -764,6 +767,37 @@ mod tests {
         assert_eq!(
             rounded(graph.region()),
             Some(Rect::new(-5.0, -5.0, 55.0, 55.0))
+        );
+    }
+
+    #[test]
+    fn chained_filters_keep_their_own_regions() {
+        let graph = convert(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+                <g filter="url(#small) url(#large)">
+                    <filter id="small" filterUnits="userSpaceOnUse" x="40" y="40" width="120" height="120">
+                        <feOffset/>
+                    </filter>
+                    <filter id="large" filterUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+                        <feOffset/>
+                    </filter>
+                    <rect width="200" height="200" fill="red"/>
+                </g>
+            </svg>"##,
+        )
+        .unwrap();
+        assert_eq!(graph.region(), Some(Rect::new(0.0, 0.0, 200.0, 200.0)));
+        let regions: Vec<_> = graph
+            .nodes()
+            .iter()
+            .map(|n| (n.subregion, n.region))
+            .collect();
+        assert_eq!(
+            regions,
+            [
+                (None, Some(Rect::new(40.0, 40.0, 160.0, 160.0))),
+                (None, Some(Rect::new(0.0, 0.0, 200.0, 200.0))),
+            ]
         );
     }
 

@@ -186,7 +186,7 @@ pub fn apply<I>(
     let full = IntRect::from_xywh(0, 0, w, h).unwrap();
     // The filter region, in the pixel space of `source`. It clips the source graphic and every
     // result.
-    let full = match filter.region() {
+    let source_region = match filter.region() {
         Some(rect) => {
             let Some(filter_region) = pixel_region(rect, transform, region, full) else {
                 pixmap.fill(tiny_skia::Color::TRANSPARENT);
@@ -197,10 +197,24 @@ pub fn apply<I>(
         }
         None => full,
     };
+    let full = source_region;
     let mut results: Vec<Image> = Vec::with_capacity(filter.nodes().len());
     // Each result's primitive subregion, in the pixel space of `source`.
     let mut regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
+    // Each result's filter region, in the pixel space of `source`.
+    let mut filter_regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
     for node in filter.nodes() {
+        // This primitive's filter region. It clips its inputs and its result.
+        let full = match node.region {
+            Some(rect) => pixel_region(rect, transform, region, full),
+            None => Some(full),
+        };
+        let Some(full) = full else {
+            results.push(empty());
+            regions.push(source_region);
+            filter_regions.push(source_region);
+            continue;
+        };
         let input_region = |input: &Option<FilterInput>| match input {
             None => regions.last().copied().unwrap_or(full),
             Some(FilterInput::Result(id)) => regions.get(id.0 as usize).copied().unwrap_or(full),
@@ -223,9 +237,16 @@ pub fn apply<I>(
         };
 
         let resolve = |input: Option<FilterInput>, results: &[Image]| -> Image {
-            match input {
-                None => results.last().cloned().unwrap_or_else(|| source.clone()),
-                Some(FilterInput::Source(FilterSource::SourceGraphic)) => source.clone(),
+            let result = |id: usize| Some((results.get(id)?.clone(), filter_regions[id]));
+            let (mut image, image_region) = match input {
+                None => results
+                    .len()
+                    .checked_sub(1)
+                    .and_then(result)
+                    .unwrap_or_else(|| (source.clone(), source_region)),
+                Some(FilterInput::Source(FilterSource::SourceGraphic)) => {
+                    (source.clone(), source_region)
+                }
                 Some(FilterInput::Source(FilterSource::SourceAlpha)) => {
                     let mut img = source.clone();
                     for p in img.pixmap.data_mut().as_chunks_mut::<4>().0 {
@@ -233,13 +254,18 @@ pub fn apply<I>(
                         p[1] = 0;
                         p[2] = 0;
                     }
-                    img
+                    (img, source_region)
                 }
-                Some(FilterInput::Source(_)) => empty(),
-                Some(FilterInput::Result(id)) => {
-                    results.get(id.0 as usize).cloned().unwrap_or_else(empty)
-                }
+                Some(FilterInput::Source(_)) => return empty(),
+                Some(FilterInput::Result(id)) => match result(id.0 as usize) {
+                    Some(result) => result,
+                    None => return empty(),
+                },
+            };
+            if image_region != full {
+                clip_to(&mut image.pixmap, Some(full));
             }
+            image
         };
         let linear = node.color_space == FilterColorSpace::LinearRgb;
         let input = || resolve(node.inputs.primary.clone(), &results);
@@ -482,11 +508,12 @@ pub fn apply<I>(
         // As in resvg, results are only clipped to explicit subregions (and the filter region).
         if node.subregion.is_some() {
             clip_to(&mut result.pixmap, subregion);
-        } else if filter.region().is_some() {
+        } else if node.region.or(filter.region()).is_some() {
             clip_to(&mut result.pixmap, Some(full));
         }
         results.push(result);
         regions.push(subregion.unwrap_or(full));
+        filter_regions.push(full);
     }
 
     let output = results
