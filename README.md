@@ -48,6 +48,7 @@ These crates sit on top of the the AnyRender abstraction, and allow you render c
 - [wgpu_context](https://docs.rs/wgpu_context) is a utility for managing `Device`s and other WGPU types
 - [pixels_window_renderer](https://docs.rs/pixels_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [pixels](https://docs.rs/pixels) crate.
 - [softbuffer_window_renderer](https://docs.rs/softbuffer_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [softbuffer](https://docs.rs/softbuffer) crate.
+- [anyrender_image_filters](https://docs.rs/anyrender_image_filters) implements SVG filter primitives (blur, lighting, turbulence, etc) on RGBA8 pixel buffers, for backends that render on the CPU. Ported from [resvg](https://github.com/linebender/resvg).
 
 
 ## Version compatibility
