@@ -1,0 +1,19 @@
+[package]
+name = "image_filters_types"
+description = "Types describing SVG/CSS image filter graphs"
+version = "0.1.0"
+documentation = "https://docs.rs/image_filters_types"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+serde = ["dep:serde", "kurbo/serde", "peniko/serde", "smallvec/serde"]
+
+[dependencies]
+kurbo = { workspace = true }
+peniko = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+smallvec = "1.15.1"

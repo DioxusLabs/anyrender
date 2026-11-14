@@ -14,9 +14,11 @@ serde = [
   "dep:serde",
   "kurbo/serde",
   "peniko/serde",
+  "image_filters_types/serde",
 ]
 
 [dependencies]
+image_filters_types = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 raw-window-handle = { workspace = true }

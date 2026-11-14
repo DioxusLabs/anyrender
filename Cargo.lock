@@ -166,6 +166,7 @@ dependencies = [
 name = "anyrender"
 version = "0.14.0"
 dependencies = [
+ "image_filters_types",
  "kurbo",
  "peniko",
  "raw-window-handle",
@@ -1724,6 +1725,16 @@ checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
  "quick-error",
+]
+
+[[package]]
+name = "image_filters_types"
+version = "0.1.0"
+dependencies = [
+ "kurbo",
+ "peniko",
+ "serde",
+ "smallvec",
 ]
 
 [[package]]
