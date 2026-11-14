@@ -371,6 +371,10 @@ impl SkiaScenePainter<'_> {
     ) -> Option<Typeface> {
         let cache_key = (font.data.id(), font.index);
 
+        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
+            return Some(cached.clone());
+        }
+
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
         {
@@ -378,6 +382,11 @@ impl SkiaScenePainter<'_> {
             use std::sync::Arc;
 
             if let Some(collection) = oaty::Collection::new(font.data.data()) {
+                if let Some(typeface) = crate::ct_collection::typeface_from_collection(font) {
+                    self.cache.typeface.insert(cache_key, typeface.clone());
+                    return Some(typeface);
+                }
+
                 if !self.cache.extracted_font_data.contains_key(&cache_key) {
                     let Some(data) = collection
                         .get_font(font.index)
@@ -396,10 +405,6 @@ impl SkiaScenePainter<'_> {
                 }
                 font = self.cache.extracted_font_data.hit(&cache_key).unwrap()
             }
-        }
-
-        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
-            return Some(cached.clone());
         }
 
         let Some(typeface) = self
