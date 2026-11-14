@@ -47,7 +47,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                         blend_mode,
                         alpha,
                         group_transform * path_transform,
-                        &util::to_bez_path(path),
+                        util::to_bez_path(path),
                         None,
                         None,
                     );
@@ -295,7 +295,7 @@ fn fill_clip_group<S: PaintScene>(
                     transform * util::to_affine(&path.abs_transform()),
                     Color::BLACK,
                     None,
-                    &util::to_bez_path(path),
+                    util::to_bez_path(path),
                 );
             }
             usvg::Node::Group(g) => match g.clip_path() {

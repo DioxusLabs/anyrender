@@ -11,7 +11,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyrender::{
     BoxShadowGeometry, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect,
-    NormalizedCoord, Paint as AnyPaint, PaintRef, PaintScene, RenderContext,
+    NormalizedCoord, Paint as AnyPaint, PaintRef, PaintScene, PaintShape, RenderContext,
 };
 use kurbo::{Affine, PathEl, Point, Shape, Stroke, Vec2};
 use peniko::{
@@ -355,36 +355,36 @@ impl PaintScene for TinySkiaScenePainter {
         }
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
         let kind = LayerKind::Group {
-            blend: to_skia_blend(blend.into()),
+            blend: to_skia_blend(blend),
             alpha,
             filter: filter.map(|filter| (filter, transform)),
         };
-        self.push(fill, transform, clip, kind);
+        self.push(fill, transform, &clip, kind);
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
-        self.push(fill, transform, clip, LayerKind::Clip);
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
+        self.push(fill, transform, &clip, LayerKind::Clip);
     }
 
-    fn push_mask_layer(
+    fn push_mask_layer_shape(
         &mut self,
         fill: Fill,
         mode: MaskMode,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
     ) {
-        self.push(fill, transform, clip, LayerKind::Mask(mode));
+        self.push(fill, transform, &clip, LayerKind::Mask(mode));
     }
 
     fn pop_layer(&mut self) {
@@ -475,28 +475,28 @@ impl PaintScene for TinySkiaScenePainter {
         self.recycle(layer.pixmap);
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
+        brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
-        let Some(path) = to_path(shape) else { return };
-        self.stroke_path(style, transform, brush.into(), 1.0, brush_transform, &path);
+        let Some(path) = to_path(&shape) else { return };
+        self.stroke_path(style, transform, brush, 1.0, brush_transform, &path);
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
+        brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     ) {
-        let Some(path) = to_path(shape) else { return };
-        self.fill_path(style, transform, brush.into(), 1.0, brush_transform, &path);
+        let Some(path) = to_path(&shape) else { return };
+        self.fill_path(style, transform, brush, 1.0, brush_transform, &path);
     }
 
     fn draw_glyphs<'a, 's: 'a>(

@@ -41,7 +41,7 @@
 
 #![allow(clippy::collapsible_if)]
 
-use kurbo::{Affine, Rect, Shape, Stroke, Vec2};
+use kurbo::{Affine, Rect, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
 use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
@@ -200,56 +200,52 @@ pub trait PaintScene: RenderContext {
     /// Removes all content from the scene
     fn reset(&mut self);
 
-    /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
-    /// The fill rule determines which parts of the clip shape are inside the clipping region.
-    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
-    /// However, the transforms are not saved or modified by the layer stack.
+    /// Backend implementation of [`push_layer`](Self::push_layer).
     #[allow(clippy::too_many_arguments)]
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         backdrop_filter: Option<Arc<Filter>>,
     );
 
-    /// Pushes a new clip layer clipped by the specified shape.
-    /// The fill rule determines which parts of the clip shape are inside the clipping region.
-    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
-    /// However, the transforms are not saved or modified by the layer stack.
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape);
+    /// Backend implementation of [`push_clip_layer`](Self::push_clip_layer).
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>);
 
-    /// Pushes a new mask layer clipped by the specified shape.
-    /// Content drawn until the layer is popped is used as a mask for the content drawn before it
-    /// in the enclosing layer, converted to a mask according to `mode`. Everything outside of the
-    /// clip shape counts as fully masked, so content of the enclosing layer outside of it is removed.
-    /// However, the transforms are not saved or modified by the layer stack.
-    fn push_mask_layer(&mut self, fill: Fill, mode: MaskMode, transform: Affine, clip: &impl Shape);
+    /// Backend implementation of [`push_mask_layer`](Self::push_mask_layer).
+    fn push_mask_layer_shape(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: PaintShape<'_>,
+    );
 
     /// Pops the current layer.
     fn pop_layer(&mut self);
 
-    /// Strokes a shape using the specified style and brush.
-    fn stroke<'a>(
+    /// Backend implementation of [`stroke`](Self::stroke).
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
+        brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     );
 
-    /// Fills a shape using the specified style and brush.
-    fn fill<'a>(
+    /// Backend implementation of [`fill`](Self::fill).
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
+        brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
     );
 
     /// Draws a run of glyphs
@@ -293,30 +289,132 @@ pub trait PaintScene: RenderContext {
 
     // --- Provided methods
 
+    /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
+    /// The fill rule determines which parts of the clip shape are inside the clipping region.
+    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
+    /// However, the transforms are not saved or modified by the layer stack.
+    #[allow(clippy::too_many_arguments)]
+    fn push_layer<'s>(
+        &mut self,
+        fill: Fill,
+        blend: impl Into<BlendMode>,
+        alpha: f32,
+        transform: Affine,
+        clip: impl Into<PaintShape<'s>>,
+        filter: Option<Arc<Filter>>,
+        backdrop_filter: Option<Arc<Filter>>,
+    ) where
+        Self: Sized,
+    {
+        self.push_layer_shape(
+            fill,
+            blend.into(),
+            alpha,
+            transform,
+            clip.into(),
+            filter,
+            backdrop_filter,
+        );
+    }
+
+    /// Pushes a new clip layer clipped by the specified shape.
+    /// The fill rule determines which parts of the clip shape are inside the clipping region.
+    /// Every drawing command after this call will be clipped by the shape until the layer is popped.
+    /// However, the transforms are not saved or modified by the layer stack.
+    fn push_clip_layer<'s>(
+        &mut self,
+        fill: Fill,
+        transform: Affine,
+        clip: impl Into<PaintShape<'s>>,
+    ) where
+        Self: Sized,
+    {
+        self.push_clip_layer_shape(fill, transform, clip.into());
+    }
+
+    /// Pushes a new mask layer clipped by the specified shape.
+    /// Content drawn until the layer is popped is used as a mask for the content drawn before it
+    /// in the enclosing layer, converted to a mask according to `mode`. Everything outside of the
+    /// clip shape counts as fully masked, so content of the enclosing layer outside of it is removed.
+    /// However, the transforms are not saved or modified by the layer stack.
+    fn push_mask_layer<'s>(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: impl Into<PaintShape<'s>>,
+    ) where
+        Self: Sized,
+    {
+        self.push_mask_layer_shape(fill, mode, transform, clip.into());
+    }
+
+    /// Strokes a shape using the specified style and brush.
+    fn stroke<'a, 's>(
+        &mut self,
+        style: &Stroke,
+        transform: Affine,
+        brush: impl Into<PaintRef<'a>>,
+        brush_transform: Option<Affine>,
+        shape: impl Into<PaintShape<'s>>,
+    ) where
+        Self: Sized,
+    {
+        self.stroke_shape(
+            style,
+            transform,
+            brush.into(),
+            brush_transform,
+            shape.into(),
+        );
+    }
+
+    /// Fills a shape using the specified style and brush.
+    fn fill<'a, 's>(
+        &mut self,
+        style: Fill,
+        transform: Affine,
+        brush: impl Into<PaintRef<'a>>,
+        brush_transform: Option<Affine>,
+        shape: impl Into<PaintShape<'s>>,
+    ) where
+        Self: Sized,
+    {
+        self.fill_shape(
+            style,
+            transform,
+            brush.into(),
+            brush_transform,
+            shape.into(),
+        );
+    }
+
     /// Append a recorded Scene Fragment to the current scene
     fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
         for cmd in scene.commands {
             match cmd {
-                RenderCommand::PushLayer(cmd) => self.push_layer(
+                RenderCommand::PushLayer(cmd) => self.push_layer_shape(
                     cmd.fill,
                     cmd.blend,
                     cmd.alpha,
                     scene_transform * cmd.transform,
-                    &cmd.clip,
+                    (&cmd.clip).into(),
                     cmd.filter,
                     cmd.backdrop_filter,
                 ),
-                RenderCommand::PushClipLayer(cmd) => {
-                    self.push_clip_layer(cmd.fill, scene_transform * cmd.transform, &cmd.clip)
-                }
-                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer(
+                RenderCommand::PushClipLayer(cmd) => self.push_clip_layer_shape(
+                    cmd.fill,
+                    scene_transform * cmd.transform,
+                    (&cmd.clip).into(),
+                ),
+                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer_shape(
                     cmd.fill,
                     cmd.mode,
                     scene_transform * cmd.transform,
-                    &cmd.clip,
+                    (&cmd.clip).into(),
                 ),
                 RenderCommand::PopLayer => self.pop_layer(),
-                RenderCommand::Stroke(cmd) => self.stroke(
+                RenderCommand::Stroke(cmd) => self.stroke_shape(
                     &cmd.style,
                     scene_transform * cmd.transform,
                     match cmd.brush {
@@ -327,9 +425,9 @@ pub trait PaintScene: RenderContext {
                         Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
                     },
                     cmd.brush_transform,
-                    &cmd.shape,
+                    (&cmd.shape).into(),
                 ),
-                RenderCommand::Fill(cmd) => self.fill(
+                RenderCommand::Fill(cmd) => self.fill_shape(
                     cmd.fill,
                     scene_transform * cmd.transform,
                     match cmd.brush {
@@ -340,7 +438,7 @@ pub trait PaintScene: RenderContext {
                         Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
                     },
                     cmd.brush_transform,
-                    &cmd.shape,
+                    (&cmd.shape).into(),
                 ),
                 RenderCommand::GlyphRun(cmd) => self.draw_glyphs(
                     &cmd.font_data,
@@ -376,17 +474,18 @@ pub trait PaintScene: RenderContext {
 
     /// Utility method to draw an image at it's natural size. For more advanced image drawing use the `fill` method
     fn draw_image(&mut self, image: ImageBrushRef, transform: Affine) {
-        self.fill(
+        let rect = Rect::new(
+            0.0,
+            0.0,
+            image.image.width as f64,
+            image.image.height as f64,
+        );
+        self.fill_shape(
             Fill::NonZero,
             transform,
-            image,
+            image.into(),
             None,
-            &Rect::new(
-                0.0,
-                0.0,
-                image.image.width as f64,
-                image.image.height as f64,
-            ),
+            PaintShape::Rect(&rect),
         );
     }
 }
