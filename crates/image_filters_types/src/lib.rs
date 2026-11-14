@@ -675,6 +675,11 @@ pub mod composite {
         /// Shows source where destination is transparent and vice versa,
         /// but not where both are opaque.
         Xor,
+        /// Source plus destination (`lighter` in SVG and CSS).
+        ///
+        /// Result = source + destination, clamped. The same as
+        /// `Arithmetic { k1: 0, k2: 1, k3: 1, k4: 0 }`.
+        Lighter,
 
         Arithmetic(ArithmeticCompositeOperator),
     }

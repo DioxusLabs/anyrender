@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyrender::filters::{
     Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
+    composite::CompositeOperator,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
 use anyrender::{PaintScene, render_to_buffer};
@@ -159,4 +160,27 @@ fn turbulence_seed_is_truncated_toward_zero() {
     assert_eq!(turbulence(3.9), turbulence(3.0));
     assert_ne!(turbulence(-5.0), turbulence(0.0));
     assert_ne!(turbulence(-5.0), turbulence(5.0));
+}
+
+#[test]
+fn composite_lighter_adds_its_inputs() {
+    let mut filter = Filter::empty();
+    let flood = |filter: &mut Filter, color| {
+        filter.add_node(FilterGraphNode {
+            effect: FilterEffect::Flood(color),
+            inputs: FilterInputs::NONE,
+            color_space: FilterColorSpace::Srgb,
+            subregion: None,
+        })
+    };
+    let a = flood(&mut filter, Color::from_rgb8(100, 200, 0));
+    let b = flood(&mut filter, Color::from_rgb8(100, 100, 50));
+    filter.add_node(FilterGraphNode {
+        effect: FilterEffect::Composite(CompositeOperator::Lighter),
+        inputs: FilterInputs::dual(FilterInput::Result(a), FilterInput::Result(b)),
+        color_space: FilterColorSpace::Srgb,
+        subregion: None,
+    });
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [200, 255, 50, 255]);
 }
