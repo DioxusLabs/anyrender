@@ -93,7 +93,9 @@ impl PartialEq for Pattern {
 
 /// Fills `shape` with `pattern` by drawing a clipped copy of the pattern's scene for every tile
 /// that intersects the shape. This is a fallback for backends that can't paint with a
-/// pattern directly. Takes the same arguments as [`PaintScene::fill`].
+/// pattern directly. Takes the same arguments as [`PaintScene::fill`], plus `visible`: the area
+/// of the painter's space that can be seen (such as the viewport), if known. Tiles outside it
+/// are skipped.
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
@@ -104,6 +106,7 @@ pub fn fill_pattern_tiles<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
+    visible: Option<Rect>,
 ) {
     fill_pattern_tiles_with(
         painter,
@@ -112,6 +115,7 @@ pub fn fill_pattern_tiles<S: PaintScene>(
         transform,
         brush_transform,
         shape,
+        visible,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -128,6 +132,7 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
+    visible: Option<Rect>,
 ) {
     stroke_pattern_tiles_with(
         painter,
@@ -136,6 +141,7 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
         transform,
         brush_transform,
         shape,
+        visible,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -146,6 +152,7 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
 pub fn fill_pattern_tiles_with<S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
@@ -153,6 +160,7 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
+    visible: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     let brush_transform = brush_transform.unwrap_or(Affine::IDENTITY);
@@ -168,6 +176,7 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
         pattern,
         transform * brush_transform,
         bounds,
+        visible,
         draw_tile,
     );
     painter.pop_layer();
@@ -178,6 +187,7 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
 pub fn stroke_pattern_tiles_with<S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
@@ -185,6 +195,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
+    visible: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     if style.width <= 0.0 {
@@ -207,6 +218,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
         transform,
         brush_transform,
         &outline,
+        visible,
         draw_tile,
     );
 }
@@ -232,6 +244,7 @@ pub fn draw_glyphs_pattern_tiles<'a, S: PaintScene>(
     transform: Affine,
     glyph_transform: Option<Affine>,
     glyphs: impl Iterator<Item = Glyph> + Clone,
+    visible: Option<Rect>,
 ) {
     draw_glyphs_pattern_tiles_with(
         painter,
@@ -246,6 +259,7 @@ pub fn draw_glyphs_pattern_tiles<'a, S: PaintScene>(
         transform,
         glyph_transform,
         glyphs,
+        visible,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -269,6 +283,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
     transform: Affine,
     glyph_transform: Option<Affine>,
     glyphs: impl Iterator<Item = Glyph> + Clone,
+    visible: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     let style = style.into();
@@ -313,7 +328,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
         None,
         None,
     );
-    draw_tiles(painter, pattern, transform, bounds, draw_tile);
+    draw_tiles(painter, pattern, transform, bounds, visible, draw_tile);
     painter.pop_layer();
     painter.pop_layer();
 }
@@ -386,11 +401,18 @@ fn draw_tiles<S: PaintScene>(
     pattern: &Pattern,
     transform: Affine,
     bounds: Rect,
+    visible: Option<Rect>,
     mut draw_tile: impl FnMut(&mut S, Affine),
 ) {
+    let bounds = match visible {
+        Some(visible) if transform.determinant() != 0.0 => {
+            bounds.intersect(transform.inverse().transform_rect_bbox(visible))
+        }
+        _ => bounds,
+    };
     let tile = pattern.tile();
     let (width, height) = (tile.width(), tile.height());
-    if !(width > 0.0 && height > 0.0 && bounds.is_finite()) {
+    if !(width > 0.0 && height > 0.0 && bounds.is_finite()) || bounds.is_zero_area() {
         return;
     }
     let first_x = ((bounds.x0 - tile.x0) / width).floor();

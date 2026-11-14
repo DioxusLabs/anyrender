@@ -153,6 +153,7 @@ fn pattern_fill_fallback_tiles() {
                 Affine::IDENTITY,
                 None,
                 &Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64),
+                None,
             );
         },
         SIZE,
@@ -160,6 +161,42 @@ fn pattern_fill_fallback_tiles() {
     );
     assert_close(pixel(&buffer, 45, 65), RED);
     assert_close(pixel(&buffer, 55, 65), CLEAR);
+}
+
+/// The fallback only counts tiles in the visible area, so a tiny tile on a huge shape still
+/// draws when only part of the shape is visible.
+#[test]
+fn pattern_fill_fallback_tiles_huge_shape() {
+    use anyrender::{PaintScene, Pattern, recording::Scene};
+    use kurbo::Rect;
+    use peniko::{Color, Fill};
+
+    let mut tile_scene = Scene::new();
+    tile_scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(255, 0, 0),
+        None,
+        &Rect::new(0.0, 0.0, 1.0, 2.0),
+    );
+    let pattern = Pattern::new(tile_scene, Rect::new(0.0, 0.0, 2.0, 2.0));
+    let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| {
+            anyrender::fill_pattern_tiles(
+                scene,
+                &pattern,
+                Fill::NonZero,
+                Affine::IDENTITY,
+                None,
+                &Rect::new(0.0, 0.0, 1280.0, 20000.0),
+                Some(Rect::new(0.0, 0.0, SIZE as f64, SIZE as f64)),
+            );
+        },
+        SIZE,
+        SIZE,
+    );
+    assert_close(pixel(&buffer, 40, 65), RED);
+    assert_close(pixel(&buffer, 41, 65), CLEAR);
 }
 
 /// A pattern whose tile is solid red paints glyphs the same as solid red does.
@@ -295,6 +332,7 @@ fn pattern_glyphs_fallback_tiles() {
                 x: i as f32 * 25.0,
                 y: 0.0,
             }),
+            None,
         )
     });
 }
@@ -341,6 +379,7 @@ fn check_tile_origin<R: ImageRenderer>(fallback: bool) {
                     Affine::IDENTITY,
                     None,
                     &shape,
+                    None,
                 );
             } else {
                 scene.fill(Fill::NonZero, Affine::IDENTITY, &pattern, None, &shape);
@@ -446,6 +485,7 @@ fn pattern_fallback_seams_and_many_tiles() {
                     transform,
                     None,
                     &shape,
+                    None,
                 );
             },
             SIZE,
@@ -574,6 +614,7 @@ fn pattern_glyph_transform_fallback() {
                 x: i as f32 * 40.0,
                 y: 0.0,
             }),
+            None,
         )
     });
 }

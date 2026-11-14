@@ -1,4 +1,5 @@
 use anyrender::{ImageRenderer, RenderContext, ResourceId};
+use kurbo::Rect;
 use peniko::ImageData;
 use rustc_hash::FxHashMap;
 use vello::{Renderer as VelloRenderer, RendererOptions, Scene as VelloScene};
@@ -96,6 +97,10 @@ impl ImageRenderer for VelloImageRenderer {
             device_handle: Some(&self.buffer_renderer.device_handle),
             texture_handles: Some(&mut self.texture_handles),
             pattern_scenes: Default::default(),
+            viewport: {
+                let size = self.buffer_renderer.size();
+                Some(Rect::new(0.0, 0.0, size.width as f64, size.height as f64))
+            },
         });
 
         for handle in self.texture_handles.values() {

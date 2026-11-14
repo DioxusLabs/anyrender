@@ -140,6 +140,15 @@ pub struct WebGlScenePainter<'s> {
 }
 
 impl<'s> WebGlScenePainter<'s> {
+    fn viewport(&self) -> Option<Rect> {
+        Some(Rect::new(
+            0.0,
+            0.0,
+            f64::from(self.scene.width()),
+            f64::from(self.scene.height()),
+        ))
+    }
+
     pub fn new(scene: &'s mut vello_gpu::Scene, image_manager: WebGlImageManager<'s>) -> Self {
         Self {
             scene,
@@ -301,6 +310,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
+            let viewport = self.viewport();
             anyrender::stroke_pattern_tiles(
                 self,
                 pattern,
@@ -308,6 +318,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 transform,
                 brush_transform,
                 shape,
+                viewport,
             );
             return;
         }
@@ -330,7 +341,16 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
-            anyrender::fill_pattern_tiles(self, pattern, style, transform, brush_transform, shape);
+            let viewport = self.viewport();
+            anyrender::fill_pattern_tiles(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+                viewport,
+            );
             return;
         }
         self.scene.set_transform(transform);
@@ -362,6 +382,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
+            let viewport = self.viewport();
             anyrender::draw_glyphs_pattern_tiles(
                 self,
                 pattern,
@@ -375,6 +396,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 transform,
                 glyph_transform,
                 glyphs,
+                viewport,
             );
             return;
         }
