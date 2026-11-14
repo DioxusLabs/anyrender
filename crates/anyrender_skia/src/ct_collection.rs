@@ -6,6 +6,8 @@
 use std::ffi::c_void;
 
 use peniko::{Blob, FontData};
+#[cfg(test)]
+use skia_safe::Data;
 use skia_safe::Typeface;
 use skrifa::raw::TableProvider;
 use skrifa::string::StringId;
@@ -142,8 +144,8 @@ pub(crate) fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
             return None;
         }
 
-        // CoreText returns the faces in collection order; check by name so a skipped face
-        // cannot shift the indices.
+        // CoreText returns the faces in collection order, but gives a variable face one
+        // descriptor per named instance, so match by PostScript name where the index misses.
         let count = CFArrayGetCount(descriptors);
         let index = font.index as CFIndex;
         let matches = |i: CFIndex| match &name {
@@ -182,6 +184,7 @@ pub(crate) fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     #[link(name = "CoreText", kind = "framework")]
@@ -193,70 +196,119 @@ mod tests {
         fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
     }
 
-    fn face_count(data: &[u8]) -> u32 {
-        match skrifa::raw::FileRef::new(data).unwrap() {
-            skrifa::raw::FileRef::Collection(collection) => collection.len(),
-            skrifa::raw::FileRef::Font(_) => 1,
+    fn find_collections(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for path in entries.flatten().map(|entry| entry.path()) {
+            if path.is_dir() {
+                find_collections(&path, out);
+            } else if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| {
+                    ext.eq_ignore_ascii_case("ttc") || ext.eq_ignore_ascii_case("otc")
+                })
+            {
+                out.push(path);
+            }
         }
     }
 
+    fn variation_position(typeface: &Typeface) -> Vec<(u32, f32)> {
+        typeface
+            .variation_design_position()
+            .unwrap_or_default()
+            .iter()
+            .map(|coord| (*coord.axis, coord.value))
+            .collect()
+    }
+
+    fn assert_draws(typeface: Typeface, what: &str) {
+        let font = skia_safe::Font::from_typeface(typeface, 48.0);
+        let Some(glyph) = ['H', '0', '\u{1F600}', '\u{4E00}', '\u{0915}']
+            .into_iter()
+            .map(|c| font.unichar_to_glyph(c as i32))
+            .find(|&glyph| glyph != 0)
+        else {
+            return;
+        };
+        let mut surface = skia_safe::surfaces::raster_n32_premul((64, 64)).unwrap();
+        surface.canvas().draw_glyphs_at(
+            &[glyph],
+            &[skia_safe::Point::new(4.0, 52.0)][..],
+            (0.0, 0.0),
+            &font,
+            &skia_safe::Paint::default(),
+        );
+        let pixmap = surface.peek_pixels().unwrap();
+        let inked = pixmap
+            .bytes()
+            .unwrap()
+            .chunks(4)
+            .filter(|px| px[3] != 0)
+            .count();
+        assert!(inked > 0, "{what}: nothing drawn");
+    }
+
+    /// Every face of every installed collection opens without copying, as the same face (by
+    /// PostScript name and variation position) that the copying fallback would give.
     #[test]
     fn opens_every_face_of_system_collections_without_copying() {
-        for path in [
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-            "/System/Library/Fonts/Menlo.ttc",
-            "/System/Library/Fonts/Apple Color Emoji.ttc",
+        let mut paths = Vec::new();
+        for dir in [
+            "/System/Library/Fonts",
+            "/Library/Fonts",
+            "/System/Library/AssetsV2",
         ] {
-            let Ok(bytes) = std::fs::read(path) else {
+            find_collections(Path::new(dir), &mut paths);
+        }
+        let font_mgr = skia_safe::FontMgr::new();
+        for path in &paths {
+            let blob = Blob::new(Arc::new(std::fs::read(path).unwrap()));
+            let range = blob.data().as_ptr_range();
+            let Some(collection) = oaty::Collection::new(blob.data()) else {
                 continue;
             };
-            let blob = Blob::new(Arc::new(bytes));
-            let range = blob.data().as_ptr_range();
-            for index in 0..face_count(blob.data()) {
-                let font = FontData::new(blob.clone(), index);
-                let typeface = typeface_from_collection(&font).expect(path);
+            let skrifa::raw::FileRef::Collection(faces) =
+                skrifa::raw::FileRef::new(blob.data()).unwrap()
+            else {
+                continue;
+            };
+            for index in 0..faces.len() {
+                let what = format!("{} {index}", path.display());
+                let typeface = typeface_from_collection(&FontData::new(blob.clone(), index))
+                    .unwrap_or_else(|| panic!("{what}: not opened"));
                 let face = FontRef::from_index(blob.data(), index).unwrap();
                 assert_eq!(
                     typeface.post_script_name(),
                     postscript_name(&face),
-                    "{path} {index}"
+                    "{what}"
                 );
 
-                let tag = u32::from_be_bytes(*b"head");
-                let expected = face
+                let copied = collection
+                    .get_font(index)
+                    .and_then(|font| font.copy_data())
+                    .and_then(|data| font_mgr.new_from_data(Data::new_copy(&data), 0))
+                    .unwrap();
+                assert_eq!(
+                    variation_position(&typeface),
+                    variation_position(&copied),
+                    "{what}"
+                );
+
+                let head = face
                     .table_data(skrifa::raw::types::Tag::new(b"head"))
                     .unwrap();
-                let table = unsafe { CTFontCopyTable(typeface.ct_font().unwrap(), tag, 0) };
+                let table = unsafe {
+                    CTFontCopyTable(typeface.ct_font().unwrap(), u32::from_be_bytes(*b"head"), 0)
+                };
                 let ptr = unsafe { CFDataGetBytePtr(table) };
-                assert!(range.contains(&ptr), "{path} {index}: table was copied");
-                assert_eq!(ptr, expected.as_bytes().as_ptr(), "{path} {index}");
                 unsafe { CFRelease(table) };
+                assert!(range.contains(&ptr), "{what}: table was copied");
+                assert_eq!(ptr, head.as_bytes().as_ptr(), "{what}");
 
-                let mut surface = skia_safe::surfaces::raster_n32_premul((64, 64)).unwrap();
-                let skia_font = skia_safe::Font::from_typeface(typeface, 48.0);
-                let glyph = ['H', '\u{1F600}']
-                    .into_iter()
-                    .map(|c| skia_font.unichar_to_glyph(c as i32))
-                    .find(|&glyph| glyph != 0)
-                    .unwrap_or(0);
-                assert_ne!(glyph, 0, "{path} {index}");
-                let paint = skia_safe::Paint::default();
-                surface.canvas().draw_glyphs_at(
-                    &[glyph],
-                    &[skia_safe::Point::new(4.0, 52.0)][..],
-                    (0.0, 0.0),
-                    &skia_font,
-                    &paint,
-                );
-                let pixmap = surface.peek_pixels().unwrap();
-                let inked = pixmap
-                    .bytes()
-                    .unwrap()
-                    .chunks(4)
-                    .filter(|px| px[3] != 0)
-                    .count();
-                assert!(inked > 50, "{path} {index}: nothing drawn");
+                assert_draws(typeface, &what);
             }
         }
     }
@@ -282,13 +334,6 @@ mod cache_tests {
         let b = Blob::new(Arc::new(b));
         let ta = typeface_from_collection(&FontData::new(a.clone(), 1)).unwrap();
         let tb = typeface_from_collection(&FontData::new(b.clone(), 1)).unwrap();
-        let tb_same = typeface_from_collection(&FontData::new(b.clone(), 1)).unwrap();
-        eprintln!(
-            "ids: a={} b={} b again={}",
-            ta.unique_id(),
-            tb.unique_id(),
-            tb_same.unique_id()
-        );
         let glyf_tag = u32::from_be_bytes(*b"glyf");
         let tb_glyf = tb.copy_table_data(glyf_tag).unwrap();
         assert_eq!(
