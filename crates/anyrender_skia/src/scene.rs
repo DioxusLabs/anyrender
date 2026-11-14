@@ -961,7 +961,7 @@ fn convert_filter_effect(
                     skia_safe::ISize::new(r.width().round() as i32, r.height().round() as i32)
                 });
             let num_octaves = turbulence_filter.num_octaves as usize;
-            let seed = turbulence_filter.seed as f32;
+            let seed = turbulence_filter.seed.trunc();
             let shader = match turbulence_filter.turbulence_type {
                 TurbulenceType::FractalNoise => {
                     shaders::fractal_noise(base_frequency, num_octaves, seed, tile_size)

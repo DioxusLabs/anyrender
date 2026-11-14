@@ -815,8 +815,9 @@ pub mod turbulence {
         pub base_frequency_y: f32,
         /// Number of octaves for fractal noise. More octaves add finer detail.
         pub num_octaves: u32,
-        /// Random seed for reproducible noise generation.
-        pub seed: u32,
+        /// Seed for the pseudo-random number generator. As with SVG's `seed`, it is truncated
+        /// toward zero, and zero and negative values are valid seeds.
+        pub seed: f32,
         /// Type of noise: smooth fractal or more chaotic turbulence.
         pub turbulence_type: TurbulenceType,
         /// Whether to adjust the frequencies so that the noise tiles seamlessly across the
