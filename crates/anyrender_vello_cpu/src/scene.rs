@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use anyrender::{Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, BezPath, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
-use vello_cpu::{PaintType, Pixmap};
+use vello_cpu::{Mask, PaintType, Pixmap};
 
 use crate::image_cache::{ImageCache, ImageCacheConfig};
 
@@ -111,6 +111,18 @@ enum LayerKind {
     Clip,
     /// A filter layer whose input and output are clipped to its filter region.
     FilterRegionLayer,
+    LuminanceMask(Box<LuminanceMaskLayer>),
+}
+
+/// A luminance mask layer whose content is being drawn into its own render context.
+///
+/// vello_cpu can only apply a luminance mask that has already been rasterized, so the mask
+/// content is rendered separately and applied to the parent context when the layer is popped.
+struct LuminanceMaskLayer {
+    parent_ctx: vello_cpu::RenderContext,
+    fill: Fill,
+    transform: Affine,
+    clip: BezPath,
 }
 
 pub struct VelloCpuScenePainter {
@@ -119,6 +131,12 @@ pub struct VelloCpuScenePainter {
     pub(crate) image_cache: ImageCache,
     layer_stack: Vec<LayerKind>,
     glyph_caching: bool,
+    /// Resources for rendering luminance mask content, kept apart from `resources` so that
+    /// rendering a mask mid-frame doesn't advance the main glyph caches.
+    mask_resources: vello_cpu::Resources,
+    /// Render contexts of popped luminance mask layers, reused by later ones.
+    spare_mask_ctxs: Vec<vello_cpu::RenderContext>,
+    luminance_mask_depth: usize,
 }
 
 impl VelloCpuScenePainter {
@@ -133,6 +151,9 @@ impl VelloCpuScenePainter {
             image_cache: ImageCache::new(config),
             layer_stack: Vec::new(),
             glyph_caching: false,
+            mask_resources: vello_cpu::Resources::new(),
+            spare_mask_ctxs: Vec::new(),
+            luminance_mask_depth: 0,
         }
     }
 
@@ -143,6 +164,60 @@ impl VelloCpuScenePainter {
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub fn set_glyph_caching(&mut self, enabled: bool) {
         self.glyph_caching = enabled;
+    }
+
+    fn push_luminance_mask_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
+        let (width, height) = (self.render_ctx.width(), self.render_ctx.height());
+        let mask_ctx = match self.spare_mask_ctxs.pop() {
+            Some(mut ctx) if ctx.width() == width && ctx.height() == height => {
+                ctx.reset();
+                ctx
+            }
+            _ => {
+                // Single-threaded, so that each mask context doesn't start its own thread pool.
+                let settings = vello_cpu::RenderSettings {
+                    num_threads: 0,
+                    ..*self.render_ctx.render_settings()
+                };
+                vello_cpu::RenderContext::new_with(width, height, settings)
+            }
+        };
+        let parent_ctx = std::mem::replace(&mut self.render_ctx, mask_ctx);
+        self.luminance_mask_depth += 1;
+        self.layer_stack
+            .push(LayerKind::LuminanceMask(Box::new(LuminanceMaskLayer {
+                parent_ctx,
+                fill,
+                transform,
+                clip: clip.into_path(DEFAULT_TOLERANCE),
+            })));
+    }
+
+    fn pop_luminance_mask_layer(&mut self, layer: LuminanceMaskLayer) {
+        let mut mask_ctx = std::mem::replace(&mut self.render_ctx, layer.parent_ctx);
+        self.luminance_mask_depth -= 1;
+        mask_ctx.flush();
+        let mut pixmap = Pixmap::new(mask_ctx.width(), mask_ctx.height());
+        mask_ctx.render(pixmap.as_mut(), &mut self.mask_resources);
+        mask_ctx.reset();
+        self.spare_mask_ctxs.push(mask_ctx);
+        let mask = Mask::new_luminance(&pixmap);
+
+        // An unclipped layer, so that everything outside of the clip is masked out too.
+        self.render_ctx.set_transform(Affine::IDENTITY);
+        self.render_ctx.push_layer(
+            None,
+            Some(BlendMode::new(Mix::Normal, Compose::DestIn)),
+            None,
+            Some(mask),
+            None,
+        );
+        self.render_ctx.set_transform(layer.transform);
+        self.render_ctx.set_fill_rule(layer.fill);
+        self.render_ctx.set_paint(PaintType::Solid(Color::BLACK));
+        self.render_ctx.reset_paint_transform();
+        self.render_ctx.fill_path(&layer.clip);
+        self.render_ctx.pop_layer();
     }
 
     fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
@@ -182,8 +257,15 @@ impl VelloCpuScenePainter {
 impl RenderContext for VelloCpuScenePainter {}
 impl PaintScene for VelloCpuScenePainter {
     fn reset(&mut self) {
+        while let Some(kind) = self.layer_stack.pop() {
+            if let LayerKind::LuminanceMask(layer) = kind {
+                let mut mask_ctx = std::mem::replace(&mut self.render_ctx, layer.parent_ctx);
+                mask_ctx.reset();
+                self.spare_mask_ctxs.push(mask_ctx);
+            }
+        }
+        self.luminance_mask_depth = 0;
         self.render_ctx.reset();
-        self.layer_stack.clear();
     }
 
     fn push_layer(
@@ -239,10 +321,15 @@ impl PaintScene for VelloCpuScenePainter {
     fn push_mask_layer(
         &mut self,
         fill: Fill,
-        _mode: MaskMode,
+        mode: MaskMode,
         transform: Affine,
         clip: &impl Shape,
     ) {
+        if mode == MaskMode::Luminance {
+            self.push_luminance_mask_layer(fill, transform, clip);
+            return;
+        }
+
         let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
 
         // Everything outside of the clip is masked out
@@ -259,7 +346,6 @@ impl PaintScene for VelloCpuScenePainter {
         self.fill(fill, transform, Color::BLACK, None, clip);
         self.pop_layer();
 
-        // Luminance masks aren't supported yet, so they are treated as alpha masks
         self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
@@ -287,6 +373,7 @@ impl PaintScene for VelloCpuScenePainter {
                 self.render_ctx.pop_layer();
                 self.render_ctx.pop_clip();
             }
+            Some(LayerKind::LuminanceMask(layer)) => self.pop_luminance_mask_layer(*layer),
             None => {}
         }
     }
@@ -349,8 +436,15 @@ impl PaintScene for VelloCpuScenePainter {
         let paint = self.convert_paint(paint.into());
         self.render_ctx.set_paint(paint);
 
+        // Mask content is rendered with `mask_resources`, which doesn't use the glyph atlas.
+        let in_mask = self.luminance_mask_depth > 0;
         let glyph_caching =
-            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+            self.glyph_caching && !in_mask && supports_glyph_caching(transform, glyph_transform);
+        let resources = if in_mask {
+            &mut self.mask_resources
+        } else {
+            &mut self.resources
+        };
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
@@ -358,7 +452,7 @@ impl PaintScene for VelloCpuScenePainter {
                 self.render_ctx.set_fill_rule(fill);
                 let _ = self
                     .render_ctx
-                    .glyph_run(&mut self.resources, font)
+                    .glyph_run(resources, font)
                     .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
@@ -375,7 +469,7 @@ impl PaintScene for VelloCpuScenePainter {
                 self.render_ctx.set_stroke(stroke.clone());
                 let _ = self
                     .render_ctx
-                    .glyph_run(&mut self.resources, font)
+                    .glyph_run(resources, font)
                     .atlas_cache(glyph_caching)
                     .font_size(font_size)
                     .hint(hint)
@@ -797,5 +891,122 @@ mod box_shadow_tests {
         assert_eq!(alpha(&buffer, 25, 50), 255);
         assert_eq!(alpha(&buffer, 50, 50), 0);
         assert_eq!(alpha(&buffer, 10, 10), 0);
+    }
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use anyrender::{MaskMode, PaintScene, render_to_buffer};
+    use kurbo::{Affine, Rect};
+    use peniko::{
+        Color, Fill,
+        color::palette::css::{BLACK, LIME, RED, WHITE},
+    };
+
+    use crate::VelloCpuImageRenderer;
+
+    fn fill_rect(scene: &mut impl PaintScene, color: Color, rect: Rect) {
+        scene.fill(Fill::NonZero, Affine::IDENTITY, color, None, &rect);
+    }
+
+    /// Draws red over the whole canvas, masked by white, lime, black, half-transparent white and
+    /// 50% gray columns, each 20px wide, with the mask clipped to `0..80` vertically.
+    fn render_masked(mode: MaskMode, nested: bool) -> Vec<u8> {
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| {
+                fill_rect(scene, RED, Rect::new(0.0, 0.0, 100.0, 100.0));
+                scene.push_mask_layer(
+                    Fill::NonZero,
+                    mode,
+                    Affine::translate((0.0, 10.0)),
+                    &Rect::new(0.0, -10.0, 100.0, 70.0),
+                );
+                fill_rect(scene, WHITE, Rect::new(0.0, 0.0, 20.0, 100.0));
+                fill_rect(scene, LIME, Rect::new(20.0, 0.0, 40.0, 100.0));
+                fill_rect(scene, BLACK, Rect::new(40.0, 0.0, 60.0, 100.0));
+                fill_rect(
+                    scene,
+                    WHITE.with_alpha(0.5),
+                    Rect::new(60.0, 0.0, 80.0, 100.0),
+                );
+                fill_rect(
+                    scene,
+                    Color::from_rgb8(128, 128, 128),
+                    Rect::new(80.0, 0.0, 100.0, 100.0),
+                );
+                if nested {
+                    // An inner luminance mask that keeps all of the outer mask's content.
+                    scene.push_mask_layer(
+                        Fill::NonZero,
+                        MaskMode::Luminance,
+                        Affine::IDENTITY,
+                        &Rect::new(0.0, 0.0, 100.0, 100.0),
+                    );
+                    fill_rect(scene, WHITE, Rect::new(0.0, 0.0, 100.0, 100.0));
+                    scene.pop_layer();
+                }
+                scene.pop_layer();
+            },
+            100,
+            100,
+        )
+    }
+
+    fn alpha_at(buffer: &[u8], x: usize, y: usize) -> u8 {
+        buffer[(y * 100 + x) * 4 + 3]
+    }
+
+    fn assert_close(actual: u8, expected: u8, what: &str) {
+        assert!(
+            actual.abs_diff(expected) <= 2,
+            "{what}: expected alpha {expected}, got {actual}"
+        );
+    }
+
+    fn assert_luminance_mask(buffer: &[u8]) {
+        assert_close(alpha_at(buffer, 10, 40), 255, "white");
+        // 0.7152 * 255
+        assert_close(alpha_at(buffer, 30, 40), 182, "lime");
+        assert_close(alpha_at(buffer, 50, 40), 0, "black");
+        assert_close(alpha_at(buffer, 70, 40), 128, "half-transparent white");
+        // vello_cpu's luminance masks use the sRGB-encoded values, like browsers do.
+        assert_close(alpha_at(buffer, 90, 40), 128, "gray");
+        // Outside of the mask's clip, everything is masked out.
+        assert_close(alpha_at(buffer, 10, 90), 0, "outside clip");
+        assert_eq!(&buffer[(40 * 100 + 10) * 4..][..3], &[255, 0, 0]);
+    }
+
+    #[test]
+    fn luminance_masks_use_luminance() {
+        assert_luminance_mask(&render_masked(MaskMode::Luminance, false));
+    }
+
+    #[test]
+    fn nested_luminance_masks() {
+        assert_luminance_mask(&render_masked(MaskMode::Luminance, true));
+    }
+
+    #[test]
+    fn alpha_masks_use_alpha() {
+        let buffer = render_masked(MaskMode::Alpha, false);
+        assert_close(alpha_at(&buffer, 10, 40), 255, "white");
+        assert_close(alpha_at(&buffer, 30, 40), 255, "lime");
+        assert_close(alpha_at(&buffer, 50, 40), 255, "black");
+        assert_close(alpha_at(&buffer, 70, 40), 128, "half-transparent white");
+        assert_close(alpha_at(&buffer, 10, 90), 0, "outside clip");
+    }
+
+    #[test]
+    fn unpopped_luminance_mask_is_discarded_on_reset() {
+        let mut scene = crate::VelloCpuScenePainter::new(10, 10);
+        scene.push_mask_layer(
+            Fill::NonZero,
+            MaskMode::Luminance,
+            Affine::IDENTITY,
+            &Rect::new(0.0, 0.0, 10.0, 10.0),
+        );
+        scene.reset();
+        fill_rect(&mut scene, RED, Rect::new(0.0, 0.0, 10.0, 10.0));
+        assert_eq!(scene.finish().data()[0].a, 255);
     }
 }
