@@ -21,3 +21,15 @@ pub type VelloCpuWindowRenderer = SoftbufferWindowRenderer<crate::VelloCpuImageR
     not(feature = "pixels_window_renderer")
 ))]
 pub type VelloCpuRendererOptions = SoftbufferRendererOptions;
+
+/// Creates [`VelloCpuWindowRenderer`]s.
+#[cfg(feature = "pixels_window_renderer")]
+pub type VelloCpuWindowRendererContext =
+    pixels_window_renderer::PixelsWindowRendererContext<crate::VelloCpuImageRenderer>;
+/// Creates [`VelloCpuWindowRenderer`]s.
+#[cfg(all(
+    feature = "softbuffer_window_renderer",
+    not(feature = "pixels_window_renderer")
+))]
+pub type VelloCpuWindowRendererContext =
+    softbuffer_window_renderer::SoftbufferWindowRendererContext<crate::VelloCpuImageRenderer>;

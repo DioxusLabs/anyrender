@@ -2,11 +2,13 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer, WindowRendererContext,
+};
 use debug_timer::debug_timer;
 use kurbo::{Affine, Rect};
 use softbuffer::{Context, Surface};
-use std::{num::NonZero, sync::Arc};
+use std::{marker::PhantomData, num::NonZero, sync::Arc};
 
 /// Configuration options for the Softbuffer renderer.
 #[derive(Debug, Clone)]
@@ -56,6 +58,42 @@ pub struct ActiveRenderState {
 pub enum RenderState {
     Active(ActiveRenderState),
     Suspended,
+}
+
+/// Creates [`SoftbufferWindowRenderer`]s that all use the same options. This backend has no state to share
+/// between windows.
+pub struct SoftbufferWindowRendererContext<Renderer: ImageRenderer> {
+    options: SoftbufferRendererOptions,
+    renderer: PhantomData<fn() -> Renderer>,
+}
+
+impl<Renderer: ImageRenderer> SoftbufferWindowRendererContext<Renderer> {
+    pub fn new(options: impl Into<SoftbufferRendererOptions>) -> Self {
+        Self {
+            options: options.into(),
+            renderer: PhantomData,
+        }
+    }
+}
+
+impl<Renderer: ImageRenderer> Default for SoftbufferWindowRendererContext<Renderer> {
+    fn default() -> Self {
+        Self::new(SoftbufferRendererOptions::default())
+    }
+}
+
+impl<Renderer: ImageRenderer> Clone for SoftbufferWindowRendererContext<Renderer> {
+    fn clone(&self) -> Self {
+        Self::new(self.options.clone())
+    }
+}
+
+impl<Renderer: ImageRenderer> WindowRendererContext for SoftbufferWindowRendererContext<Renderer> {
+    type Renderer = SoftbufferWindowRenderer<Renderer>;
+
+    fn create_renderer(&self) -> SoftbufferWindowRenderer<Renderer> {
+        SoftbufferWindowRenderer::with_options(self.options.clone())
+    }
 }
 
 pub struct SoftbufferWindowRenderer<Renderer: ImageRenderer> {
