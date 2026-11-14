@@ -178,26 +178,13 @@ pub fn apply<I>(
         pixmap: Pixmap::new(w, h).unwrap(),
         linear: false,
     };
-    let mut source = Image {
+    let source = Image {
         pixmap: source,
         linear: false,
     };
 
     let full = IntRect::from_xywh(0, 0, w, h).unwrap();
-    // The filter region, in the pixel space of `source`. It clips the source graphic and every
-    // result.
-    let source_region = match filter.region() {
-        Some(rect) => {
-            let Some(filter_region) = pixel_region(rect, transform, region, full) else {
-                pixmap.fill(tiny_skia::Color::TRANSPARENT);
-                return;
-            };
-            clip_to(&mut source.pixmap, Some(filter_region));
-            filter_region
-        }
-        None => full,
-    };
-    let full = source_region;
+    let source_region = full;
     let mut results: Vec<Image> = Vec::with_capacity(filter.nodes().len());
     // Each result's primitive subregion, in the pixel space of `source`.
     let mut regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
@@ -205,35 +192,17 @@ pub fn apply<I>(
     let mut filter_regions: Vec<IntRect> = Vec::with_capacity(filter.nodes().len());
     for node in filter.nodes() {
         // This primitive's filter region. It clips its inputs and its result.
-        let full = match node.region {
-            Some(rect) => pixel_region(rect, transform, region, full),
-            None => Some(full),
-        };
-        let Some(full) = full else {
+        let Some(full) = pixel_region(node.region, transform, region, source_region) else {
             results.push(empty());
             regions.push(source_region);
             filter_regions.push(source_region);
             continue;
         };
+        let subregion = pixel_region(node.subregion, transform, region, full);
         let input_region = |input: &Option<FilterInput>| match input {
             None => regions.last().copied().unwrap_or(full),
             Some(FilterInput::Result(id)) => regions.get(id.0 as usize).copied().unwrap_or(full),
             Some(FilterInput::Source(_)) => full,
-        };
-        let subregion = match node.subregion {
-            Some(rect) => pixel_region(rect, transform, region, full),
-            None => match node.effect {
-                FilterEffect::Flood(_) | FilterEffect::Turbulence(_) | FilterEffect::Image(_) => {
-                    Some(full)
-                }
-                _ => {
-                    let primary = input_region(&node.inputs.primary);
-                    match &node.inputs.secondary {
-                        Some(_) => union(primary, input_region(&node.inputs.secondary)),
-                        None => Some(primary),
-                    }
-                }
-            },
         };
 
         let resolve = |input: Option<FilterInput>, results: &[Image]| -> Image {
@@ -516,12 +485,7 @@ pub fn apply<I>(
             }
         };
         let mut result = result;
-        // As in resvg, results are only clipped to explicit subregions (and the filter region).
-        if node.subregion.is_some() {
-            clip_to(&mut result.pixmap, subregion);
-        } else if node.region.or(filter.region()).is_some() {
-            clip_to(&mut result.pixmap, Some(full));
-        }
+        clip_to(&mut result.pixmap, subregion);
         results.push(result);
         regions.push(subregion.unwrap_or(full));
         filter_regions.push(full);
@@ -601,15 +565,6 @@ fn tile(pixmap: &Pixmap, tile: IntRect) -> Pixmap {
         out.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
     }
     out
-}
-
-fn union(a: IntRect, b: IntRect) -> Option<IntRect> {
-    IntRect::from_ltrb(
-        a.left().min(b.left()),
-        a.top().min(b.top()),
-        a.right().max(b.right()),
-        a.bottom().max(b.bottom()),
-    )
 }
 
 fn transform_scale(transform: Affine) -> (f64, f64) {

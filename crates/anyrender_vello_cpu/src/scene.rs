@@ -202,7 +202,10 @@ impl PaintScene for VelloCpuScenePainter {
             .and_then(crate::filters::convert_filter)
             .filter(|_| cfg!(not(feature = "multithreading")))
         {
-            Some(converted) => (Some(converted), filter.and_then(|f| f.region())),
+            Some(converted) => (
+                Some(converted),
+                filter.and_then(|f| Some(f.nodes().first()?.region)),
+            ),
             None => (None, None),
         };
 

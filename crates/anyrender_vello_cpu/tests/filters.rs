@@ -46,7 +46,7 @@ fn pixel(buffer: &[u8], x: u32, y: u32) -> [u8; 4] {
 
 #[test]
 fn results_are_clipped_to_the_filter_region() {
-    let mut filter = Filter::empty().with_region(Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
+    let mut filter = Filter::new(Rect::new(0.0, 0.0, 4.0, 4.0));
     filter.add(
         FilterEffect::Flood(Color::from_rgb8(0, 255, 0)),
         FilterInputs::NONE,
@@ -59,7 +59,7 @@ fn results_are_clipped_to_the_filter_region() {
 #[test]
 fn source_graphic_is_clipped_to_the_filter_region() {
     let region = Rect::new(8.0, 0.0, SIZE as f64, SIZE as f64);
-    let mut filter = Filter::empty().with_region(Some(region));
+    let mut filter = Filter::new(region);
     filter.add(
         FilterEffect::Offset(Vec2::new(4.0, 0.0)),
         FilterInputs::NONE,
