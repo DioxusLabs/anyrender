@@ -237,4 +237,19 @@ mod tests {
         assert!(matches!(commands[2], RenderCommand::PushMaskLayer(_)));
         assert!(matches!(commands.last(), Some(RenderCommand::PopLayer)));
     }
+
+    #[test]
+    fn isolation_isolate_pushes_layer() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+            <g style="isolation:isolate"><rect width="10" height="10"/></g>
+        </svg>"##;
+        let mut scene = Scene::new();
+        render_svg_str(&mut scene, svg, Affine::IDENTITY).unwrap();
+        assert!(
+            scene
+                .commands
+                .iter()
+                .any(|command| matches!(command, RenderCommand::PushLayer(_)))
+        );
+    }
 }
