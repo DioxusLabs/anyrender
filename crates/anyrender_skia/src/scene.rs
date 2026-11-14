@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
+use anyrender::filters::color_transformation::ColorMatrix;
 use anyrender::filters::component_transfer::TransferFunction;
 use anyrender::filters::composite::CompositeOperator;
 use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterSource,
+};
 use anyrender::{PaintScene, RenderContext};
 use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
@@ -759,6 +762,17 @@ fn resolve_input(
     let result = |id: u16| results.get(id as usize).cloned().unwrap_or(source.clone());
     let (input, input_color_space) = match input {
         None => id.0.checked_sub(1).map_or(source.clone(), result),
+        Some(FilterInput::Source(FilterSource::SourceAlpha)) => (
+            skia_safe::image_filters::color_filter(
+                skia_safe::color_filters::matrix_row_major(
+                    &ColorMatrix::SOURCE_ALPHA.0,
+                    skia_safe::color_filters::Clamp::Yes,
+                ),
+                None,
+                None,
+            ),
+            FilterColorSpace::Srgb,
+        ),
         Some(FilterInput::Source(_)) => source.clone(),
         Some(FilterInput::Result(input_id)) => result(input_id.0),
     };

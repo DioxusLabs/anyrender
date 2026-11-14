@@ -1,21 +1,35 @@
 use anyrender::{
     Filter,
-    filters::{EdgeMode, FilterEffect},
+    filters::{EdgeMode, FilterEffect, FilterInput, FilterSource},
 };
 use vello_common::filter_effects::FilterPrimitive;
 
-pub(crate) fn convert_filter(filter: &Filter) -> Option<vello_common::filter_effects::Filter> {
-    let nodes = filter.nodes();
-    if nodes.is_empty() {
+pub(crate) struct ConvertedFilter {
+    pub(crate) filter: vello_common::filter_effects::Filter,
+    /// Whether the filter is a flood, whose output covers the whole layer.
+    pub(crate) floods: bool,
+}
+
+pub(crate) fn convert_filter(filter: &Filter) -> Option<ConvertedFilter> {
+    // Vello CPU only supports single-node filters at the moment, so fold
+    // away the primitives that do not change the result first.
+    let filter = filter.without_noops();
+    // A graph that doesn't fold to one primitive applied to the source
+    // graphic can't be run, so the content is drawn unfiltered.
+    let [node] = filter.nodes() else {
+        return None;
+    };
+    if !matches!(
+        node.inputs.primary,
+        None | Some(FilterInput::Source(FilterSource::SourceGraphic))
+    ) {
         return None;
     }
-
-    // Vello CPU only supports single-node filters at the moment
-    let node = &filter.nodes()[0];
     let primitive = convert_filter_effect(&node.effect)?;
-    Some(vello_common::filter_effects::Filter::from_primitive(
-        primitive,
-    ))
+    Some(ConvertedFilter {
+        floods: matches!(primitive, FilterPrimitive::Flood { .. }),
+        filter: vello_common::filter_effects::Filter::from_primitive(primitive),
+    })
 }
 
 pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimitive> {
