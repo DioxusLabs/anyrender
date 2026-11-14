@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use anyrender::{
     Filter,
     filters::{EdgeMode, FilterEffect},
 };
 use vello_common::filter_effects::FilterPrimitive;
 
-pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter_effects::Filter> {
+pub(crate) fn convert_filter(filter: &Filter) -> Option<vello_common::filter_effects::Filter> {
     let nodes = filter.nodes();
     if nodes.is_empty() {
         return None;
