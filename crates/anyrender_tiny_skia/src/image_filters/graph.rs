@@ -500,6 +500,12 @@ pub fn apply<I>(
 
 /// Maps a user-space primitive subregion to pixels of the filter `region`, clipped to `full`
 /// (`None` if nothing is left). Rounds outwards like resvg.
+///
+/// TODO: rounding as floor(x0) + ceil(width) is one pixel short of ceil(x1) when
+/// fract(x1) < fract(x0) (e.g. y 97.5..202.5 covers rows 97..201). Chrome and Firefox round both
+/// edges out (floor(x0)..ceil(x1)) and so include that last row/column. The spec doesn't say how
+/// to snap the region to pixels. resvg's reference images use this rounding, so switching to the
+/// browsers' fails the resvg text filter-bbox tests.
 fn pixel_region(
     rect: kurbo::Rect,
     transform: Affine,

@@ -186,7 +186,18 @@ impl TinySkiaScenePainter {
             .filter(|_| is_axis_aligned(transform))
             .map(|r| transform_bbox(transform, r))
             .filter(|r| is_pixel_aligned(*r));
+        // The filter region is a hard clip (Filter Effects 1 §8). Browsers round an axis-aligned
+        // region out to whole pixels rather than anti-aliasing its edges, so `region` alone
+        // expresses it; a rotated or skewed region still needs the mask for its edges.
+        let hard_filter_clip = matches!(
+            kind,
+            LayerKind::Group {
+                filter: Some(_),
+                ..
+            }
+        ) && is_axis_aligned(transform);
         let needs_mask = !empty
+            && !hard_filter_clip
             && !rect_clip.is_some_and(|r| {
                 r.x0 <= rect.x() as f64
                     && r.y0 <= rect.y() as f64
