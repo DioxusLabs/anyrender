@@ -229,8 +229,30 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = anyrender::Glyph>,
+        glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
     ) {
+        let paint: anyrender::PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            let tile_scene = self.take_pattern_scene(pattern);
+            anyrender::draw_glyphs_pattern_tiles_with(
+                self,
+                pattern,
+                font,
+                font_size,
+                hint,
+                normalized_coords,
+                embolden,
+                style,
+                brush_alpha,
+                transform,
+                glyph_transform,
+                glyphs,
+                |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
+            );
+            self.pattern_scenes.insert(pattern.id(), tile_scene);
+            return;
+        }
+        let brush_ref: BrushRef<'_> = paint.into();
         self.inner
             .draw_glyphs(font)
             .font_size(font_size)
@@ -239,7 +261,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .font_embolden(vello::FontEmbolden::new(kurbo::Diagonal2::new(
                 embolden.x, embolden.y,
             )))
-            .brush(paint.into())
+            .brush(brush_ref)
             .brush_alpha(brush_alpha)
             .transform(transform)
             .glyph_transform(glyph_transform)

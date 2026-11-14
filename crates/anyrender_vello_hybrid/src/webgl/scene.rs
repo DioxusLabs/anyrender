@@ -355,12 +355,30 @@ impl PaintScene for WebGlScenePainter<'_> {
         embolden: kurbo::Vec2,
         style: impl Into<StyleRef<'a>>,
         paint: impl Into<PaintRef<'a>>,
-        _brush_alpha: f32,
+        brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
     ) {
-        let paint = self.convert_paint(paint.into());
+        let paint: PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            anyrender::draw_glyphs_pattern_tiles(
+                self,
+                pattern,
+                font,
+                font_size,
+                hint,
+                normalized_coords,
+                embolden,
+                style,
+                brush_alpha,
+                transform,
+                glyph_transform,
+                glyphs,
+            );
+            return;
+        }
+        let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 

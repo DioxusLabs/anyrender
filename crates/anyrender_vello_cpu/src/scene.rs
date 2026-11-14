@@ -156,20 +156,40 @@ impl VelloCpuScenePainter {
         self.glyph_caching = enabled;
     }
 
-    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
-        match paint {
+    /// Converts `paint` for a draw with `transform`, returning it with its paint transform.
+    fn convert_paint(
+        &mut self,
+        paint: PaintRef<'_>,
+        transform: Affine,
+        brush_transform: Option<Affine>,
+    ) -> (PaintType, Affine) {
+        let brush_transform = brush_transform.unwrap_or(Affine::IDENTITY);
+        let paint = match paint {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
             Paint::Image(image) => PaintType::Image(ImageBrush {
                 image: self.image_cache.get_or_register(image.image),
                 sampler: image.sampler,
             }),
+            Paint::Pattern(pattern) => {
+                match self.pattern_pixmap(pattern, transform * brush_transform) {
+                    Some((pixmap, pixel_transform)) => {
+                        let paint = PaintType::Image(ImageBrush {
+                            image: ImageSource::Pixmap(pixmap),
+                            sampler: peniko::ImageSampler::new()
+                                .with_extend(peniko::Extend::Repeat)
+                                .with_quality(peniko::ImageQuality::High),
+                        });
+                        return (paint, brush_transform * pixel_transform);
+                    }
+                    None => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
+                }
+            }
             // TODO: custom paint
             Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
             Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-            // Patterns are converted by `set_paint`
-            Paint::Pattern(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-        }
+        };
+        (paint, brush_transform)
     }
 
     /// Sets the paint and paint transform for a draw with `transform`.
@@ -179,28 +199,9 @@ impl VelloCpuScenePainter {
         transform: Affine,
         brush_transform: Option<Affine>,
     ) {
-        let brush_transform = brush_transform.unwrap_or(Affine::IDENTITY);
-        if let Paint::Pattern(pattern) = paint {
-            let Some((pixmap, pixel_transform)) =
-                self.pattern_pixmap(pattern, transform * brush_transform)
-            else {
-                self.render_ctx
-                    .set_paint(PaintType::Solid(peniko::color::palette::css::TRANSPARENT));
-                return;
-            };
-            self.render_ctx.set_paint(PaintType::Image(ImageBrush {
-                image: ImageSource::Pixmap(pixmap),
-                sampler: peniko::ImageSampler::new()
-                    .with_extend(peniko::Extend::Repeat)
-                    .with_quality(peniko::ImageQuality::High),
-            }));
-            self.render_ctx
-                .set_paint_transform(brush_transform * pixel_transform);
-            return;
-        }
-        let paint = self.convert_paint(paint);
+        let (paint, paint_transform) = self.convert_paint(paint, transform, brush_transform);
         self.render_ctx.set_paint(paint);
-        self.render_ctx.set_paint_transform(brush_transform);
+        self.render_ctx.set_paint_transform(paint_transform);
     }
 
     /// Rasterizes one tile of `pattern` at the resolution it is drawn at with `transform` (the
@@ -431,8 +432,7 @@ impl PaintScene for VelloCpuScenePainter {
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
     ) {
         self.render_ctx.set_transform(transform);
-        let paint = self.convert_paint(paint.into());
-        self.render_ctx.set_paint(paint);
+        self.set_paint(paint.into(), transform, None);
 
         let glyph_caching =
             self.glyph_caching && supports_glyph_caching(transform, glyph_transform);

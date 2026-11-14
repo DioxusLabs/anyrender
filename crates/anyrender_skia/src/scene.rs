@@ -627,6 +627,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         glyph_transform: Option<kurbo::Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         if let Some(glyph_transform) = glyph_transform {

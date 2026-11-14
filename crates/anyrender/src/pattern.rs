@@ -5,10 +5,10 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use kurbo::{Affine, Rect, Shape, Stroke, StrokeOpts};
-use peniko::Fill;
+use kurbo::{Affine, Rect, Shape, Stroke, StrokeOpts, Vec2};
+use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 
-use crate::{PaintScene, Scene};
+use crate::{Glyph, NormalizedCoord, PaintScene, Scene};
 
 static PATTERN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -173,6 +173,131 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
         &outline,
         draw_tile,
     );
+}
+
+/// Draws a glyph run filled or stroked with `pattern`, by drawing the pattern's tiles into a
+/// layer composited onto the glyphs with [`Compose::SrcIn`]. This is a fallback for backends
+/// that can't paint glyphs with a pattern directly. Takes the same arguments as
+/// [`PaintScene::draw_glyphs`], with pattern space being the glyph run's space.
+///
+/// This is intended for use by backends.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn draw_glyphs_pattern_tiles<'a, S: PaintScene>(
+    painter: &mut S,
+    pattern: &Pattern,
+    font: &'a FontData,
+    font_size: f32,
+    hint: bool,
+    normalized_coords: &'a [NormalizedCoord],
+    embolden: Vec2,
+    style: impl Into<StyleRef<'a>>,
+    brush_alpha: f32,
+    transform: Affine,
+    glyph_transform: Option<Affine>,
+    glyphs: impl Iterator<Item = Glyph> + Clone,
+) {
+    draw_glyphs_pattern_tiles_with(
+        painter,
+        pattern,
+        font,
+        font_size,
+        hint,
+        normalized_coords,
+        embolden,
+        style,
+        brush_alpha,
+        transform,
+        glyph_transform,
+        glyphs,
+        |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
+    );
+}
+
+/// Like [`draw_glyphs_pattern_tiles`], but calls `draw_tile` to draw the content of each tile,
+/// as [`fill_pattern_tiles_with`] does.
+///
+/// This is intended for use by backends.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
+    painter: &mut S,
+    pattern: &Pattern,
+    font: &'a FontData,
+    font_size: f32,
+    hint: bool,
+    normalized_coords: &'a [NormalizedCoord],
+    embolden: Vec2,
+    style: impl Into<StyleRef<'a>>,
+    brush_alpha: f32,
+    transform: Affine,
+    glyph_transform: Option<Affine>,
+    glyphs: impl Iterator<Item = Glyph> + Clone,
+    draw_tile: impl FnMut(&mut S, Affine),
+) {
+    let style = style.into();
+    let Some(bounds) =
+        glyph_run_bounds(font_size, embolden, &style, glyph_transform, glyphs.clone())
+    else {
+        return;
+    };
+    painter.push_layer(
+        Fill::NonZero,
+        Mix::Normal,
+        brush_alpha,
+        transform,
+        &bounds,
+        None,
+        None,
+    );
+    painter.draw_glyphs(
+        font,
+        font_size,
+        hint,
+        normalized_coords,
+        embolden,
+        style,
+        Color::BLACK,
+        1.0,
+        transform,
+        glyph_transform,
+        glyphs,
+    );
+    painter.push_layer(
+        Fill::NonZero,
+        BlendMode::new(Mix::Normal, Compose::SrcIn),
+        1.0,
+        transform,
+        &bounds,
+        None,
+        None,
+    );
+    draw_tiles(painter, pattern, transform, bounds, draw_tile);
+    painter.pop_layer();
+    painter.pop_layer();
+}
+
+/// A conservative bounding box of a glyph run, in the run's space: each glyph is assumed to fit
+/// within two ems of its origin.
+fn glyph_run_bounds(
+    font_size: f32,
+    embolden: Vec2,
+    style: &StyleRef<'_>,
+    glyph_transform: Option<Affine>,
+    glyphs: impl Iterator<Item = Glyph>,
+) -> Option<Rect> {
+    let em = 2.0 * f64::from(font_size);
+    let glyph_box = Rect::new(-em, -em, em, em);
+    let mut glyph_box = glyph_transform
+        .unwrap_or(Affine::IDENTITY)
+        .transform_rect_bbox(glyph_box)
+        .inflate(embolden.x.abs(), embolden.y.abs());
+    if let StyleRef::Stroke(stroke) = style {
+        glyph_box = glyph_box.inflate(stroke.width, stroke.width);
+    }
+    glyphs
+        .map(|glyph| glyph_box + Vec2::new(f64::from(glyph.x), f64::from(glyph.y)))
+        .reduce(|a, b| a.union(b))
 }
 
 /// Draws every tile of `pattern` that intersects `bounds` (in pattern space), with

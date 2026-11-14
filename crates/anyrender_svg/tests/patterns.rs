@@ -161,3 +161,135 @@ fn pattern_fill_fallback_tiles() {
     assert_close(pixel(&buffer, 45, 65), RED);
     assert_close(pixel(&buffer, 55, 65), CLEAR);
 }
+
+/// A pattern whose tile is solid red paints glyphs the same as solid red does.
+fn check_glyphs<R: ImageRenderer>(
+    draw: impl Fn(&mut R::ScenePainter<'_>, &anyrender::Pattern, &peniko::FontData),
+) {
+    use anyrender::{Glyph, PaintScene, Pattern, recording::Scene};
+    use kurbo::Rect;
+    use peniko::{Blob, Color, Fill, FontData};
+    use std::sync::Arc;
+
+    static ROBOTO: &[u8] = include_bytes!("../../../assets/fonts/roboto/Roboto.ttf");
+    let font = FontData::new(Blob::new(Arc::new(ROBOTO)), 0);
+    let tile = Rect::new(0.0, 0.0, 10.0, 10.0);
+    let mut tile_scene = Scene::new();
+    tile_scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(255, 0, 0),
+        None,
+        &tile,
+    );
+    let pattern = Pattern::new(tile_scene, tile);
+
+    let solid = render_to_buffer::<R, _>(
+        |scene| {
+            scene.draw_glyphs(
+                &font,
+                40.0,
+                true,
+                &[],
+                Default::default(),
+                Fill::NonZero,
+                Color::from_rgb8(255, 0, 0),
+                1.0,
+                GLYPHS_TRANSFORM,
+                None,
+                glyphs(),
+            )
+        },
+        SIZE,
+        SIZE,
+    );
+    let patterned = render_to_buffer::<R, _>(|scene| draw(scene, &pattern, &font), SIZE, SIZE);
+
+    assert!(solid.chunks(4).any(|p| p == RED), "glyphs drew nothing");
+    for (i, (s, p)) in solid.chunks(4).zip(patterned.chunks(4)).enumerate() {
+        assert!(
+            s.iter().zip(p).all(|(s, p)| s.abs_diff(*p) <= 8),
+            "pixel {i}: solid {s:?}, pattern {p:?}"
+        );
+    }
+
+    fn glyphs() -> impl Iterator<Item = Glyph> + Clone {
+        (0..3).map(|i| Glyph {
+            id: 40 + i,
+            x: i as f32 * 25.0,
+            y: 0.0,
+        })
+    }
+}
+
+const GLYPHS_TRANSFORM: Affine = Affine::new([1.0, 0.0, 0.0, 1.0, 10.0, 60.0]);
+
+fn draw_patterned_glyphs<S: anyrender::PaintScene>(
+    scene: &mut S,
+    pattern: &anyrender::Pattern,
+    font: &peniko::FontData,
+) {
+    scene.draw_glyphs(
+        font,
+        40.0,
+        true,
+        &[],
+        Default::default(),
+        peniko::Fill::NonZero,
+        anyrender::PaintRef::Pattern(pattern),
+        1.0,
+        GLYPHS_TRANSFORM,
+        None,
+        (0..3).map(|i| anyrender::Glyph {
+            id: 40 + i,
+            x: i as f32 * 25.0,
+            y: 0.0,
+        }),
+    );
+}
+
+// The closure keeps the painter's lifetime generic.
+#[allow(clippy::redundant_closure)]
+#[test]
+fn pattern_glyphs_tiny_skia() {
+    check_glyphs::<TinySkiaImageRenderer>(|s, p, f| draw_patterned_glyphs(s, p, f));
+}
+
+// The closure keeps the painter's lifetime generic.
+#[allow(clippy::redundant_closure)]
+#[test]
+fn pattern_glyphs_vello_cpu() {
+    check_glyphs::<VelloCpuImageRenderer>(|s, p, f| draw_patterned_glyphs(s, p, f));
+}
+
+// The closure keeps the painter's lifetime generic.
+#[allow(clippy::redundant_closure)]
+#[test]
+fn pattern_glyphs_skia() {
+    check_glyphs::<SkiaImageRenderer>(|s, p, f| draw_patterned_glyphs(s, p, f));
+}
+
+/// The generic glyph fallback, which vello and vello_hybrid use.
+#[test]
+fn pattern_glyphs_fallback_tiles() {
+    check_glyphs::<VelloCpuImageRenderer>(|scene, pattern, font| {
+        anyrender::draw_glyphs_pattern_tiles(
+            scene,
+            pattern,
+            font,
+            40.0,
+            true,
+            &[],
+            Default::default(),
+            peniko::Fill::NonZero,
+            1.0,
+            GLYPHS_TRANSFORM,
+            None,
+            (0..3).map(|i| anyrender::Glyph {
+                id: 40 + i,
+                x: i as f32 * 25.0,
+                y: 0.0,
+            }),
+        )
+    });
+}
