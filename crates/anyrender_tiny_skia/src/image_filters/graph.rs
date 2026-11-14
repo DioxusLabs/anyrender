@@ -398,7 +398,11 @@ pub fn apply<I>(
                 if kernel.preserve_alpha {
                     demultiply_alpha(pixmap.data_mut().as_rgba_mut());
                 }
-                convolve_matrix::apply(kernel, image_mut(&mut pixmap));
+                // Edge modes see the edges of the filter region, not of the rounded-out layer.
+                if let Some(mut sub) = pixmap.clone_rect(full) {
+                    convolve_matrix::apply(kernel, image_mut(&mut sub));
+                    replace_region(&mut pixmap, full, &sub);
+                }
                 Image { pixmap, linear }
             }
             FilterEffect::DisplacementMap(fe) => {
