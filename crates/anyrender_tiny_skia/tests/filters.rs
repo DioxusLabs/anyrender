@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyrender::filters::{
     Filter, FilterColorSpace, FilterEffect, FilterGraphNode, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
+    turbulence::{TurbulenceFilter, TurbulenceType},
 };
 use anyrender::{PaintScene, render_to_buffer};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
@@ -134,4 +135,28 @@ fn tile_repeats_its_input_subregion() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 14, 2), [0, 255, 0, 255]);
+}
+
+fn turbulence(seed: f32) -> Vec<u8> {
+    let mut filter = Filter::empty();
+    filter.add(
+        FilterEffect::Turbulence(TurbulenceFilter {
+            base_frequency_x: 0.1,
+            base_frequency_y: 0.1,
+            num_octaves: 2,
+            seed,
+            turbulence_type: TurbulenceType::Turbulence,
+            stitch_tiles: false,
+        }),
+        FilterInputs::NONE,
+    );
+    render_filter(filter)
+}
+
+#[test]
+fn turbulence_seed_is_truncated_toward_zero() {
+    assert_eq!(turbulence(-5.7), turbulence(-5.0));
+    assert_eq!(turbulence(3.9), turbulence(3.0));
+    assert_ne!(turbulence(-5.0), turbulence(0.0));
+    assert_ne!(turbulence(-5.0), turbulence(5.0));
 }

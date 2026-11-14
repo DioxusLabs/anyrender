@@ -415,7 +415,7 @@ pub fn apply<I>(
                         fe.base_frequency_x as f64,
                         fe.base_frequency_y as f64,
                         fe.num_octaves,
-                        fe.seed.min(i32::MAX as u32) as i32,
+                        fe.seed as i32,
                         fe.stitch_tiles,
                         fe.turbulence_type == TurbulenceType::FractalNoise,
                         image_mut(&mut pixmap),

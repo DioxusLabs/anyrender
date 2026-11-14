@@ -395,7 +395,7 @@ fn convert_primitive(
                 base_frequency_y: fe.base_frequency_y().get(),
                 stitch_tiles: fe.stitch_tiles(),
                 num_octaves: fe.num_octaves(),
-                seed: fe.seed().max(0) as u32,
+                seed: fe.seed() as f32,
                 turbulence_type: match fe.kind() {
                     usvg::filter::TurbulenceKind::FractalNoise => TurbulenceType::FractalNoise,
                     usvg::filter::TurbulenceKind::Turbulence => TurbulenceType::Turbulence,
