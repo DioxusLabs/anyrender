@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `Paint::Pattern`, a paint that repeats a recorded `Scene` as a tile, with a stable id for caching the rasterized tile (breaking for code matching on `Paint`). `fill_pattern_tiles` and `stroke_pattern_tiles` draw it on backends without native pattern support.
+- `Paint::Pattern`, a paint that repeats a recorded `Scene` as a tile, with a stable id for caching the rasterized tile (breaking for code matching on `Paint`).
 - `Scene::replay`, which draws a recorded scene into any `PaintScene`.
 - `ColorMatrix::SOURCE_ALPHA` and `ColorMatrix::LUMINANCE_TO_ALPHA` constants.
 - `PaintScene::push_mask_layer` with `MaskMode::Alpha` and `MaskMode::Luminance`, and the recorded `MaskLayerCommand` (breaking for `PaintScene` implementors).

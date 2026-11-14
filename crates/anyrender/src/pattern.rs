@@ -14,7 +14,7 @@ static PATTERN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Patterns covering more tiles than this are not drawn by [`fill_pattern_tiles`] and
 /// [`stroke_pattern_tiles`].
-pub const MAX_PATTERN_TILES: u64 = 10_000;
+const MAX_PATTERN_TILES: u64 = 10_000;
 
 /// A paint that repeats the content of a [`Scene`] in a grid of tiles.
 ///
@@ -67,6 +67,9 @@ impl PartialEq for Pattern {
 /// Fills `shape` with `pattern` by drawing a clipped copy of the pattern's scene for every tile
 /// that intersects the shape. This is a fallback for backends that can't paint with a
 /// pattern directly. Takes the same arguments as [`PaintScene::fill`].
+///
+/// This is intended for use by backends.
+#[doc(hidden)]
 pub fn fill_pattern_tiles<S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
@@ -89,6 +92,9 @@ pub fn fill_pattern_tiles<S: PaintScene>(
 
 /// Strokes `shape` with `pattern`, as [`fill_pattern_tiles`] fills it. Takes the same arguments
 /// as [`PaintScene::stroke`].
+///
+/// This is intended for use by backends.
+#[doc(hidden)]
 pub fn stroke_pattern_tiles<S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
