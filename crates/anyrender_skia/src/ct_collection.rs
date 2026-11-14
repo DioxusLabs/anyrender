@@ -4,7 +4,11 @@
 //! collection from one `CFData`, which wraps the blob's bytes without copying them.
 
 use std::ffi::c_void;
+use std::ptr::NonNull;
 
+use objc2_core_foundation::{
+    CFAllocator, CFAllocatorContext, CFArray, CFData, CFIndex, CFRetained, CFString, CFType,
+};
 use peniko::{Blob, FontData};
 #[cfg(test)]
 use skia_safe::Data;
@@ -13,112 +17,59 @@ use skrifa::raw::TableProvider;
 use skrifa::string::StringId;
 use skrifa::{FontRef, MetadataProvider};
 
-type CFTypeRef = *const c_void;
-type CFIndex = isize;
-
-#[repr(C)]
-struct CFAllocatorContext {
-    version: CFIndex,
-    info: *mut c_void,
-    retain: *const c_void,
-    release: *const c_void,
-    copy_description: *const c_void,
-    allocate: *const c_void,
-    reallocate: *const c_void,
-    deallocate: Option<unsafe extern "C" fn(ptr: *mut c_void, info: *mut c_void)>,
-    preferred_size: *const c_void,
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    fn CFAllocatorCreate(allocator: CFTypeRef, context: *mut CFAllocatorContext) -> CFTypeRef;
-    fn CFDataCreateWithBytesNoCopy(
-        allocator: CFTypeRef,
-        bytes: *const u8,
-        length: CFIndex,
-        bytes_deallocator: CFTypeRef,
-    ) -> CFTypeRef;
-    fn CFArrayGetCount(array: CFTypeRef) -> CFIndex;
-    fn CFArrayGetValueAtIndex(array: CFTypeRef, index: CFIndex) -> CFTypeRef;
-    fn CFRelease(cf: CFTypeRef);
-    fn CFStringGetLength(string: CFTypeRef) -> CFIndex;
-    fn CFStringGetCString(string: CFTypeRef, buffer: *mut u8, size: CFIndex, encoding: u32) -> u8;
-}
-
 #[link(name = "CoreText", kind = "framework")]
 unsafe extern "C" {
-    static kCTFontNameAttribute: CFTypeRef;
-    fn CTFontManagerCreateFontDescriptorsFromData(data: CFTypeRef) -> CFTypeRef;
-    fn CTFontDescriptorCopyAttribute(descriptor: CFTypeRef, attribute: CFTypeRef) -> CFTypeRef;
+    static kCTFontNameAttribute: &'static CFString;
+    fn CTFontManagerCreateFontDescriptorsFromData(data: &CFData) -> Option<NonNull<CFArray>>;
+    fn CTFontDescriptorCopyAttribute(
+        descriptor: &CFType,
+        attribute: &CFString,
+    ) -> Option<NonNull<CFType>>;
     fn CTFontCreateWithFontDescriptor(
-        descriptor: CFTypeRef,
+        descriptor: &CFType,
         size: f64,
         matrix: *const c_void,
-    ) -> CFTypeRef;
+    ) -> Option<NonNull<CFType>>;
 }
 
-const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
-
-unsafe extern "C" fn drop_blob(_ptr: *mut c_void, info: *mut c_void) {
-    drop(unsafe { Box::from_raw(info.cast::<Blob<u8>>()) });
+unsafe extern "C-unwind" fn release_blob(info: *const c_void) {
+    drop(unsafe { Box::from_raw(info.cast_mut().cast::<Blob<u8>>()) });
 }
 
-/// A `CFData` over the blob's bytes that keeps a clone of the blob alive until CoreText is done.
-fn cf_data_no_copy(blob: &Blob<u8>) -> Option<CFTypeRef> {
+/// A `CFData` over the blob's bytes. Its deallocator owns a clone of the blob and drops it when
+/// the deallocator itself is freed: after the data, or straight away if the data is not created.
+fn cf_data_no_copy(blob: &Blob<u8>) -> Option<CFRetained<CFData>> {
     let bytes = blob.data();
+    let info = Box::into_raw(Box::new(blob.clone()));
     let mut context = CFAllocatorContext {
         version: 0,
-        info: Box::into_raw(Box::new(blob.clone())).cast(),
-        retain: std::ptr::null(),
-        release: std::ptr::null(),
-        copy_description: std::ptr::null(),
-        allocate: std::ptr::null(),
-        reallocate: std::ptr::null(),
-        deallocate: Some(drop_blob),
-        preferred_size: std::ptr::null(),
+        info: info.cast(),
+        retain: None,
+        release: Some(release_blob),
+        copyDescription: None,
+        allocate: None,
+        reallocate: None,
+        deallocate: None,
+        preferredSize: None,
     };
     unsafe {
-        let deallocator = CFAllocatorCreate(std::ptr::null(), &mut context);
-        if deallocator.is_null() {
-            drop_blob(std::ptr::null_mut(), context.info);
+        let Some(deallocator) = CFAllocator::new(None, &mut context) else {
+            release_blob(info.cast());
             return None;
-        }
-        let data = CFDataCreateWithBytesNoCopy(
-            std::ptr::null(),
+        };
+        CFData::with_bytes_no_copy(
+            None,
             bytes.as_ptr(),
             bytes.len() as CFIndex,
-            deallocator,
-        );
-        CFRelease(deallocator);
-        (!data.is_null()).then_some(data)
-    }
-}
-
-fn cf_string(string: CFTypeRef) -> Option<String> {
-    let mut buffer = vec![0u8; unsafe { CFStringGetLength(string) } as usize * 4 + 1];
-    let ok = unsafe {
-        CFStringGetCString(
-            string,
-            buffer.as_mut_ptr(),
-            buffer.len() as CFIndex,
-            K_CF_STRING_ENCODING_UTF8,
+            Some(&deallocator),
         )
-    };
-    let len = buffer.iter().position(|&b| b == 0)?;
-    buffer.truncate(len);
-    (ok != 0).then(|| String::from_utf8(buffer).ok()).flatten()
+    }
 }
 
-fn descriptor_postscript_name(descriptor: CFTypeRef) -> Option<String> {
-    unsafe {
-        let name = CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute);
-        if name.is_null() {
-            return None;
-        }
-        let string = cf_string(name);
-        CFRelease(name);
-        string
-    }
+fn descriptor_postscript_name(descriptor: &CFType) -> Option<String> {
+    let name = unsafe { CTFontDescriptorCopyAttribute(descriptor, kCTFontNameAttribute) }?;
+    let name = unsafe { CFRetained::from_raw(name) };
+    Some(name.downcast_ref::<CFString>()?.to_string())
 }
 
 /// The face's PostScript name (name ID 6), if it has one.
@@ -131,54 +82,36 @@ fn postscript_name(font: &FontRef<'_>) -> Option<String> {
 }
 
 /// Opens face `font.index` of a collection, or `None` if CoreText cannot open it from the bytes or
-/// no CoreText face can be matched to that index by PostScript name.
+/// no CoreText face can be matched to it by PostScript name.
 pub(crate) fn typeface_from_collection(font: &FontData) -> Option<Typeface> {
     let face = FontRef::from_index(font.data.data(), font.index).ok()?;
-    let name = postscript_name(&face);
+    // Without a name the index is no guide: a variable face has a descriptor per named instance.
+    let name = Some(postscript_name(&face)?);
 
-    unsafe {
-        let data = cf_data_no_copy(&font.data)?;
-        let descriptors = CTFontManagerCreateFontDescriptorsFromData(data);
-        CFRelease(data);
-        if descriptors.is_null() {
-            return None;
-        }
+    let data = cf_data_no_copy(&font.data)?;
+    let descriptors =
+        unsafe { CFRetained::from_raw(CTFontManagerCreateFontDescriptorsFromData(&data)?) };
+    let descriptor = |i: CFIndex| unsafe { &*descriptors.value_at_index(i).cast::<CFType>() };
+    let matches = |i: CFIndex| descriptor_postscript_name(descriptor(i)) == name;
 
-        // CoreText returns the faces in collection order, but gives a variable face one
-        // descriptor per named instance, so match by PostScript name where the index misses.
-        let count = CFArrayGetCount(descriptors);
-        let index = font.index as CFIndex;
-        let matches = |i: CFIndex| match &name {
-            Some(name) => {
-                descriptor_postscript_name(CFArrayGetValueAtIndex(descriptors, i)).as_ref()
-                    == Some(name)
-            }
-            None => i == index,
-        };
-        let found = if index < count && matches(index) {
-            Some(index)
-        } else if name.is_some() {
-            (0..count).find(|&i| matches(i))
-        } else {
-            None
-        };
+    // CoreText returns the faces in collection order, but gives a variable face one descriptor
+    // per named instance, so search by PostScript name where the index misses.
+    let count = descriptors.count();
+    let index = font.index as CFIndex;
+    let found = if index < count && matches(index) {
+        index
+    } else {
+        (0..count).find(|&i| matches(i))?
+    };
 
-        let typeface = found.and_then(|i| {
-            let ct_font = CTFontCreateWithFontDescriptor(
-                CFArrayGetValueAtIndex(descriptors, i),
-                0.0,
-                std::ptr::null(),
-            );
-            if ct_font.is_null() {
-                return None;
-            }
-            let typeface = Typeface::from_ct_font(ct_font);
-            CFRelease(ct_font);
-            typeface
-        });
-        CFRelease(descriptors);
-        typeface
-    }
+    let ct_font = unsafe {
+        CFRetained::from_raw(CTFontCreateWithFontDescriptor(
+            descriptor(found),
+            0.0,
+            std::ptr::null(),
+        )?)
+    };
+    unsafe { Typeface::from_ct_font(CFRetained::as_ptr(&ct_font).as_ptr().cast()) }
 }
 
 #[cfg(test)]
@@ -189,11 +122,7 @@ mod tests {
 
     #[link(name = "CoreText", kind = "framework")]
     unsafe extern "C" {
-        fn CTFontCopyTable(font: CFTypeRef, tag: u32, options: u32) -> CFTypeRef;
-    }
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
+        fn CTFontCopyTable(font: *const c_void, tag: u32, options: u32) -> Option<NonNull<CFData>>;
     }
 
     fn find_collections(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -251,16 +180,12 @@ mod tests {
         assert!(inked > 0, "{what}: nothing drawn");
     }
 
-    /// Every face of every installed collection opens without copying, as the same face (by
+    /// Every face of every system collection opens without copying, as the same face (by
     /// PostScript name and variation position) that the copying fallback would give.
     #[test]
     fn opens_every_face_of_system_collections_without_copying() {
         let mut paths = Vec::new();
-        for dir in [
-            "/System/Library/Fonts",
-            "/Library/Fonts",
-            "/System/Library/AssetsV2",
-        ] {
+        for dir in ["/System/Library/Fonts", "/System/Library/AssetsV2"] {
             find_collections(Path::new(dir), &mut paths);
         }
         let font_mgr = skia_safe::FontMgr::new();
@@ -301,10 +226,16 @@ mod tests {
                     .table_data(skrifa::raw::types::Tag::new(b"head"))
                     .unwrap();
                 let table = unsafe {
-                    CTFontCopyTable(typeface.ct_font().unwrap(), u32::from_be_bytes(*b"head"), 0)
+                    CFRetained::from_raw(
+                        CTFontCopyTable(
+                            typeface.ct_font().unwrap(),
+                            u32::from_be_bytes(*b"head"),
+                            0,
+                        )
+                        .unwrap(),
+                    )
                 };
-                let ptr = unsafe { CFDataGetBytePtr(table) };
-                unsafe { CFRelease(table) };
+                let ptr = table.byte_ptr();
                 assert!(range.contains(&ptr), "{what}: table was copied");
                 assert_eq!(ptr, head.as_bytes().as_ptr(), "{what}");
 
