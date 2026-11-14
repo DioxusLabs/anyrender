@@ -6,19 +6,13 @@
 //!
 //! - `resources.json` - Metadata mapping resource files to IDs
 //! - `draw_commands.json` - Serialized draw commands referencing resources by ID
-//! - `filter_images.json` - The scenes drawn by `feImage` filter primitives, one per
-//!   [`FilterImage`] in pre-order: a layer's filter, then its backdrop filter, then the scenes
-//!   nested in those. Omitted when there are none.
 //! - `images/<sha256_hash>.png` - Image files (PNG format)
 //! - `fonts/<sha256_hash>.{woff2,ttf}` - Font data files (optionally WOFF2-compressed and subsetted)
 
-use std::cell::Cell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
-use std::sync::Arc;
 
-use anyrender::filters::FilterImage;
-use anyrender::{Filter, Paint};
+use anyrender::Paint;
 use image::{ImageBuffer, ImageEncoder, RgbaImage};
 use peniko::{Blob, Color, FontData, Gradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use serde::{Deserialize, Serialize};
@@ -26,9 +20,7 @@ use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use anyrender::recording::{
-    FillCommand, GlyphRunCommand, LayerCommand, RenderCommand, Scene, StrokeCommand,
-};
+use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, StrokeCommand};
 
 mod font_writer;
 mod json_formatter;
@@ -40,13 +32,6 @@ pub type SerializableRenderCommand = RenderCommand<FontResourceId, SerializableB
 
 // /// A brush with images replaced by IDs.
 // pub type SerializableBrush = Paint<ImageBrush<ResourceId>>;
-
-/// The scene of a [`FilterImage`], with resources replaced by IDs.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SerializableFilterImage {
-    pub tolerance: f64,
-    pub commands: Vec<SerializableRenderCommand>,
-}
 
 /// A brush with images replaced by IDs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,9 +64,6 @@ pub struct FontResourceId {
 pub struct SceneArchive {
     pub manifest: ResourceManifest,
     pub commands: Vec<SerializableRenderCommand>,
-    /// The [`FilterImage`] scenes, which `commands` leave empty, in the order described in the
-    /// [crate docs](crate).
-    pub filter_images: Vec<SerializableFilterImage>,
     /// Font data (one per font resource, optionally WOFF2-compressed and/or subsetted).
     pub fonts: Vec<Blob<u8>>,
     pub images: Vec<ImageData>,
@@ -100,10 +82,7 @@ pub struct ResourceManifest {
 
 impl ResourceManifest {
     /// Current archive format version. Bump this when the format changes.
-    pub const CURRENT_VERSION: u32 = 3;
-
-    /// The oldest archive format version that can still be read.
-    pub const MIN_SUPPORTED_VERSION: u32 = 2;
+    pub const CURRENT_VERSION: u32 = 2;
 
     pub fn new(tolerance: f64) -> Self {
         Self {
@@ -167,7 +146,6 @@ struct ResourceCollector {
     image_id_map: HashMap<u64, ResourceId>,
     /// Collected images
     images: Vec<ImageData>,
-    filter_images: Vec<SerializableFilterImage>,
 }
 
 impl ResourceCollector {
@@ -176,35 +154,7 @@ impl ResourceCollector {
             fonts: FontWriter::new(config),
             image_id_map: HashMap::new(),
             images: Vec::new(),
-            filter_images: Vec::new(),
         }
-    }
-
-    fn convert_commands(&mut self, commands: &[RenderCommand]) -> Vec<SerializableRenderCommand> {
-        commands
-            .iter()
-            .filter_map(|cmd| self.convert_command(cmd))
-            .collect()
-    }
-
-    /// Move the filter's [`FilterImage`] scenes into `filter_images`.
-    fn convert_filter(&mut self, filter: &Option<Arc<Filter>>) -> Option<Arc<Filter>> {
-        let filter = filter.as_ref()?;
-        if filter.images().next().is_none() {
-            return Some(filter.clone());
-        }
-        let mut filter = Filter::clone(filter);
-        for image in filter.images_mut() {
-            let scene = std::mem::take(&mut image.scene);
-            // Reserve the slot first, so nested filter images come after this one.
-            let index = self.filter_images.len();
-            self.filter_images.push(SerializableFilterImage {
-                tolerance: scene.tolerance,
-                commands: Vec::new(),
-            });
-            self.filter_images[index].commands = self.convert_commands(&scene.commands);
-        }
-        Some(Arc::new(filter))
     }
 
     /// Register an image and return its [`ResourceId`].
@@ -240,11 +190,7 @@ impl ResourceCollector {
     /// Convert a [`RenderCommand`] to a [`SerializableRenderCommand`].
     fn convert_command(&mut self, cmd: &RenderCommand) -> Option<SerializableRenderCommand> {
         Some(match cmd {
-            RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(LayerCommand {
-                filter: self.convert_filter(&layer.filter),
-                backdrop_filter: self.convert_filter(&layer.backdrop_filter),
-                ..layer.clone()
-            }),
+            RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(layer.clone()),
             RenderCommand::PushClipLayer(clip) => {
                 SerializableRenderCommand::PushClipLayer(clip.clone())
             }
@@ -295,64 +241,14 @@ impl ResourceCollector {
 }
 
 /// Reconstructs resources from deserialized data.
-struct ResourceReconstructor<'a> {
+struct ResourceReconstructor {
     fonts: Vec<FontData>,
     images: Vec<ImageData>,
-    filter_images: &'a [SerializableFilterImage],
-    /// Index of the next [`FilterImage`] to reconstruct in `filter_images`.
-    next_filter_image: Cell<usize>,
 }
 
-impl<'a> ResourceReconstructor<'a> {
-    fn new(
-        fonts: Vec<FontData>,
-        images: Vec<ImageData>,
-        filter_images: &'a [SerializableFilterImage],
-    ) -> Self {
-        Self {
-            fonts,
-            images,
-            filter_images,
-            next_filter_image: Cell::new(0),
-        }
-    }
-
-    fn convert_commands(
-        &self,
-        commands: &[SerializableRenderCommand],
-    ) -> Result<Vec<RenderCommand>, ArchiveError> {
-        commands
-            .iter()
-            .map(|cmd| self.convert_command(cmd))
-            .collect()
-    }
-
-    /// Restore the filter's [`FilterImage`] scenes from `filter_images`.
-    fn convert_filter(
-        &self,
-        filter: &Option<Arc<Filter>>,
-    ) -> Result<Option<Arc<Filter>>, ArchiveError> {
-        let Some(filter) = filter else {
-            return Ok(None);
-        };
-        if filter.images().next().is_none() {
-            return Ok(Some(filter.clone()));
-        }
-        let mut filter = Filter::clone(filter);
-        for image in filter.images_mut() {
-            let index = self.next_filter_image.get();
-            self.next_filter_image.set(index + 1);
-            let stored = self.filter_images.get(index).ok_or_else(|| {
-                ArchiveError::InvalidFormat(format!("Missing filter image {index}"))
-            })?;
-            *image = FilterImage {
-                scene: Scene {
-                    tolerance: stored.tolerance,
-                    commands: self.convert_commands(&stored.commands)?,
-                },
-            };
-        }
-        Ok(Some(Arc::new(filter)))
+impl ResourceReconstructor {
+    fn new(fonts: Vec<FontData>, images: Vec<ImageData>) -> Self {
+        Self { fonts, images }
     }
 
     fn get_font(&self, id: ResourceId) -> Result<&FontData, ArchiveError> {
@@ -388,11 +284,7 @@ impl<'a> ResourceReconstructor<'a> {
         cmd: &SerializableRenderCommand,
     ) -> Result<RenderCommand, ArchiveError> {
         Ok(match cmd {
-            SerializableRenderCommand::PushLayer(layer) => RenderCommand::PushLayer(LayerCommand {
-                filter: self.convert_filter(&layer.filter)?,
-                backdrop_filter: self.convert_filter(&layer.backdrop_filter)?,
-                ..layer.clone()
-            }),
+            SerializableRenderCommand::PushLayer(layer) => RenderCommand::PushLayer(layer.clone()),
             SerializableRenderCommand::PushClipLayer(clip) => {
                 RenderCommand::PushClipLayer(clip.clone())
             }
@@ -515,8 +407,11 @@ impl SceneArchive {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new(config.clone());
 
-        let commands = collector.convert_commands(&scene.commands);
-        let filter_images = std::mem::take(&mut collector.filter_images);
+        let commands: Vec<_> = scene
+            .commands
+            .iter()
+            .filter_map(|cmd| collector.convert_command(cmd))
+            .collect();
 
         // Normalize all images to RGBA8
         let images: Vec<ImageData> = collector
@@ -575,7 +470,6 @@ impl SceneArchive {
         Ok(Self {
             manifest,
             commands,
-            filter_images,
             fonts,
             images,
         })
@@ -617,11 +511,17 @@ impl SceneArchive {
             })
             .collect::<Result<Vec<_>, ArchiveError>>()?;
 
-        let reconstructor = ResourceReconstructor::new(fonts_ttf, images, &self.filter_images);
+        let reconstructor = ResourceReconstructor::new(fonts_ttf, images);
+
+        let commands: Result<Vec<_>, _> = self
+            .commands
+            .iter()
+            .map(|cmd| reconstructor.convert_command(cmd))
+            .collect();
 
         Ok(Scene {
             tolerance: self.manifest.tolerance,
-            commands: reconstructor.convert_commands(&self.commands)?,
+            commands: commands?,
         })
     }
 
@@ -642,12 +542,6 @@ impl SceneArchive {
             zip.start_file("draw_commands.json", options)?;
             let commands_json = json_formatter::to_json_depth_limited(&self.commands, 3)?;
             zip.write_all(commands_json.as_bytes())?;
-        }
-
-        if !self.filter_images.is_empty() {
-            zip.start_file("filter_images.json", options)?;
-            let filter_images_json = json_formatter::to_json_depth_limited(&self.filter_images, 4)?;
-            zip.write_all(filter_images_json.as_bytes())?;
         }
 
         // Write image files as PNG
@@ -682,9 +576,7 @@ impl SceneArchive {
         };
 
         // Check version
-        if !(ResourceManifest::MIN_SUPPORTED_VERSION..=ResourceManifest::CURRENT_VERSION)
-            .contains(&manifest.version)
-        {
+        if manifest.version != ResourceManifest::CURRENT_VERSION {
             return Err(ArchiveError::UnsupportedVersion(manifest.version));
         }
 
@@ -694,16 +586,6 @@ impl SceneArchive {
             let mut contents = String::new();
             file.read_to_string(&mut contents)?;
             serde_json::from_str(&contents)?
-        };
-
-        let filter_images: Vec<SerializableFilterImage> = match zip.by_name("filter_images.json") {
-            Ok(mut file) => {
-                let mut contents = String::new();
-                file.read_to_string(&mut contents)?;
-                serde_json::from_str(&contents)?
-            }
-            Err(zip::result::ZipError::FileNotFound) => Vec::new(),
-            Err(e) => return Err(e.into()),
         };
 
         // Read images
@@ -753,7 +635,6 @@ impl SceneArchive {
         Ok(Self {
             manifest,
             commands,
-            filter_images,
             fonts,
             images,
         })

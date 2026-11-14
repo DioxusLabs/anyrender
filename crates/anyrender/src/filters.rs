@@ -159,26 +159,6 @@ impl Filter {
         &self.primitives
     }
 
-    /// The content of every [`FilterEffect::Image`] primitive, in node order.
-    pub fn images(&self) -> impl Iterator<Item = &FilterImage> {
-        self.primitives
-            .iter()
-            .filter_map(|node| match &node.effect {
-                FilterEffect::Image(image) => Some(image),
-                _ => None,
-            })
-    }
-
-    /// Mutable access to the content of every [`FilterEffect::Image`] primitive, in node order.
-    pub fn images_mut(&mut self) -> impl Iterator<Item = &mut FilterImage> {
-        self.primitives
-            .iter_mut()
-            .filter_map(|node| match &mut node.effect {
-                FilterEffect::Image(image) => Some(image),
-                _ => None,
-            })
-    }
-
     /// The output filter for the graph.
     pub fn output(&self) -> FilterId {
         self.output
@@ -486,10 +466,7 @@ pub enum FilterEffect {
     /// enabling color corrections, gamma adjustments, and custom mappings.
     ComponentTransfer(ComponentTransferFilter),
 
-    /// Render [`FilterImage::scene`], ignoring the inputs.
-    ///
-    /// See: <https://www.w3.org/TR/filter-effects-1/#feImageElement>
-    Image(FilterImage),
+    Image(ExternalImageSource),
 
     /// Tile the input to fill the primitive subregion.
     ///
@@ -772,16 +749,15 @@ pub mod shadow {
     }
 }
 
-/// Content rendered by a [`FilterEffect::Image`] primitive (`feImage` in SVG).
+/// Reference an external image as filter input.
+///
+/// Allows using pre-existing images (from an atlas or resource) as
+/// input to filter operations, useful for texturing and overlays.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FilterImage {
-    /// Drawn in the filter's user space, the space of [`FilterGraphNode::subregion`].
-    ///
-    /// Skipped by serde, because its fonts and images aren't serializable: `anyrender_serialize`
-    /// stores it alongside the scene's other resources instead.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub scene: crate::recording::Scene,
+pub struct ExternalImageSource {
+    pub image_id: u32,
+    pub transform: Option<[f32; 6]>,
 }
 
 pub mod morphology {
