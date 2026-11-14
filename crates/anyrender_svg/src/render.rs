@@ -34,6 +34,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
 
                 #[allow(deprecated)]
                 let needs_layer = clip.is_some()
+                    || g.isolate()
                     || blend_mode != BlendMode::default()
                     || !is_fully_opaque
                     || g.mask().is_some();
