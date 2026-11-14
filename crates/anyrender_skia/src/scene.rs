@@ -29,6 +29,9 @@ pub struct SkiaSceneCache {
     dash_intervals: Vec<f32>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    collection_descriptors:
+        GenerationalCache<u64, Option<crate::ct_collection::CollectionDescriptors>>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
     image_shader: GenerationalCache<u64, Shader>,
@@ -46,6 +49,8 @@ impl SkiaSceneCache {
 
     /// Increment the generation on the caches. Should be called once per frame.
     pub fn next_gen(&mut self) {
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        self.collection_descriptors.next_gen();
         self.typeface.next_gen();
         self.normalized_typeface.next_gen();
         self.image_shader.next_gen();
@@ -60,6 +65,8 @@ impl Default for SkiaSceneCache {
             dash_intervals: Vec::new(),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             extracted_font_data: GenerationalCache::new(10),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            collection_descriptors: GenerationalCache::new(10),
             typeface: GenerationalCache::new(1),
             normalized_typeface: GenerationalCache::new(1),
             image_shader: GenerationalCache::new(1),
@@ -371,6 +378,10 @@ impl SkiaScenePainter<'_> {
     ) -> Option<Typeface> {
         let cache_key = (font.data.id(), font.index);
 
+        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
+            return Some(cached.clone());
+        }
+
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
         {
@@ -378,6 +389,25 @@ impl SkiaScenePainter<'_> {
             use std::sync::Arc;
 
             if let Some(collection) = oaty::Collection::new(font.data.data()) {
+                let blob_id = font.data.id();
+                if !self.cache.collection_descriptors.contains_key(&blob_id) {
+                    let descriptors = crate::ct_collection::CollectionDescriptors::new(&font.data);
+                    self.cache
+                        .collection_descriptors
+                        .insert(blob_id, descriptors);
+                }
+                if let Some(typeface) = self
+                    .cache
+                    .collection_descriptors
+                    .hit(&blob_id)
+                    .unwrap()
+                    .as_ref()
+                    .and_then(|descriptors| descriptors.typeface(font))
+                {
+                    self.cache.typeface.insert(cache_key, typeface.clone());
+                    return Some(typeface);
+                }
+
                 if !self.cache.extracted_font_data.contains_key(&cache_key) {
                     let Some(data) = collection
                         .get_font(font.index)
@@ -396,10 +426,6 @@ impl SkiaScenePainter<'_> {
                 }
                 font = self.cache.extracted_font_data.hit(&cache_key).unwrap()
             }
-        }
-
-        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
-            return Some(cached.clone());
         }
 
         let Some(typeface) = self
@@ -1636,5 +1662,35 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
+mod ct_collection_cache_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn releases_collection_once_its_faces_leave_the_cache() {
+        // Keep Skia's global typeface cache from holding on to the typeface (and so the blob).
+        skia_safe::graphics::set_typeface_cache_count_limit(0);
+        let bytes = Arc::new(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());
+        let weak = Arc::downgrade(&bytes);
+        let font = peniko::FontData::new(peniko::Blob::new(bytes), 1);
+        let mut surface = skia_safe::surfaces::raster_n32_premul((8, 8)).unwrap();
+        let mut cache = SkiaSceneCache::default();
+        let typeface =
+            SkiaScenePainter::new(surface.canvas(), &mut cache).get_or_cache_typeface(&font);
+        assert_eq!(
+            typeface.unwrap().post_script_name().as_deref(),
+            Some("Helvetica-Bold")
+        );
+        drop(font);
+        for _ in 0..10 {
+            cache.next_gen();
+        }
+        assert!(weak.upgrade().is_some());
+        cache.next_gen();
+        assert!(weak.upgrade().is_none(), "blob outlived the cache");
     }
 }
