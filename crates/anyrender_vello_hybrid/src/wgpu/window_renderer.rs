@@ -99,6 +99,7 @@ fn build_wgpu_context(config: &VelloHybridRendererOptions) -> WGPUContext {
     let features =
         config.features.unwrap_or_default() | Features::CLEAR_TEXTURE | Features::PIPELINE_CACHE;
     WGPUContext::with_features_and_limits(Some(features), config.limits.clone())
+        .with_device_creator(config.device_creator.clone())
 }
 
 // TODO: Make configurable?
@@ -205,6 +206,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
+        let device_creator = self.wgpu_context.device_creator();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -229,11 +231,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         spawn_init(async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
-                None => DeviceHandle::new_from_compatible_surface(
+                None => DeviceHandle::new_from_compatible_surface_with_creator(
                     instance,
                     Some(&surface),
                     extra_features,
                     override_limits,
+                    device_creator.as_ref(),
                 )
                 .await
                 .expect("Error creating DeviceHandle"),

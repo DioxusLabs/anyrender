@@ -16,7 +16,7 @@ use wgpu::{
     TextureUsages,
 };
 use wgpu_context::{
-    AlphaConversion, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
+    AlphaConversion, DeviceCreator, DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration,
     TextureConfiguration, WGPUContext,
 };
 
@@ -74,6 +74,9 @@ pub struct VelloRendererOptions {
     /// lower values reduce memory usage and input latency at the cost of less
     /// buffering to absorb slow frames.
     pub desired_maximum_frame_latency: u32,
+    /// Creates the wgpu device in place of `Adapter::request_device`, e.g. to enable
+    /// hardware video decoding. See [`DeviceCreator`].
+    pub device_creator: Option<DeviceCreator>,
 }
 
 impl Default for VelloRendererOptions {
@@ -92,6 +95,7 @@ impl VelloRendererOptions {
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             pipeline_cache: None,
             desired_maximum_frame_latency: 1,
+            device_creator: None,
         }
     }
 
@@ -140,6 +144,13 @@ impl VelloRendererOptions {
     pub fn desired_maximum_frame_latency(self, desired_maximum_frame_latency: u32) -> Self {
         Self {
             desired_maximum_frame_latency,
+            ..self
+        }
+    }
+
+    pub fn device_creator(self, device_creator: DeviceCreator) -> Self {
+        Self {
+            device_creator: Some(device_creator),
             ..self
         }
     }
@@ -239,6 +250,7 @@ fn build_wgpu_context(config: &VelloRendererOptions) -> WGPUContext {
     let features =
         config.features.unwrap_or_default() | Features::CLEAR_TEXTURE | Features::PIPELINE_CACHE;
     WGPUContext::with_features_and_limits(Some(features), config.limits.clone())
+        .with_device_creator(config.device_creator.clone())
 }
 
 impl WindowRenderer for VelloWindowRenderer {
@@ -283,6 +295,7 @@ impl WindowRenderer for VelloWindowRenderer {
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
+        let device_creator = self.wgpu_context.device_creator();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -308,11 +321,12 @@ impl WindowRenderer for VelloWindowRenderer {
         spawn_init(async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
-                None => DeviceHandle::new_from_compatible_surface(
+                None => DeviceHandle::new_from_compatible_surface_with_creator(
                     instance,
                     Some(&surface),
                     extra_features,
                     override_limits,
+                    device_creator.as_ref(),
                 )
                 .await
                 .expect("Error creating DeviceHandle"),
