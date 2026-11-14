@@ -14,7 +14,7 @@ use peniko::color::{AlphaColor, Srgb};
 use rgb::FromSlice;
 use tiny_skia::{IntRect, Pixmap, PixmapPaint, Transform};
 
-use crate::{
+use crate::kernels::{
     ImageRef, ImageRefMut, box_blur, color_matrix, component_transfer, composite, convolve_matrix,
     demultiply_alpha, displacement_map, from_linear_rgb, iir_blur, into_linear_rgb, lighting,
     morphology, multiply_alpha, turbulence,
