@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs, FilterSource,
     color_transformation::ColorMatrix,
     lighting::{DiffuseLightingFilter, DistantLightSource, LightSource},
 };
@@ -211,6 +211,17 @@ fn negative_diffuse_constant_lights_nothing() {
         }),
         FilterInputs::NONE,
         FilterColorSpace::Srgb,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 255]);
+}
+
+#[test]
+fn source_alpha_is_black_with_the_source_alpha() {
+    let mut filter = Filter::new(FULL);
+    filter.add(
+        FilterEffect::Offset(Vec2::ZERO),
+        FilterInputs::single(FilterInput::Source(FilterSource::SourceAlpha)),
     );
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 255]);
