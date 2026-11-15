@@ -259,6 +259,7 @@ name = "anyrender_vello"
 version = "0.15.0"
 dependencies = [
  "anyrender",
+ "anyrender_vello_hybrid",
  "debug_timer",
  "futures-channel",
  "kurbo",
@@ -269,6 +270,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wgpu 30.0.1",
  "wgpu_context",
+ "winit",
 ]
 
 [[package]]
@@ -4786,8 +4788,10 @@ name = "wgpu_context"
 version = "0.10.0"
 dependencies = [
  "futures-intrusive",
+ "log",
  "objc2-core-graphics",
  "objc2-quartz-core 0.3.2",
+ "pollster",
  "wgpu 30.0.1",
 ]
 

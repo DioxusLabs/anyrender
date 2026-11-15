@@ -14,4 +14,6 @@ pub use webgl::*;
 pub use wgpu_backend::*;
 
 pub use wgpu;
-pub use wgpu_context::{DeviceHandle, SharedWGPUContext, WGPUContext};
+pub use wgpu_context::{
+    DeviceCreator, DeviceCreatorError, DeviceHandle, SharedWGPUContext, WGPUContext,
+};

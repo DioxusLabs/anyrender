@@ -101,7 +101,9 @@ impl VelloHybridContext {
     /// Creates a context that gets its devices from `wgpu_context`. Pass the same
     /// [`SharedWGPUContext`] to several contexts (e.g. a [`VelloHybridContext`] and a Vello
     /// context) to share devices between them. The `features` and `limits` in `options` are not
-    /// used: devices are created with those of `wgpu_context`.
+    /// used: devices are created with those of `wgpu_context`, and with its
+    /// [`DeviceCreator`](wgpu_context::DeviceCreator) if it was created with
+    /// [`WGPUContext::with_device_creator`].
     // wgpu types are not `Send` on wasm, which is single-threaded
     #[cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
     pub fn with_wgpu_context(
@@ -335,6 +337,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
         let instance = wgpu_context.instance.clone();
         let extra_features = wgpu_context.extra_features();
         let override_limits = wgpu_context.override_limits();
+        let device_creator = wgpu_context.device_creator();
         let mut composite_alpha_mode = match self.config.composite_alpha_mode {
             anyrender::CompositeAlphaMode::Auto => CompositeAlphaMode::Auto,
             anyrender::CompositeAlphaMode::Opaque => CompositeAlphaMode::Opaque,
@@ -359,11 +362,12 @@ impl WindowRenderer for VelloHybridWindowRenderer {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
                 None => {
-                    let device_handle = DeviceHandle::new_from_compatible_surface(
+                    let device_handle = DeviceHandle::new_from_compatible_surface_with_creator(
                         instance,
                         Some(&surface),
                         extra_features,
                         override_limits,
+                        device_creator.as_ref(),
                     )
                     .await
                     .expect("Error creating DeviceHandle");

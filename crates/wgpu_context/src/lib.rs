@@ -3,9 +3,12 @@
 
 //! Simple helpers for managing wgpu state and surfaces.
 
+use std::error::Error;
+use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 use wgpu::{
-    Adapter, Device, Features, Instance, Limits, MemoryHints, Queue, Surface, SurfaceTarget,
+    Adapter, Device, DeviceDescriptor, Features, Instance, Limits, MemoryHints, Queue, Surface,
+    SurfaceTarget,
 };
 
 mod alpha_blitter;
@@ -19,6 +22,56 @@ pub use buffer_renderer::{BufferRenderer, BufferRendererConfig};
 pub use error::WgpuContextError;
 pub use surface_renderer::{SurfaceRenderer, SurfaceRendererConfiguration, TextureConfiguration};
 pub use util::block_on_wgpu;
+
+/// The error a [`DeviceCreator`] returns when it can't create a device.
+pub type DeviceCreatorError = Box<dyn Error + Send + Sync>;
+
+type DeviceCreatorFn = dyn Fn(&Adapter, &DeviceDescriptor<'_>) -> Result<(Device, Queue), DeviceCreatorError>
+    + Send
+    + Sync;
+
+/// A hook that creates the `Device` and `Queue` in place of [`Adapter::request_device`].
+///
+/// Use it when another library has to create the device itself, for example to enable
+/// hardware video decoding with gpu-video's `request_device_with_video_support`. Pass it to
+/// [`WGPUContext::with_device_creator`]: every device that context creates goes through the
+/// hook, including those of renderers sharing it through a [`SharedWGPUContext`].
+///
+/// The callback receives the descriptor that would otherwise be passed to
+/// [`Adapter::request_device`], so it should request at least its `required_features`
+/// and `required_limits`. If it returns an error, the error is logged with `log::warn!`
+/// and the device is created with [`Adapter::request_device`] instead.
+#[derive(Clone)]
+pub struct DeviceCreator(Arc<DeviceCreatorFn>);
+
+impl DeviceCreator {
+    pub fn new(
+        create_device: impl Fn(
+            &Adapter,
+            &DeviceDescriptor<'_>,
+        ) -> Result<(Device, Queue), DeviceCreatorError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(create_device))
+    }
+
+    /// Calls the hook.
+    pub fn create_device(
+        &self,
+        adapter: &Adapter,
+        descriptor: &DeviceDescriptor<'_>,
+    ) -> Result<(Device, Queue), DeviceCreatorError> {
+        (self.0)(adapter, descriptor)
+    }
+}
+
+impl fmt::Debug for DeviceCreator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeviceCreator").finish_non_exhaustive()
+    }
+}
 
 /// A wgpu `Device`, it's associated `Queue`, and the `Adapter` and `Instance` used to create them
 #[derive(Clone, Debug)]
@@ -36,6 +89,25 @@ impl DeviceHandle {
         compatible_surface: Option<&Surface<'_>>,
         extra_features: Option<Features>,
         override_limits: Option<Limits>,
+    ) -> Result<Self, WgpuContextError> {
+        Self::new_from_compatible_surface_with_creator(
+            instance,
+            compatible_surface,
+            extra_features,
+            override_limits,
+            None,
+        )
+        .await
+    }
+
+    /// Like [`DeviceHandle::new_from_compatible_surface`], but creates the device with
+    /// `device_creator` if one is given.
+    pub async fn new_from_compatible_surface_with_creator(
+        instance: Instance,
+        compatible_surface: Option<&Surface<'_>>,
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+        device_creator: Option<&DeviceCreator>,
     ) -> Result<Self, WgpuContextError> {
         let adapter =
             wgpu::util::initialize_adapter_from_env_or_default(&instance, compatible_surface)
@@ -64,7 +136,20 @@ impl DeviceHandle {
             trace: wgpu::Trace::default(),
             experimental_features: wgpu::ExperimentalFeatures::default(),
         };
-        let (device, queue) = adapter.request_device(&descripter).await?;
+        let custom_device = device_creator.and_then(|creator| {
+            creator
+                .create_device(&adapter, &descripter)
+                .inspect_err(|err| {
+                    log::warn!(
+                        "DeviceCreator failed, falling back to Adapter::request_device: {err}"
+                    )
+                })
+                .ok()
+        });
+        let (device, queue) = match custom_device {
+            Some(device_and_queue) => device_and_queue,
+            None => adapter.request_device(&descripter).await?,
+        };
 
         // Create the device handle and store in the pool
         Ok(DeviceHandle {
@@ -141,6 +226,7 @@ pub struct WGPUContext {
     // Config
     extra_features: Option<Features>,
     override_limits: Option<Limits>,
+    device_creator: Option<DeviceCreator>,
 }
 
 impl Default for WGPUContext {
@@ -165,6 +251,27 @@ impl WGPUContext {
         extra_features: Option<Features>,
         override_limits: Option<Limits>,
     ) -> Self {
+        Self::build(extra_features, override_limits, None)
+    }
+
+    /// Creates a context whose devices are created by `device_creator` instead of
+    /// [`Adapter::request_device`], e.g. to give every window a device that can decode video.
+    ///
+    /// Share it with [`SharedWGPUContext`] so that the windows of several renderer contexts
+    /// (e.g. Vello and vello_hybrid) all get their devices from the hook.
+    pub fn with_device_creator(
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+        device_creator: DeviceCreator,
+    ) -> Self {
+        Self::build(extra_features, override_limits, Some(device_creator))
+    }
+
+    fn build(
+        extra_features: Option<Features>,
+        override_limits: Option<Limits>,
+        device_creator: Option<DeviceCreator>,
+    ) -> Self {
         Self {
             instance: Instance::new(wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::from_env().unwrap_or_default(),
@@ -179,6 +286,7 @@ impl WGPUContext {
             device_pool: Vec::new(),
             extra_features,
             override_limits,
+            device_creator,
         }
     }
 
@@ -192,6 +300,7 @@ impl WGPUContext {
             extra_features: Some(device_handle.device.features()),
             override_limits: Some(device_handle.device.limits()),
             device_pool: vec![device_handle],
+            device_creator: None,
         }
     }
 
@@ -217,6 +326,11 @@ impl WGPUContext {
 
     pub fn override_limits(&self) -> Option<Limits> {
         self.override_limits.clone()
+    }
+
+    /// The hook this context creates devices with, if any (see [`WGPUContext::with_device_creator`]).
+    pub fn device_creator(&self) -> Option<DeviceCreator> {
+        self.device_creator.clone()
     }
 
     /// Creates a new surface for the specified window and dimensions.
@@ -304,12 +418,20 @@ impl WGPUContext {
         &self,
         compatible_surface: Option<&Surface<'_>>,
     ) -> impl Future<Output = Result<DeviceHandle, WgpuContextError>> {
-        DeviceHandle::new_from_compatible_surface(
-            self.instance.clone(),
-            compatible_surface,
-            self.extra_features,
-            self.override_limits.clone(),
-        )
+        let instance = self.instance.clone();
+        let extra_features = self.extra_features;
+        let override_limits = self.override_limits.clone();
+        let device_creator = self.device_creator.clone();
+        async move {
+            DeviceHandle::new_from_compatible_surface_with_creator(
+                instance,
+                compatible_surface,
+                extra_features,
+                override_limits,
+                device_creator.as_ref(),
+            )
+            .await
+        }
     }
 
     /// Creates a compatible device handle id.

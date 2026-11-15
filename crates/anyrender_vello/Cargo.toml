@@ -28,3 +28,11 @@ pollster = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = { workspace = true }
+
+[dev-dependencies]
+anyrender_vello_hybrid = { workspace = true }
+winit = { workspace = true }
+
+[[test]]
+name = "shared_device_creator"
+harness = false
