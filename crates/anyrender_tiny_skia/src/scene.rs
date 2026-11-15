@@ -249,6 +249,19 @@ impl TinySkiaScenePainter {
         );
         let full_extent = matches!(kind, LayerKind::Mask(_));
         let bbox = transform_bbox(transform, clip.bounding_box());
+        // A pixel-aligned rect clip is fully expressed by the layer's extent.
+        let rect_clip = clip
+            .as_rect()
+            .filter(|_| is_axis_aligned(transform))
+            .map(|r| transform_bbox(transform, r))
+            .filter(|r| is_pixel_aligned(*r));
+        // Any other clip is a mask, which gets 2px of margin (as resvg's layers do): tiny-skia
+        // under-covers an edge lying on the pixmap's boundary and chops curves crossing it.
+        let bbox = if has_filter || rect_clip.is_some() {
+            bbox
+        } else {
+            bbox.inflate(2.0, 2.0)
+        };
         // A filter can move content from outside its parent (and the canvas) into view, so its
         // layer covers the whole filter region, limited like resvg's to 5x the canvas.
         let bounds = if has_filter {
@@ -264,12 +277,6 @@ impl TinySkiaScenePainter {
         };
         let empty = clip_rect.is_none() && !full_extent;
 
-        // A pixel-aligned rect clip is fully expressed by the layer's extent.
-        let rect_clip = clip
-            .as_rect()
-            .filter(|_| is_axis_aligned(transform))
-            .map(|r| transform_bbox(transform, r))
-            .filter(|r| is_pixel_aligned(*r));
         // The filter region is a hard clip (Filter Effects 1 §8). Browsers round an axis-aligned
         // region out to whole pixels rather than anti-aliasing its edges, so `region` alone
         // expresses it; a rotated or skewed region still needs the mask for its edges.
