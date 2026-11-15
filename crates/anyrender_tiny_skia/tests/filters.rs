@@ -323,6 +323,7 @@ fn filters_run_in_user_space_axes_under_rotation() {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &Rect::new(-1.0, -size, 1.0, size),
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
