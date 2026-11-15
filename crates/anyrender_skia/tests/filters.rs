@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyrender::filters::{
     Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
+    lighting::{DiffuseLightingFilter, DistantLightSource, LightSource},
 };
 use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
 use anyrender_skia::SkiaImageRenderer;
@@ -192,4 +193,25 @@ fn tile_repeats_its_input_subregion() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 14, 2), [0, 255, 0, 255]);
+}
+
+#[test]
+fn negative_diffuse_constant_lights_nothing() {
+    let mut filter = Filter::new(FULL);
+    filter.add_with_color_space(
+        FilterEffect::DiffuseLighting(DiffuseLightingFilter {
+            surface_scale: 1.0,
+            diffuse_constant: -1.0,
+            kernel_unit_length: 1.0,
+            light_source: LightSource::Distant(DistantLightSource {
+                azimuth: 45.0,
+                elevation: 45.0,
+            }),
+            lighting_color: Color::WHITE,
+        }),
+        FilterInputs::NONE,
+        FilterColorSpace::Srgb,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 255]);
 }
