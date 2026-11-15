@@ -44,6 +44,8 @@ enum LayerKind {
     Group {
         blend: tiny_skia::BlendMode,
         alpha: f32,
+        /// The filter and the transform from its user space into the layer's space (before
+        /// the offset of the layer's rect).
         filter: Option<(Arc<Filter>, Affine)>,
     },
     Clip,
@@ -194,7 +196,7 @@ impl TinySkiaScenePainter {
         Affine::translate((-rect.x() as f64, -rect.y() as f64)) * self.space() * transform
     }
 
-    fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, kind: LayerKind) {
+    fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, mut kind: LayerKind) {
         let mut space = self.space();
         let mut transform = space * transform;
         let mut parent = self.top_rect();
@@ -220,11 +222,23 @@ impl TinySkiaScenePainter {
                 bounds.x1.ceil() as i32,
                 bounds.y1.ceil() as i32,
             ) {
+                // `inverse * transform` is only the scale (and a translation), but rounding leaves
+                // tiny off-diagonal terms and scales like 1.4999999999999998, which primitives
+                // that snap to whole pixels (feOffset) turn into a pixel of error. Build it exactly.
+                let (sx, sy) = transform_scale(transform);
+                let translation = (inverse * transform).translation();
                 space = inverse * space;
-                transform = inverse * transform;
+                transform = Affine::new([sx, 0.0, 0.0, sy, translation.x, translation.y]);
                 parent = rect;
                 to_parent = Some(rest);
             }
+        }
+        if let LayerKind::Group {
+            filter: Some((_, filter_transform)),
+            ..
+        } = &mut kind
+        {
+            *filter_transform = transform;
         }
         let has_filter = matches!(
             kind,
@@ -576,7 +590,6 @@ impl PaintScene for TinySkiaScenePainter {
             } => {
                 if let Some((filter, transform)) = filter {
                     let local = Affine::translate((-layer.rect.x() as f64, -layer.rect.y() as f64))
-                        * layer.space
                         * *transform;
                     filter::apply(filter, local, layer.region, &mut layer.pixmap);
                 }

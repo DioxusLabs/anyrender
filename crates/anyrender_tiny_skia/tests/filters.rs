@@ -386,3 +386,59 @@ fn filters_run_in_user_space_axes_under_rotation() {
     assert!(pixel(&buffer, 8, 4)[3] > 0);
     assert!(pixel(&buffer, 8, 8)[3] < 255);
 }
+
+/// Renders a red stripe under a skew and 1.5x scale, either moved by a filter offset of `dx`
+/// along user-space x or, without a filter, by translating the stripe itself.
+fn skewed_stripe(dx: f64, with_filter: bool) -> Vec<u8> {
+    let size = SIZE as f64;
+    // `scale(1.5) skewX(30)` as usvg hands it over. Dividing the scale back out of this in
+    // floating point gives 1.4999999999999998 rather than 1.5.
+    let transform = Affine::new([1.5, 0.0, 0.8660253882408142, 1.5, -6.0, 0.0]);
+    let mut filter = Filter::new(Rect::new(-size, -size, 2.0 * size, 2.0 * size));
+    filter.add(FilterEffect::Offset(Vec2::new(dx, 0.0)), FilterInputs::NONE);
+    let filter = Arc::new(filter);
+    let stripe = Rect::new(0.0, 0.0, 2.0, size);
+    render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            if with_filter {
+                scene.push_layer(
+                    Fill::NonZero,
+                    Mix::Normal,
+                    1.0,
+                    transform,
+                    &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
+                    Some(filter.clone()),
+                    None,
+                );
+            }
+            let shift = if with_filter { 0.0 } else { dx };
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &(stripe + Vec2::new(shift, 0.0)),
+                AntiAliasing::Enabled,
+            );
+            if with_filter {
+                scene.pop_layer();
+            }
+        },
+        SIZE * 2,
+        SIZE,
+    )
+}
+
+#[test]
+fn whole_pixel_offsets_stay_exact_under_skew() {
+    // 4 user units at 1.5x is exactly 6 pixels, so the offset copy lands where the stripe would.
+    let filtered = skewed_stripe(4.0, true);
+    let moved = skewed_stripe(4.0, false);
+    let max_diff = filtered
+        .iter()
+        .zip(&moved)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(max_diff <= 64, "max channel difference {max_diff}");
+}
