@@ -43,7 +43,6 @@
 
 use kurbo::{Affine, Rect, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, ImageBrushRef, StyleRef};
-use recording::RenderCommand;
 use std::{any::Any, sync::Arc};
 
 pub mod filters;
@@ -60,6 +59,8 @@ mod null_backend;
 pub use null_backend::*;
 pub mod recording;
 pub use recording::Scene;
+mod pattern;
+pub use pattern::*;
 
 mod resource_id;
 pub use resource_id::ResourceId;
@@ -236,6 +237,7 @@ pub trait PaintScene: RenderContext {
         brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Backend implementation of [`fill`](Self::fill).
@@ -246,6 +248,7 @@ pub trait PaintScene: RenderContext {
         brush: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Draws a run of glyphs
@@ -263,6 +266,7 @@ pub trait PaintScene: RenderContext {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Draw a box shadow cast by `box_shape`, as specified by CSS `box-shadow`.
@@ -357,6 +361,7 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: impl Into<PaintShape<'s>>,
+        anti_aliasing: AntiAliasing,
     ) where
         Self: Sized,
     {
@@ -366,6 +371,7 @@ pub trait PaintScene: RenderContext {
             brush.into(),
             brush_transform,
             shape.into(),
+            anti_aliasing,
         );
     }
 
@@ -377,6 +383,7 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: impl Into<PaintShape<'s>>,
+        anti_aliasing: AntiAliasing,
     ) where
         Self: Sized,
     {
@@ -386,90 +393,13 @@ pub trait PaintScene: RenderContext {
             brush.into(),
             brush_transform,
             shape.into(),
+            anti_aliasing,
         );
     }
 
     /// Append a recorded Scene Fragment to the current scene
     fn append_scene(&mut self, scene: Scene, scene_transform: Affine) {
-        for cmd in scene.commands {
-            match cmd {
-                RenderCommand::PushLayer(cmd) => self.push_layer_shape(
-                    cmd.fill,
-                    cmd.blend,
-                    cmd.alpha,
-                    scene_transform * cmd.transform,
-                    (&cmd.clip).into(),
-                    cmd.filter,
-                    cmd.backdrop_filter,
-                ),
-                RenderCommand::PushClipLayer(cmd) => self.push_clip_layer_shape(
-                    cmd.fill,
-                    scene_transform * cmd.transform,
-                    (&cmd.clip).into(),
-                ),
-                RenderCommand::PushMaskLayer(cmd) => self.push_mask_layer_shape(
-                    cmd.fill,
-                    cmd.mode,
-                    scene_transform * cmd.transform,
-                    (&cmd.clip).into(),
-                ),
-                RenderCommand::PopLayer => self.pop_layer(),
-                RenderCommand::Stroke(cmd) => self.stroke_shape(
-                    &cmd.style,
-                    scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_transform,
-                    (&cmd.shape).into(),
-                ),
-                RenderCommand::Fill(cmd) => self.fill_shape(
-                    cmd.fill,
-                    scene_transform * cmd.transform,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_transform,
-                    (&cmd.shape).into(),
-                ),
-                RenderCommand::GlyphRun(cmd) => self.draw_glyphs(
-                    &cmd.font_data,
-                    cmd.font_size,
-                    cmd.hint,
-                    &cmd.normalized_coords,
-                    cmd.embolden,
-                    &cmd.style,
-                    match cmd.brush {
-                        Paint::Solid(alpha_color) => Paint::Solid(alpha_color),
-                        Paint::Gradient(ref gradient) => Paint::Gradient(gradient),
-                        Paint::Image(ref image) => Paint::Image(image.as_ref()),
-                        Paint::Resource(id) => Paint::Resource(id),
-                        Paint::Custom(ref custom) => Paint::Custom(custom.as_ref()),
-                    },
-                    cmd.brush_alpha,
-                    scene_transform * cmd.transform,
-                    cmd.glyph_transform,
-                    cmd.glyphs.into_iter(),
-                ),
-                RenderCommand::BoxShadow(cmd) => self.draw_box_shadow(
-                    scene_transform * cmd.transform,
-                    &cmd.box_shape,
-                    cmd.offset,
-                    cmd.spread,
-                    cmd.std_dev,
-                    cmd.color,
-                    cmd.kind,
-                ),
-            }
-        }
+        scene.replay(self, scene_transform);
     }
 
     /// Utility method to draw an image at it's natural size. For more advanced image drawing use the `fill` method
@@ -486,6 +416,7 @@ pub trait PaintScene: RenderContext {
             image.into(),
             None,
             PaintShape::Rect(&rect),
+            AntiAliasing::Enabled,
         );
     }
 }

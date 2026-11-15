@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Paint::Pattern` support. Each pattern tile is rasterized once, cached, and painted as a repeating image.
 - `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
 - Filter layers are clipped to `Filter::region`.
 

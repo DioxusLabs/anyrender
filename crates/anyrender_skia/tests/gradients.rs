@@ -1,4 +1,4 @@
-use anyrender::{PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
 use anyrender_skia::SkiaImageRenderer;
 use kurbo::{Affine, Rect};
 use peniko::{Color, Fill, Gradient, InterpolationAlphaSpace};
@@ -19,8 +19,16 @@ fn midpoint(alpha_space: InterpolationAlphaSpace) -> [u8; 4] {
                 Color::from_rgb8(0, 0, 255),
                 None,
                 &rect,
+                AntiAliasing::Enabled,
             );
-            scene.fill(Fill::NonZero, Affine::IDENTITY, &gradient, None, &rect);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                &gradient,
+                None,
+                &rect,
+                AntiAliasing::Enabled,
+            );
         },
         SIZE,
         SIZE,

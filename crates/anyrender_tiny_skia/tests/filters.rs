@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     composite::CompositeOperator,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
-use anyrender::{PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
@@ -48,6 +49,7 @@ fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -93,6 +95,7 @@ fn render_filter(filter: Filter) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -261,6 +264,7 @@ fn partial_alpha_pixels(transform: Affine, clip: Rect) -> usize {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -284,4 +288,157 @@ fn rotated_filter_region_keeps_antialiased_edges() {
     let clip = Rect::new(-4.0, -4.0, 4.0, 4.0);
     let transform = Affine::translate((8.0, 8.0)) * Affine::rotate(0.5);
     assert!(partial_alpha_pixels(transform, clip) > 0);
+}
+
+/// Offsets a red square drawn left of the canvas into view, through a filter layer blended with
+/// `blend` over a white background.
+fn offset_from_outside_canvas(blend: Mix) -> Vec<u8> {
+    let mut filter = Filter::new(Rect::new(-8.0, 0.0, 16.0, 16.0));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(8.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let filter = Arc::new(filter);
+    render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::WHITE,
+                None,
+                &FULL,
+                AntiAliasing::Enabled,
+            );
+            scene.push_layer(
+                Fill::NonZero,
+                blend,
+                1.0,
+                Affine::IDENTITY,
+                &Rect::new(-8.0, 0.0, 16.0, 16.0),
+                Some(filter.clone()),
+                None,
+            );
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(-8.0, 0.0, 0.0, 16.0),
+                AntiAliasing::Enabled,
+            );
+            scene.pop_layer();
+        },
+        SIZE,
+        SIZE,
+    )
+}
+
+#[test]
+fn filters_see_content_outside_the_canvas() {
+    for blend in [Mix::Normal, Mix::Multiply] {
+        let buffer = offset_from_outside_canvas(blend);
+        assert_close(pixel(&buffer, 0, 8), [255, 0, 0, 255]);
+        assert_close(pixel(&buffer, 7, 8), [255, 0, 0, 255]);
+        assert_close(pixel(&buffer, 8, 8), [255, 255, 255, 255]);
+    }
+}
+
+#[test]
+fn filters_run_in_user_space_axes_under_rotation() {
+    // A blur along user-space x, under a quarter turn, spreads along canvas y.
+    let size = SIZE as f64;
+    let mut filter = Filter::new(Rect::new(-size, -size, size, size));
+    filter.add(
+        FilterEffect::GaussianBlur(GaussianBlurFilter {
+            std_deviation_x: 2.0,
+            std_deviation_y: 0.0,
+            edge_mode: EdgeMode::None,
+        }),
+        FilterInputs::NONE,
+    );
+    let filter = Arc::new(filter);
+    let transform = Affine::translate((8.0, 8.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2);
+    let buffer = render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            scene.push_layer(
+                Fill::NonZero,
+                Mix::Normal,
+                1.0,
+                transform,
+                &Rect::new(-size, -size, size, size),
+                Some(filter.clone()),
+                None,
+            );
+            // A horizontal stripe on the canvas, along user-space y.
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(-1.0, -size, 1.0, size),
+                AntiAliasing::Enabled,
+            );
+            scene.pop_layer();
+        },
+        SIZE,
+        SIZE,
+    );
+    assert!(pixel(&buffer, 8, 4)[3] > 0);
+    assert!(pixel(&buffer, 8, 8)[3] < 255);
+}
+
+/// Renders a red stripe under a skew and 1.5x scale, either moved by a filter offset of `dx`
+/// along user-space x or, without a filter, by translating the stripe itself.
+fn skewed_stripe(dx: f64, with_filter: bool) -> Vec<u8> {
+    let size = SIZE as f64;
+    // `scale(1.5) skewX(30)` as usvg hands it over. Dividing the scale back out of this in
+    // floating point gives 1.4999999999999998 rather than 1.5.
+    let transform = Affine::new([1.5, 0.0, 0.8660253882408142, 1.5, -6.0, 0.0]);
+    let mut filter = Filter::new(Rect::new(-size, -size, 2.0 * size, 2.0 * size));
+    filter.add(FilterEffect::Offset(Vec2::new(dx, 0.0)), FilterInputs::NONE);
+    let filter = Arc::new(filter);
+    let stripe = Rect::new(0.0, 0.0, 2.0, size);
+    render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            if with_filter {
+                scene.push_layer(
+                    Fill::NonZero,
+                    Mix::Normal,
+                    1.0,
+                    transform,
+                    &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
+                    Some(filter.clone()),
+                    None,
+                );
+            }
+            let shift = if with_filter { 0.0 } else { dx };
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &(stripe + Vec2::new(shift, 0.0)),
+                AntiAliasing::Enabled,
+            );
+            if with_filter {
+                scene.pop_layer();
+            }
+        },
+        SIZE * 2,
+        SIZE,
+    )
+}
+
+#[test]
+fn whole_pixel_offsets_stay_exact_under_skew() {
+    // 4 user units at 1.5x is exactly 6 pixels, so the offset copy lands where the stripe would.
+    let filtered = skewed_stripe(4.0, true);
+    let moved = skewed_stripe(4.0, false);
+    let max_diff = filtered
+        .iter()
+        .zip(&moved)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap();
+    assert!(max_diff <= 64, "max channel difference {max_diff}");
 }

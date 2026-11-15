@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Paint::Pattern`, a paint that repeats a recorded `Scene` as a tile, with a stable id for caching the rasterized tile (breaking for code matching on `Paint`).
+- `Scene::replay`, which draws a recorded scene into any `PaintScene`.
 - `ColorMatrix::SOURCE_ALPHA` and `ColorMatrix::LUMINANCE_TO_ALPHA` constants.
 - `PaintScene::push_mask_layer` with `MaskMode::Alpha` and `MaskMode::Luminance`, and the recorded `MaskLayerCommand` (breaking for `PaintScene` implementors).
 - `Filter::region`, an optional filter region that clips the source graphic and every primitive result, and is the default subregion of primitives that fill an area. `None` (the default) is unbounded.

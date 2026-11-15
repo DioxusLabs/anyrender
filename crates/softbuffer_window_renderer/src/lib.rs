@@ -2,7 +2,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use anyrender::{ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    AntiAliasing, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer,
+};
 use debug_timer::debug_timer;
 use kurbo::{Affine, Rect};
 use softbuffer::{Context, Surface};
@@ -220,6 +222,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
                 base_color,
                 None,
                 &Rect::new(0.0, 0.0, width, height),
+                AntiAliasing::Enabled,
             );
             draw_fn(painter);
         };

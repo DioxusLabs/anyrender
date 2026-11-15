@@ -1,16 +1,22 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyrender::{
-    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape, RenderContext,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape,
+    RenderContext,
 };
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
+use vello_common::paint::ImageSource;
 use vello_cpu::{PaintType, Pixmap};
 
 use crate::image_cache::{ImageCache, ImageCacheConfig};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
+
+/// Rasterized pattern tiles are evicted after going unused for this many frames.
+const PATTERN_CACHE_FRAMES: u64 = 2;
 
 /// Whether a glyph run drawn with the given transforms can use Vello's glyph atlas cache.
 ///
@@ -119,6 +125,10 @@ pub struct VelloCpuScenePainter {
     pub(crate) render_ctx: vello_cpu::RenderContext,
     pub(crate) resources: vello_cpu::Resources,
     pub(crate) image_cache: ImageCache,
+    /// Rasterized pattern tiles, by pattern id and pixel size, with the frame they were last
+    /// used in.
+    pattern_cache: HashMap<(u64, u16, u16), (Arc<Pixmap>, u64)>,
+    frame: u64,
     layer_stack: Vec<LayerKind>,
     glyph_caching: bool,
 }
@@ -133,6 +143,8 @@ impl VelloCpuScenePainter {
             render_ctx: vello_cpu::RenderContext::new(width, height),
             resources: vello_cpu::Resources::new(),
             image_cache: ImageCache::new(config),
+            pattern_cache: HashMap::new(),
+            frame: 0,
             layer_stack: Vec::new(),
             glyph_caching: false,
         }
@@ -147,30 +159,100 @@ impl VelloCpuScenePainter {
         self.glyph_caching = enabled;
     }
 
-    fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
-        match paint {
+    /// Converts `paint` for a draw with `transform`, returning it with its paint transform.
+    fn convert_paint(
+        &mut self,
+        paint: PaintRef<'_>,
+        transform: Affine,
+        brush_transform: Option<Affine>,
+    ) -> (PaintType, Affine) {
+        let brush_transform = brush_transform.unwrap_or(Affine::IDENTITY);
+        let paint = match paint {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
             Paint::Image(image) => PaintType::Image(ImageBrush {
                 image: self.image_cache.get_or_register(image.image),
                 sampler: image.sampler,
             }),
+            Paint::Pattern(pattern) => {
+                match self.pattern_pixmap(pattern, transform * brush_transform) {
+                    Some((pixmap, pixel_transform)) => {
+                        let paint = PaintType::Image(ImageBrush {
+                            image: ImageSource::Pixmap(pixmap),
+                            sampler: peniko::ImageSampler::new()
+                                .with_extend(peniko::Extend::Repeat)
+                                .with_quality(peniko::ImageQuality::Medium),
+                        });
+                        return (paint, brush_transform * pixel_transform);
+                    }
+                    None => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
+                }
+            }
             // TODO: custom paint
             Paint::Resource(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
             Paint::Custom(_) => PaintType::Solid(peniko::color::palette::css::TRANSPARENT),
-        }
+        };
+        (paint, brush_transform)
     }
 
-    /// Advance the image cache's frame counter and evict stale entries.
+    /// Sets the paint and paint transform for a draw with `transform`.
+    fn set_paint(
+        &mut self,
+        paint: PaintRef<'_>,
+        transform: Affine,
+        brush_transform: Option<Affine>,
+    ) {
+        let (paint, paint_transform) = self.convert_paint(paint, transform, brush_transform);
+        self.render_ctx.set_paint(paint);
+        self.render_ctx.set_paint_transform(paint_transform);
+    }
+
+    /// Rasterizes one tile of `pattern` at the resolution it is drawn at with `transform` (the
+    /// local transform of the shape, including the brush transform). Returns the tile and the
+    /// transform mapping its pixels into pattern space.
+    fn pattern_pixmap(
+        &mut self,
+        pattern: &anyrender::Pattern,
+        transform: Affine,
+    ) -> Option<(Arc<Pixmap>, Affine)> {
+        let tile = pattern.tile();
+        let (width, height) = anyrender::pattern_raster_size(tile, transform)?;
+        let (width, height) = (f64::from(width), f64::from(height));
+        // Scale so the tile exactly covers the pixmap, so tiles repeat without seams.
+        let scale = Affine::scale_non_uniform(width / tile.width(), height / tile.height());
+        let pixel_transform = Affine::translate(tile.origin().to_vec2()) * scale.inverse();
+        let (width, height) = (width as u16, height as u16);
+
+        let key = (pattern.id(), width, height);
+        if let Some((pixmap, used)) = self.pattern_cache.get_mut(&key) {
+            *used = self.frame;
+            return Some((pixmap.clone(), pixel_transform));
+        }
+        let mut painter = VelloCpuScenePainter::new(width, height);
+        pattern.scene().replay(
+            &mut painter,
+            scale * Affine::translate(-tile.origin().to_vec2()),
+        );
+        let pixmap = Arc::new(painter.finish());
+        self.pattern_cache.insert(key, (pixmap.clone(), self.frame));
+        Some((pixmap, pixel_transform))
+    }
+
+    /// Advance the image and pattern caches' frame counter and evict stale entries.
     ///
     /// Should be called once per frame, after rendering.
     pub fn maintain(&mut self) {
         self.image_cache.maintain();
+        self.frame += 1;
+        let frame = self.frame;
+        self.pattern_cache
+            .retain(|_, (_, used)| frame - *used <= PATTERN_CACHE_FRAMES);
     }
 
     /// Drop all cached image conversions.
     pub fn clear_image_cache(&mut self) {
         self.image_cache.clear();
+        self.pattern_cache.clear();
     }
 
     pub fn finish(mut self) -> Pixmap {
@@ -261,7 +343,14 @@ impl PaintScene for VelloCpuScenePainter {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip.as_ref());
+        self.fill(
+            fill,
+            transform,
+            Color::BLACK,
+            None,
+            clip.as_ref(),
+            AntiAliasing::Enabled,
+        );
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -303,19 +392,20 @@ impl PaintScene for VelloCpuScenePainter {
         paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        anti_aliasing: AntiAliasing,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_stroke(style.clone());
-        let paint = self.convert_paint(paint);
-        self.render_ctx.set_paint(paint);
-        self.render_ctx
-            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
+        self.set_paint(paint, transform, brush_transform);
         if let PaintShape::Rect(rect) = shape {
             self.render_ctx.stroke_rect(rect);
         } else {
             self.render_ctx
                 .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
+        self.render_ctx.set_aliasing_threshold(None);
     }
 
     fn fill_shape(
@@ -325,19 +415,20 @@ impl PaintScene for VelloCpuScenePainter {
         paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        anti_aliasing: AntiAliasing,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(style);
-        let paint = self.convert_paint(paint);
-        self.render_ctx.set_paint(paint);
-        self.render_ctx
-            .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
+        self.set_paint(paint, transform, brush_transform);
         if let PaintShape::Rect(rect) = shape {
             self.render_ctx.fill_rect(rect);
         } else {
             self.render_ctx
                 .fill_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
+        self.render_ctx.set_aliasing_threshold(None);
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -353,13 +444,16 @@ impl PaintScene for VelloCpuScenePainter {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        anti_aliasing: AntiAliasing,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
-        let paint = self.convert_paint(paint.into());
-        self.render_ctx.set_paint(paint);
+        self.set_paint(paint.into(), transform, None);
 
-        let glyph_caching =
-            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+        let glyph_caching = anti_aliasing.is_enabled()
+            && self.glyph_caching
+            && supports_glyph_caching(transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
@@ -397,6 +491,7 @@ impl PaintScene for VelloCpuScenePainter {
                     }));
             }
         }
+        self.render_ctx.set_aliasing_threshold(None);
     }
     fn draw_box_shadow(
         &mut self,
@@ -438,7 +533,7 @@ impl PaintScene for VelloCpuScenePainter {
 
 #[cfg(test)]
 mod clip_rule_tests {
-    use anyrender::{PaintScene, recording::Scene, render_to_buffer};
+    use anyrender::{AntiAliasing, PaintScene, recording::Scene, render_to_buffer};
     use kurbo::{Affine, BezPath, Rect};
     use peniko::{Fill, Mix, color::palette::css::RED};
 
@@ -475,6 +570,7 @@ mod clip_rule_tests {
             RED,
             None,
             &Rect::new(0.0, 0.0, 100.0, 100.0),
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
     }
@@ -522,6 +618,7 @@ mod clip_rule_tests {
                             RED,
                             None,
                             &Rect::new(0.0, 0.0, 100.0, 100.0),
+                            AntiAliasing::Enabled,
                         );
                     }
                     scene.pop_layer();
@@ -561,6 +658,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(0.0, 0.0, 100.0, 100.0),
+                    AntiAliasing::Enabled,
                 );
                 scene.pop_layer();
                 scene.pop_layer();
@@ -570,6 +668,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(90.0, 90.0, 100.0, 100.0),
+                    AntiAliasing::Enabled,
                 );
             },
             100,
@@ -683,7 +782,9 @@ mod glyph_origin_snap_tests {
 
 #[cfg(test)]
 mod box_shadow_tests {
-    use anyrender::{BoxShadowKind, NonUniformRoundedRect, PaintScene, render_to_buffer};
+    use anyrender::{
+        AntiAliasing, BoxShadowKind, NonUniformRoundedRect, PaintScene, render_to_buffer,
+    };
     use kurbo::{Affine, Rect, Vec2};
     use peniko::color::palette::css::RED;
 
@@ -774,6 +875,7 @@ mod box_shadow_tests {
                         peniko::color::palette::css::WHITE,
                         None,
                         &Rect::new(0.0, 0.0, 100.0, 100.0),
+                        AntiAliasing::Enabled,
                     );
                     scene.draw_box_shadow(
                         Affine::IDENTITY,
@@ -807,4 +909,9 @@ mod box_shadow_tests {
         assert_eq!(alpha(&buffer, 50, 50), 0);
         assert_eq!(alpha(&buffer, 10, 10), 0);
     }
+}
+
+/// The coverage above which vello_cpu fully paints a pixel when anti-aliasing is disabled.
+fn aliasing_threshold(anti_aliasing: AntiAliasing) -> Option<u8> {
+    (!anti_aliasing.is_enabled()).then_some(127)
 }

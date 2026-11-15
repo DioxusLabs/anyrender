@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use anyrender::{
-    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape, RenderContext,
-    ResourceId,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape,
+    RenderContext, ResourceId,
 };
 use kurbo::{Affine, Rect, Stroke};
 use peniko::{
@@ -18,6 +18,10 @@ pub struct VelloScenePainter<'r, 's> {
     pub(crate) device_handle: Option<&'r DeviceHandle>,
     pub(crate) texture_handles: Option<&'r mut FxHashMap<ResourceId, ImageData>>,
     pub(crate) inner: &'s mut vello::Scene,
+    /// Pattern tiles converted to vello scenes in this frame, by pattern id.
+    pub(crate) pattern_scenes: FxHashMap<u64, vello::Scene>,
+    /// The area of the scene that is rendered, if known. Pattern tiles outside it are skipped.
+    pub(crate) cull_rect: Option<Rect>,
 }
 
 impl RenderContext for VelloScenePainter<'_, '_> {
@@ -62,7 +66,31 @@ impl VelloScenePainter<'_, '_> {
             device_handle: None,
             texture_handles: None,
             inner: scene,
+            pattern_scenes: FxHashMap::default(),
+            cull_rect: None,
         }
+    }
+}
+
+impl VelloScenePainter<'_, '_> {
+    /// Takes the vello scene for one tile of `pattern`, converting it on first use in this
+    /// frame. Put it back with `pattern_scenes.insert` when done.
+    fn take_pattern_scene(&mut self, pattern: &anyrender::Pattern) -> vello::Scene {
+        if let Some(scene) = self.pattern_scenes.remove(&pattern.id()) {
+            return scene;
+        }
+        let mut scene = vello::Scene::new();
+        let mut painter = VelloScenePainter {
+            renderer: None,
+            device_handle: None,
+            texture_handles: self.texture_handles.as_deref_mut(),
+            inner: &mut scene,
+            pattern_scenes: std::mem::take(&mut self.pattern_scenes),
+            cull_rect: Some(pattern.tile()),
+        };
+        pattern.scene().replay(&mut painter, Affine::IDENTITY);
+        self.pattern_scenes = painter.pattern_scenes;
+        scene
     }
 }
 
@@ -124,7 +152,24 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         paint_ref: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        _anti_aliasing: AntiAliasing,
     ) {
+        if let anyrender::Paint::Pattern(pattern) = paint_ref {
+            let tile_scene = self.take_pattern_scene(pattern);
+            let cull_rect = self.cull_rect;
+            anyrender::stroke_pattern_tiles_with(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+                cull_rect,
+                |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
+            );
+            self.pattern_scenes.insert(pattern.id(), tile_scene);
+            return;
+        }
         let brush_ref: BrushRef<'_> = paint_ref.into();
         self.inner
             .stroke(style, transform, brush_ref, brush_transform, &shape);
@@ -137,7 +182,24 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
+        _anti_aliasing: AntiAliasing,
     ) {
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            let tile_scene = self.take_pattern_scene(pattern);
+            let cull_rect = self.cull_rect;
+            anyrender::fill_pattern_tiles_with(
+                self,
+                pattern,
+                style,
+                transform,
+                brush_transform,
+                shape,
+                cull_rect,
+                |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
+            );
+            self.pattern_scenes.insert(pattern.id(), tile_scene);
+            return;
+        }
         let brush_ref: BrushRef<'_> = match paint {
             Paint::Solid(color) => BrushRef::Solid(color),
             Paint::Gradient(gradient) => BrushRef::Gradient(gradient),
@@ -157,7 +219,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                     BrushRef::Solid(Color::TRANSPARENT)
                 }
             }
-            Paint::Custom(_) => BrushRef::Solid(Color::TRANSPARENT),
+            Paint::Custom(_) | Paint::Pattern(_) => BrushRef::Solid(Color::TRANSPARENT),
         };
 
         self.inner
@@ -176,8 +238,33 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         brush_alpha: f32,
         transform: Affine,
         glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = anyrender::Glyph>,
+        glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        _anti_aliasing: AntiAliasing,
     ) {
+        let paint: anyrender::PaintRef<'a> = paint.into();
+        if let anyrender::Paint::Pattern(pattern) = paint {
+            let tile_scene = self.take_pattern_scene(pattern);
+            let cull_rect = self.cull_rect;
+            anyrender::draw_glyphs_pattern_tiles_with(
+                self,
+                pattern,
+                font,
+                font_size,
+                hint,
+                normalized_coords,
+                embolden,
+                style,
+                brush_alpha,
+                transform,
+                glyph_transform,
+                glyphs,
+                cull_rect,
+                |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
+            );
+            self.pattern_scenes.insert(pattern.id(), tile_scene);
+            return;
+        }
+        let brush_ref: BrushRef<'_> = paint.into();
         self.inner
             .draw_glyphs(font)
             .font_size(font_size)
@@ -186,7 +273,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .font_embolden(vello::FontEmbolden::new(kurbo::Diagonal2::new(
                 embolden.x, embolden.y,
             )))
-            .brush(paint.into())
+            .brush(brush_ref)
             .brush_alpha(brush_alpha)
             .transform(transform)
             .glyph_transform(glyph_transform)

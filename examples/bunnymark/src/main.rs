@@ -1,4 +1,4 @@
-use anyrender::{PaintScene, WindowRenderer};
+use anyrender::{AntiAliasing, PaintScene, WindowRenderer};
 use anyrender_skia::{SkiaImageRenderer, SkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
@@ -101,6 +101,7 @@ impl App {
             SKY_BLUE,
             None,
             &Rect::new(0.0, 0.0, width as f64, height as f64),
+            AntiAliasing::Enabled,
         );
 
         // Draw small circle indicating renderer in use
@@ -110,6 +111,7 @@ impl App {
             Color::BLACK,
             None,
             &Rect::new(5.0, 5.0, 35.0, 35.0),
+            AntiAliasing::Enabled,
         );
         scene.fill(
             Fill::NonZero,
@@ -117,6 +119,7 @@ impl App {
             color,
             None,
             &Circle::new(Point::new(20.0, 20.0), 10.0),
+            AntiAliasing::Enabled,
         );
 
         // Draw bunnies

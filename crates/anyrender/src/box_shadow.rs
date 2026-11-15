@@ -1,6 +1,6 @@
 //! Box shadows, as drawn by [`PaintScene::draw_box_shadow`].
 
-use crate::{NonUniformRoundedRect, PaintScene};
+use crate::{AntiAliasing, NonUniformRoundedRect, PaintScene};
 use kurbo::{Affine, BezPath, Shape, Vec2};
 use peniko::{Color, Fill};
 
@@ -120,7 +120,14 @@ impl BoxShadowGeometry {
         if clip {
             scene.push_clip_layer(Fill::NonZero, transform, &self.area);
         }
-        scene.fill(Fill::NonZero, transform, color, None, self.unblurred_path());
+        scene.fill(
+            Fill::NonZero,
+            transform,
+            color,
+            None,
+            self.unblurred_path(),
+            AntiAliasing::Enabled,
+        );
         if clip {
             scene.pop_layer();
         }

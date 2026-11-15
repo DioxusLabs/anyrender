@@ -1,4 +1,4 @@
-use anyrender::PaintScene;
+use anyrender::{AntiAliasing, PaintScene};
 use anyrender_vello_cpu::VelloCpuScenePainter;
 use kurbo::{Affine, Rect};
 use peniko::{Color, Fill};
@@ -12,6 +12,7 @@ fn finish_renders_scene() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 8.0, 16.0),
+        AntiAliasing::Enabled,
     );
     let pixmap = scene.finish();
     let pixel = |x: usize, y: usize| {
