@@ -6,7 +6,9 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput};
+use anyrender::filters::{
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterSource,
+};
 use anyrender::{AntiAliasing, PaintScene, RenderContext};
 use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
@@ -841,10 +843,29 @@ fn resolve_input(
     };
     let (input, input_color_space) = match input {
         None => id.0.checked_sub(1).map_or(source.clone(), result),
+        Some(FilterInput::Source(FilterSource::SourceAlpha)) => {
+            (source_alpha(source.0), FilterColorSpace::Srgb)
+        }
         Some(FilterInput::Source(_)) => source.clone(),
         Some(FilterInput::Result(input_id)) => result(input_id.0),
     };
     convert_color_space(input, input_color_space, color_space)
+}
+
+/// Keep only the alpha channel of `source`, as black.
+fn source_alpha(source: Option<ImageFilter>) -> Option<ImageFilter> {
+    #[rustfmt::skip]
+    let alpha_only = [
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0, 0.0,
+    ];
+    let color_filter = skia_safe::color_filters::matrix_row_major(
+        &alpha_only,
+        skia_safe::color_filters::Clamp::Yes,
+    );
+    skia_safe::image_filters::color_filter(color_filter, source, None)
 }
 
 /// Wrap `filter` (`None` meaning the source graphic) in a gamma colour filter converting it
