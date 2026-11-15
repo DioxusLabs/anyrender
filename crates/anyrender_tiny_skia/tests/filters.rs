@@ -301,7 +301,14 @@ fn offset_from_outside_canvas(blend: Mix) -> Vec<u8> {
     let filter = Arc::new(filter);
     render_to_buffer::<TinySkiaImageRenderer, _>(
         |scene| {
-            scene.fill(Fill::NonZero, Affine::IDENTITY, Color::WHITE, None, &FULL);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::WHITE,
+                None,
+                &FULL,
+                AntiAliasing::Enabled,
+            );
             scene.push_layer(
                 Fill::NonZero,
                 blend,
@@ -317,6 +324,7 @@ fn offset_from_outside_canvas(blend: Mix) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &Rect::new(-8.0, 0.0, 0.0, 16.0),
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
