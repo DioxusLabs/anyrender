@@ -451,7 +451,7 @@ impl WindowRenderer for VelloWindowRenderer {
             device_handle: Some(&render_surface.device_handle),
             texture_handles: Some(&mut self.texture_handles),
             pattern_scenes: Default::default(),
-            viewport: Some(kurbo::Rect::new(
+            cull_rect: Some(kurbo::Rect::new(
                 0.0,
                 0.0,
                 render_surface.config.width as f64,

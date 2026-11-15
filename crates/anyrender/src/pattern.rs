@@ -93,9 +93,9 @@ impl PartialEq for Pattern {
 
 /// Fills `shape` with `pattern` by drawing a clipped copy of the pattern's scene for every tile
 /// that intersects the shape. This is a fallback for backends that can't paint with a
-/// pattern directly. Takes the same arguments as [`PaintScene::fill`], plus `visible`: the area
-/// of the painter's space that can be seen (such as the viewport), if known. Tiles outside it
-/// are skipped.
+/// pattern directly. Takes the same arguments as [`PaintScene::fill`], plus `cull_rect`: the
+/// area of the painter's space that can be drawn to (such as the viewport), if known. Tiles
+/// outside it are skipped.
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
@@ -106,7 +106,7 @@ pub fn fill_pattern_tiles<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
 ) {
     fill_pattern_tiles_with(
         painter,
@@ -115,7 +115,7 @@ pub fn fill_pattern_tiles<S: PaintScene>(
         transform,
         brush_transform,
         shape,
-        visible,
+        cull_rect,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -132,7 +132,7 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
 ) {
     stroke_pattern_tiles_with(
         painter,
@@ -141,7 +141,7 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
         transform,
         brush_transform,
         shape,
-        visible,
+        cull_rect,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -160,7 +160,7 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     let brush_transform = brush_transform.unwrap_or(Affine::IDENTITY);
@@ -176,7 +176,7 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
         pattern,
         transform * brush_transform,
         bounds,
-        visible,
+        cull_rect,
         draw_tile,
     );
     painter.pop_layer();
@@ -195,7 +195,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
     transform: Affine,
     brush_transform: Option<Affine>,
     shape: &impl Shape,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     if style.width <= 0.0 {
@@ -218,7 +218,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
         transform,
         brush_transform,
         &outline,
-        visible,
+        cull_rect,
         draw_tile,
     );
 }
@@ -244,7 +244,7 @@ pub fn draw_glyphs_pattern_tiles<'a, S: PaintScene>(
     transform: Affine,
     glyph_transform: Option<Affine>,
     glyphs: impl Iterator<Item = Glyph> + Clone,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
 ) {
     draw_glyphs_pattern_tiles_with(
         painter,
@@ -259,7 +259,7 @@ pub fn draw_glyphs_pattern_tiles<'a, S: PaintScene>(
         transform,
         glyph_transform,
         glyphs,
-        visible,
+        cull_rect,
         |painter, tile_transform| pattern.scene().replay(painter, tile_transform),
     );
 }
@@ -283,7 +283,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
     transform: Affine,
     glyph_transform: Option<Affine>,
     glyphs: impl Iterator<Item = Glyph> + Clone,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
     let style = style.into();
@@ -328,7 +328,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
         None,
         None,
     );
-    draw_tiles(painter, pattern, transform, bounds, visible, draw_tile);
+    draw_tiles(painter, pattern, transform, bounds, cull_rect, draw_tile);
     painter.pop_layer();
     painter.pop_layer();
 }
@@ -401,12 +401,12 @@ fn draw_tiles<S: PaintScene>(
     pattern: &Pattern,
     transform: Affine,
     bounds: Rect,
-    visible: Option<Rect>,
+    cull_rect: Option<Rect>,
     mut draw_tile: impl FnMut(&mut S, Affine),
 ) {
-    let bounds = match visible {
-        Some(visible) if transform.determinant() != 0.0 => {
-            bounds.intersect(transform.inverse().transform_rect_bbox(visible))
+    let bounds = match cull_rect {
+        Some(cull_rect) if transform.determinant() != 0.0 => {
+            bounds.intersect(transform.inverse().transform_rect_bbox(cull_rect))
         }
         _ => bounds,
     };

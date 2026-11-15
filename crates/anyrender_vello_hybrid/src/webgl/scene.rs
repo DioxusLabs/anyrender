@@ -140,7 +140,7 @@ pub struct WebGlScenePainter<'s> {
 }
 
 impl<'s> WebGlScenePainter<'s> {
-    fn viewport(&self) -> Option<Rect> {
+    fn cull_rect(&self) -> Option<Rect> {
         Some(Rect::new(
             0.0,
             0.0,
@@ -310,7 +310,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
-            let viewport = self.viewport();
+            let cull_rect = self.cull_rect();
             anyrender::stroke_pattern_tiles(
                 self,
                 pattern,
@@ -318,7 +318,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 transform,
                 brush_transform,
                 shape,
-                viewport,
+                cull_rect,
             );
             return;
         }
@@ -341,7 +341,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
-            let viewport = self.viewport();
+            let cull_rect = self.cull_rect();
             anyrender::fill_pattern_tiles(
                 self,
                 pattern,
@@ -349,7 +349,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 transform,
                 brush_transform,
                 shape,
-                viewport,
+                cull_rect,
             );
             return;
         }
@@ -382,7 +382,7 @@ impl PaintScene for WebGlScenePainter<'_> {
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
-            let viewport = self.viewport();
+            let cull_rect = self.cull_rect();
             anyrender::draw_glyphs_pattern_tiles(
                 self,
                 pattern,
@@ -396,7 +396,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                 transform,
                 glyph_transform,
                 glyphs,
-                viewport,
+                cull_rect,
             );
             return;
         }

@@ -20,7 +20,7 @@ pub struct VelloScenePainter<'r, 's> {
     /// Pattern tiles converted to vello scenes in this frame, by pattern id.
     pub(crate) pattern_scenes: FxHashMap<u64, vello::Scene>,
     /// The area of the scene that is rendered, if known. Pattern tiles outside it are skipped.
-    pub(crate) viewport: Option<Rect>,
+    pub(crate) cull_rect: Option<Rect>,
 }
 
 impl RenderContext for VelloScenePainter<'_, '_> {
@@ -66,7 +66,7 @@ impl VelloScenePainter<'_, '_> {
             texture_handles: None,
             inner: scene,
             pattern_scenes: FxHashMap::default(),
-            viewport: None,
+            cull_rect: None,
         }
     }
 }
@@ -85,7 +85,7 @@ impl VelloScenePainter<'_, '_> {
             texture_handles: self.texture_handles.as_deref_mut(),
             inner: &mut scene,
             pattern_scenes: std::mem::take(&mut self.pattern_scenes),
-            viewport: Some(pattern.tile()),
+            cull_rect: Some(pattern.tile()),
         };
         pattern.scene().replay(&mut painter, Affine::IDENTITY);
         self.pattern_scenes = painter.pattern_scenes;
@@ -155,7 +155,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         let paint_ref: anyrender::PaintRef<'a> = paint_ref.into();
         if let anyrender::Paint::Pattern(pattern) = paint_ref {
             let tile_scene = self.take_pattern_scene(pattern);
-            let viewport = self.viewport;
+            let cull_rect = self.cull_rect;
             anyrender::stroke_pattern_tiles_with(
                 self,
                 pattern,
@@ -163,7 +163,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                 transform,
                 brush_transform,
                 shape,
-                viewport,
+                cull_rect,
                 |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
             );
             self.pattern_scenes.insert(pattern.id(), tile_scene);
@@ -185,7 +185,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
             let tile_scene = self.take_pattern_scene(pattern);
-            let viewport = self.viewport;
+            let cull_rect = self.cull_rect;
             anyrender::fill_pattern_tiles_with(
                 self,
                 pattern,
@@ -193,7 +193,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                 transform,
                 brush_transform,
                 shape,
-                viewport,
+                cull_rect,
                 |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
             );
             self.pattern_scenes.insert(pattern.id(), tile_scene);
@@ -242,7 +242,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
             let tile_scene = self.take_pattern_scene(pattern);
-            let viewport = self.viewport;
+            let cull_rect = self.cull_rect;
             anyrender::draw_glyphs_pattern_tiles_with(
                 self,
                 pattern,
@@ -256,7 +256,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
                 transform,
                 glyph_transform,
                 glyphs,
-                viewport,
+                cull_rect,
                 |painter, tile_transform| painter.inner.append(&tile_scene, Some(tile_transform)),
             );
             self.pattern_scenes.insert(pattern.id(), tile_scene);

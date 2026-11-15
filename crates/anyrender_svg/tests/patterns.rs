@@ -163,8 +163,8 @@ fn pattern_fill_fallback_tiles() {
     assert_close(pixel(&buffer, 55, 65), CLEAR);
 }
 
-/// The fallback only counts tiles in the visible area, so a tiny tile on a huge shape still
-/// draws when only part of the shape is visible.
+/// The fallback only counts tiles inside the cull rect, so a tiny tile on a huge shape still
+/// draws when only part of the shape is inside it.
 #[test]
 fn pattern_fill_fallback_tiles_huge_shape() {
     use anyrender::{PaintScene, Pattern, recording::Scene};
