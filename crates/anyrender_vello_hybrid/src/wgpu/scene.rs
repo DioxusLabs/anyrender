@@ -473,13 +473,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_alias: bool,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -504,13 +505,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_alias: bool,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -539,7 +541,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,
@@ -552,6 +554,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        _anti_alias: bool,
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {

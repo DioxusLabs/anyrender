@@ -50,6 +50,45 @@ fn legacy_clips_default_to_nonzero() {
     }
 }
 
+#[test]
+fn anti_alias_roundtrips_and_defaults_to_true() {
+    let mut scene = Scene::new();
+    let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::BLACK, None, &rect);
+    scene.fill_with_anti_alias(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        false,
+    );
+    scene.stroke_with_anti_alias(
+        &Stroke::new(1.0),
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        false,
+    );
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    let restored = archive.to_scene().unwrap();
+    let flags: Vec<bool> = restored
+        .commands
+        .iter()
+        .map(|command| match command {
+            RenderCommand::Fill(fill) => fill.anti_alias,
+            RenderCommand::Stroke(stroke) => stroke.anti_alias,
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(flags, [true, false, false]);
+
+    let value = serde_json::to_value(&archive.commands[0]).unwrap();
+    let fields = value.as_object().unwrap().values().next().unwrap();
+    assert!(fields.get("anti_alias").is_none());
+}
+
 /// Tests that all non-image and non-font command types survive a roundtrip.
 #[test]
 fn test_all_command_types_roundtrip() {

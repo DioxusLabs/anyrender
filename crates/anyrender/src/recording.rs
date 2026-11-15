@@ -12,6 +12,16 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
+#[cfg(feature = "serde")]
+fn default_anti_alias() -> bool {
+    true
+}
+
+#[cfg(feature = "serde")]
+fn is_anti_aliased(anti_alias: &bool) -> bool {
+    *anti_alias
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum RenderCommand<Font = FontData, Brush = Paint> {
@@ -112,6 +122,15 @@ pub struct StrokeCommand<Brush = Paint> {
     pub brush_transform: Option<Affine>,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default = "default_anti_alias",
+            skip_serializing_if = "is_anti_aliased"
+        )
+    )]
+    pub anti_alias: bool,
 }
 
 /// Fills a shape using the specified style and brush.
@@ -124,6 +143,15 @@ pub struct FillCommand<Brush = Paint> {
     pub brush_transform: Option<Affine>,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub shape: BezPath, // TODO: more shape options
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default = "default_anti_alias",
+            skip_serializing_if = "is_anti_aliased"
+        )
+    )]
+    pub anti_alias: bool,
 }
 
 /// Draws a run of glyphs
@@ -142,6 +170,15 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
     pub transform: Affine,
     pub glyph_transform: Option<Affine>,
     pub glyphs: Vec<Glyph>,
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            default = "default_anti_alias",
+            skip_serializing_if = "is_anti_aliased"
+        )
+    )]
+    pub anti_alias: bool,
 }
 
 /// Draw a box shadow cast by a box
@@ -222,21 +259,23 @@ impl Scene {
                     &cmd.clip,
                 ),
                 RenderCommand::PopLayer => painter.pop_layer(),
-                RenderCommand::Stroke(cmd) => painter.stroke(
+                RenderCommand::Stroke(cmd) => painter.stroke_with_anti_alias(
                     &cmd.style,
                     transform * cmd.transform,
                     cmd.brush.as_ref(),
                     cmd.brush_transform,
                     &cmd.shape,
+                    cmd.anti_alias,
                 ),
-                RenderCommand::Fill(cmd) => painter.fill(
+                RenderCommand::Fill(cmd) => painter.fill_with_anti_alias(
                     cmd.fill,
                     transform * cmd.transform,
                     cmd.brush.as_ref(),
                     cmd.brush_transform,
                     &cmd.shape,
+                    cmd.anti_alias,
                 ),
-                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs(
+                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs_with_anti_alias(
                     &cmd.font_data,
                     cmd.font_size,
                     cmd.hint,
@@ -248,6 +287,7 @@ impl Scene {
                     transform * cmd.transform,
                     cmd.glyph_transform,
                     cmd.glyphs.iter().copied(),
+                    cmd.anti_alias,
                 ),
                 RenderCommand::BoxShadow(cmd) => painter.draw_box_shadow(
                     transform * cmd.transform,
@@ -324,13 +364,14 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PopLayer);
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
         paint_ref: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paint(paint_ref.into());
@@ -340,17 +381,19 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
+            anti_alias,
         };
         self.commands.push(RenderCommand::Stroke(stroke));
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paint(paint.into());
@@ -360,11 +403,12 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
+            anti_alias,
         };
         self.commands.push(RenderCommand::Fill(fill));
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,
@@ -377,6 +421,7 @@ impl PaintScene for Scene {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph>,
+        anti_alias: bool,
     ) {
         let brush = self.convert_paint(paint_ref.into());
         let glyph_run = GlyphRunCommand {
@@ -391,6 +436,7 @@ impl PaintScene for Scene {
             transform,
             glyph_transform,
             glyphs: glyphs.into_iter().collect(),
+            anti_alias,
         };
         self.commands.push(RenderCommand::GlyphRun(glyph_run));
     }

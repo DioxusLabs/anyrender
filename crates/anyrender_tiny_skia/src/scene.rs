@@ -278,6 +278,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         transform: Affine,
         brush_transform: Option<Affine>,
+        anti_alias: bool,
         draw: impl FnOnce(&mut Pixmap, &Paint<'_>),
     ) {
         let brush_affine = brush_transform.unwrap_or(Affine::IDENTITY);
@@ -317,12 +318,13 @@ impl TinySkiaScenePainter {
         };
         let paint = Paint {
             shader,
-            anti_alias: true,
+            anti_alias,
             ..Default::default()
         };
         draw(self.top(), &paint);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fill_path(
         &mut self,
         fill: Fill,
@@ -331,6 +333,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         brush_transform: Option<Affine>,
         path: &Path,
+        anti_alias: bool,
     ) {
         let local = self.local(transform);
         let transform = skia_transform(local);
@@ -339,12 +342,14 @@ impl TinySkiaScenePainter {
             brush_alpha,
             local,
             brush_transform,
+            anti_alias,
             |pixmap, paint| {
                 pixmap.fill_path(path, paint, fill_rule(fill), transform, None);
             },
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn stroke_path(
         &mut self,
         style: &Stroke,
@@ -353,6 +358,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         brush_transform: Option<Affine>,
         path: &Path,
+        anti_alias: bool,
     ) {
         if style.width <= 0.0 {
             return;
@@ -365,6 +371,7 @@ impl TinySkiaScenePainter {
             brush_alpha,
             local,
             brush_transform,
+            anti_alias,
             |pixmap, paint| {
                 pixmap.stroke_path(path, paint, &stroke, transform, None);
             },
@@ -556,31 +563,49 @@ impl PaintScene for TinySkiaScenePainter {
         self.recycle(layer.pixmap);
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
         let Some(path) = to_path(shape) else { return };
-        self.stroke_path(style, transform, brush.into(), 1.0, brush_transform, &path);
+        self.stroke_path(
+            style,
+            transform,
+            brush.into(),
+            1.0,
+            brush_transform,
+            &path,
+            anti_alias,
+        );
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
         let Some(path) = to_path(shape) else { return };
-        self.fill_path(style, transform, brush.into(), 1.0, brush_transform, &path);
+        self.fill_path(
+            style,
+            transform,
+            brush.into(),
+            1.0,
+            brush_transform,
+            &path,
+            anti_alias,
+        );
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'s mut self,
         font: &'a FontData,
         font_size: f32,
@@ -593,6 +618,7 @@ impl PaintScene for TinySkiaScenePainter {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
+        anti_alias: bool,
     ) {
         let style = style.into();
         let brush = brush.into();
@@ -612,11 +638,17 @@ impl PaintScene for TinySkiaScenePainter {
         let Some(path) = run.finish() else { return };
         match style {
             StyleRef::Fill(fill) => {
-                self.fill_path(fill, transform, brush, brush_alpha, None, &path)
+                self.fill_path(fill, transform, brush, brush_alpha, None, &path, anti_alias)
             }
-            StyleRef::Stroke(stroke) => {
-                self.stroke_path(stroke, transform, brush, brush_alpha, None, &path)
-            }
+            StyleRef::Stroke(stroke) => self.stroke_path(
+                stroke,
+                transform,
+                brush,
+                brush_alpha,
+                None,
+                &path,
+                anti_alias,
+            ),
         }
     }
 

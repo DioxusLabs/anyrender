@@ -375,29 +375,36 @@ impl PaintScene for VelloCpuScenePainter {
         }
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_alias));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_stroke(style.clone());
         self.set_paint(paint.into(), transform, brush_transform);
         self.render_ctx
             .stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.render_ctx.set_aliasing_threshold(None);
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_alias: bool,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_alias));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(style);
         self.set_paint(paint.into(), transform, brush_transform);
@@ -407,9 +414,10 @@ impl PaintScene for VelloCpuScenePainter {
             self.render_ctx
                 .fill_path(&shape.into_path(DEFAULT_TOLERANCE));
         }
+        self.render_ctx.set_aliasing_threshold(None);
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,
@@ -422,12 +430,15 @@ impl PaintScene for VelloCpuScenePainter {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        anti_alias: bool,
     ) {
+        self.render_ctx
+            .set_aliasing_threshold(aliasing_threshold(anti_alias));
         self.render_ctx.set_transform(transform);
         self.set_paint(paint.into(), transform, None);
 
         let glyph_caching =
-            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+            anti_alias && self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
@@ -465,6 +476,7 @@ impl PaintScene for VelloCpuScenePainter {
                     }));
             }
         }
+        self.render_ctx.set_aliasing_threshold(None);
     }
     fn draw_box_shadow(
         &mut self,
@@ -875,4 +887,9 @@ mod box_shadow_tests {
         assert_eq!(alpha(&buffer, 50, 50), 0);
         assert_eq!(alpha(&buffer, 10, 10), 0);
     }
+}
+
+/// The coverage above which vello_cpu fully paints a pixel when anti-aliasing is disabled.
+fn aliasing_threshold(anti_alias: bool) -> Option<u8> {
+    (!anti_alias).then_some(127)
 }

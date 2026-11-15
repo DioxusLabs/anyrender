@@ -583,43 +583,47 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.restore();
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &kurbo::Stroke,
         transform: kurbo::Affine,
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
+        anti_alias: bool,
     ) {
         let brush: anyrender::PaintRef<'a> = brush.into();
         self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
+        self.cache.paint.set_anti_alias(anti_alias);
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape(shape);
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: peniko::Fill,
         transform: kurbo::Affine,
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
+        anti_alias: bool,
     ) {
         let brush: anyrender::PaintRef<'a> = brush.into();
         self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
+        self.cache.paint.set_anti_alias(anti_alias);
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape_with_fill(shape, style);
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'s mut self,
         #[allow(unused_mut)] mut font: &'a peniko::FontData,
         font_size: f32,
@@ -632,6 +636,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         transform: kurbo::Affine,
         glyph_transform: Option<kurbo::Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
+        anti_alias: bool,
     ) {
         let brush: anyrender::PaintRef<'a> = brush.into();
         self.record_pattern(&brush);
@@ -651,6 +656,7 @@ impl PaintScene for SkiaScenePainter<'_> {
             _ => None,
         };
         self.reset_paint();
+        self.cache.paint.set_anti_alias(anti_alias);
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
@@ -661,9 +667,13 @@ impl PaintScene for SkiaScenePainter<'_> {
         let hint = hint
             || (cfg!(any(target_os = "macos", target_os = "ios")) && embolden != kurbo::Vec2::ZERO);
 
-        let Some(font) = self.get_or_cache_font(font, normalized_coords, font_size, hint) else {
+        let Some(mut font) = self.get_or_cache_font(font, normalized_coords, font_size, hint)
+        else {
             return;
         };
+        if !anti_alias {
+            font.set_edging(skia_safe::font::Edging::Alias);
+        }
 
         let (min_size, _) = glyphs.size_hint();
         self.cache.glyph_id_buf.reserve(min_size);

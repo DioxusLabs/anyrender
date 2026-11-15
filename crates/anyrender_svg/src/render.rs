@@ -320,12 +320,13 @@ fn fill_clip_group<S: PaintScene>(
                 if !path.is_visible() {
                     continue;
                 }
-                scene.fill(
+                scene.fill_with_anti_alias(
                     clip_fill_rule(path),
                     transform,
                     Color::BLACK,
                     None,
                     &util::to_bez_path(path),
+                    path.rendering_mode().use_shape_antialiasing(),
                 );
             }
             usvg::Node::Group(g) => {
@@ -393,7 +394,7 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
         if let Some((paint, brush_transform)) =
             util::to_brush(fill.paint(), fill.opacity(), patterns)
         {
-            scene.fill(
+            scene.fill_with_anti_alias(
                 match fill.rule() {
                     usvg::FillRule::NonZero => Fill::NonZero,
                     usvg::FillRule::EvenOdd => Fill::EvenOdd,
@@ -402,6 +403,7 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
                 paint.as_ref(),
                 Some(brush_transform),
                 local_path,
+                path.rendering_mode().use_shape_antialiasing(),
             );
         } else {
             error_handler(scene, node, transform);
@@ -423,12 +425,13 @@ fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
             util::to_brush(stroke.paint(), stroke.opacity(), patterns)
         {
             let conv_stroke = util::to_stroke(stroke);
-            scene.stroke(
+            scene.stroke_with_anti_alias(
                 &conv_stroke,
                 transform,
                 paint.as_ref(),
                 Some(brush_transform),
                 local_path,
+                path.rendering_mode().use_shape_antialiasing(),
             );
         } else {
             error_handler(scene, node, transform);

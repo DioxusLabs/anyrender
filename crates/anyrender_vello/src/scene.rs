@@ -144,13 +144,14 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         self.inner.pop_layer();
     }
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
         paint_ref: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_alias: bool,
     ) {
         let paint_ref: anyrender::PaintRef<'a> = paint_ref.into();
         if let anyrender::Paint::Pattern(pattern) = paint_ref {
@@ -174,13 +175,14 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .stroke(style, transform, brush_ref, brush_transform, shape);
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_alias: bool,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -225,7 +227,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .fill(style, transform, brush_ref, brush_transform, shape);
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,
@@ -238,6 +240,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        _anti_alias: bool,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {

@@ -127,27 +127,29 @@ impl PaintScene for NullScenePainter {
 
     fn pop_layer(&mut self) {}
 
-    fn stroke<'a>(
+    fn stroke_with_anti_alias<'a>(
         &mut self,
         _style: &kurbo::Stroke,
         _transform: kurbo::Affine,
         _brush: impl Into<crate::PaintRef<'a>>,
         _brush_transform: Option<kurbo::Affine>,
         _shape: &impl kurbo::Shape,
+        _anti_alias: bool,
     ) {
     }
 
-    fn fill<'a>(
+    fn fill_with_anti_alias<'a>(
         &mut self,
         _style: peniko::Fill,
         _transform: kurbo::Affine,
         _brush: impl Into<crate::PaintRef<'a>>,
         _brush_transform: Option<kurbo::Affine>,
         _shape: &impl kurbo::Shape,
+        _anti_alias: bool,
     ) {
     }
 
-    fn draw_glyphs<'a, 's: 'a>(
+    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
         &'s mut self,
         _font: &'a peniko::FontData,
         _font_size: f32,
@@ -160,6 +162,7 @@ impl PaintScene for NullScenePainter {
         _transform: kurbo::Affine,
         _glyph_transform: Option<kurbo::Affine>,
         _glyphs: impl Iterator<Item = crate::Glyph>,
+        _anti_alias: bool,
     ) {
     }
 
