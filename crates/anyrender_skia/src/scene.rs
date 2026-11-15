@@ -1121,7 +1121,8 @@ fn convert_filter_effect(
                 Color::from_argb(c.a, c.r, c.g, c.b)
             };
             let surface_scale = diffuse_lighting_filter.surface_scale;
-            let kd = diffuse_lighting_filter.diffuse_constant;
+            // Skia rejects a negative constant; like resvg, light nothing (black) instead.
+            let kd = diffuse_lighting_filter.diffuse_constant.max(0.0);
             match &diffuse_lighting_filter.light_source {
                 LightSource::Distant(distant) => image_filters::distant_lit_diffuse(
                     distant_light_direction(distant),
