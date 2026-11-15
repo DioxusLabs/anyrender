@@ -427,6 +427,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     render_surface.config.width as f64,
                     render_surface.config.height as f64,
                 ),
+                true,
             );
         }
         // Regenerate the vello scene

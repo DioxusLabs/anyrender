@@ -563,7 +563,7 @@ impl PaintScene for TinySkiaScenePainter {
         self.recycle(layer.pixmap);
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -584,7 +584,7 @@ impl PaintScene for TinySkiaScenePainter {
         );
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -605,7 +605,7 @@ impl PaintScene for TinySkiaScenePainter {
         );
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         font: &'a FontData,
         font_size: f32,

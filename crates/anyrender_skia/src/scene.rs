@@ -583,7 +583,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.restore();
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &kurbo::Stroke,
         transform: kurbo::Affine,
@@ -603,7 +603,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.draw_shape(shape);
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: peniko::Fill,
         transform: kurbo::Affine,
@@ -623,7 +623,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.draw_shape_with_fill(shape, style);
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         #[allow(unused_mut)] mut font: &'a peniko::FontData,
         font_size: f32,

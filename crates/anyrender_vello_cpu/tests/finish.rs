@@ -12,6 +12,7 @@ fn finish_renders_scene() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 8.0, 16.0),
+        true,
     );
     let pixmap = scene.finish();
     let pixel = |x: usize, y: usize| {

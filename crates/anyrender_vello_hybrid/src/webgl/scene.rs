@@ -266,7 +266,7 @@ impl PaintScene for WebGlScenePainter<'_> {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.fill(fill, transform, Color::BLACK, None, clip, true);
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -303,7 +303,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -335,7 +335,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -371,7 +371,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's2: 'a>(
+    fn draw_glyphs<'a, 's2: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,

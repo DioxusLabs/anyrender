@@ -54,8 +54,15 @@ fn legacy_clips_default_to_nonzero() {
 fn anti_alias_roundtrips_and_defaults_to_true() {
     let mut scene = Scene::new();
     let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
-    scene.fill(Fill::NonZero, Affine::IDENTITY, Color::BLACK, None, &rect);
-    scene.fill_with_anti_alias(
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        true,
+    );
+    scene.fill(
         Fill::NonZero,
         Affine::IDENTITY,
         Color::BLACK,
@@ -63,7 +70,7 @@ fn anti_alias_roundtrips_and_defaults_to_true() {
         &rect,
         false,
     );
-    scene.stroke_with_anti_alias(
+    scene.stroke(
         &Stroke::new(1.0),
         Affine::IDENTITY,
         Color::BLACK,
@@ -112,6 +119,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 100.0, 50.0),
+        true,
     );
 
     // Fill (EvenOdd) with brush transform
@@ -121,6 +129,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(0, 0, 255),
         Some(Affine::rotate(std::f64::consts::PI / 4.0)),
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        true,
     );
 
     // Stroke
@@ -130,6 +139,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(0, 255, 0),
         None,
         &Rect::new(10.0, 10.0, 90.0, 90.0),
+        true,
     );
 
     // Box shadow
@@ -165,6 +175,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(255, 255, 0),
         None,
         &Rect::new(0.0, 0.0, 200.0, 200.0),
+        true,
     );
     scene.pop_layer();
 
@@ -184,6 +195,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(128, 128, 128),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        true,
     );
     scene.pop_layer();
 
@@ -215,6 +227,7 @@ fn test_image_data_roundtrip() {
         ImageBrush::new(image_data).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        true,
     );
 
     let data = serialize_to_vec(&scene, &default_config()).unwrap();
@@ -243,6 +256,7 @@ fn test_image_deduplication() {
         image_brush.as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        true,
     );
     scene.fill(
         Fill::NonZero,
@@ -250,6 +264,7 @@ fn test_image_deduplication() {
         image_brush.as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        true,
     );
 
     let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
@@ -269,6 +284,7 @@ fn test_multiple_different_images() {
         ImageBrush::new(make_1x1_image(255, 0, 0, 255)).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        true,
     );
     scene.fill(
         Fill::NonZero,
@@ -276,6 +292,7 @@ fn test_multiple_different_images() {
         ImageBrush::new(make_1x1_image(0, 0, 255, 255)).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        true,
     );
 
     let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
@@ -386,6 +403,7 @@ fn test_font_deduplication() {
                 y: 0.0,
             }]
             .into_iter(),
+            true,
         );
     }
 
@@ -408,6 +426,7 @@ fn test_archive_contains_expected_files() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        true,
     );
 
     let data = serialize_to_vec(&scene, &default_config()).unwrap();
@@ -528,6 +547,7 @@ fn build_glyph_scene(font: &FontData) -> Scene {
         Affine::translate((10.0, 50.0)),
         None,
         glyphs.into_iter(),
+        true,
     );
     scene
 }

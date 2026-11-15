@@ -243,6 +243,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
                 self.config.base_color,
                 None,
                 &kurbo::Rect::new(0., 0., render_size.width as f64, render_size.height as f64),
+                true,
             );
         }
         draw_fn(&mut scene_painter);

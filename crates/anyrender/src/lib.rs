@@ -233,9 +233,12 @@ pub trait PaintScene: RenderContext {
     /// Pops the current layer.
     fn pop_layer(&mut self);
 
-    /// Strokes a shape using the specified style and brush.
+    /// Strokes a shape using the specified style and brush, anti-aliasing its edges if
+    /// `anti_alias` is `true`.
     ///
-    /// The shape is anti-aliased: see [`stroke_with_anti_alias`](Self::stroke_with_anti_alias).
+    /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
+    /// with SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing
+    /// ignore `anti_alias`.
     fn stroke<'a>(
         &mut self,
         style: &Stroke,
@@ -243,39 +246,8 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-    ) {
-        self.stroke_with_anti_alias(style, transform, brush, brush_transform, shape, true);
-    }
-
-    /// Strokes a shape using the specified style and brush, anti-aliasing its edges if
-    /// `anti_alias` is `true`.
-    ///
-    /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
-    /// with SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing
-    /// ignore `anti_alias`.
-    fn stroke_with_anti_alias<'a>(
-        &mut self,
-        style: &Stroke,
-        transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
-        brush_transform: Option<Affine>,
-        shape: &impl Shape,
         anti_alias: bool,
     );
-
-    /// Fills a shape using the specified style and brush.
-    ///
-    /// The shape is anti-aliased: see [`fill_with_anti_alias`](Self::fill_with_anti_alias).
-    fn fill<'a>(
-        &mut self,
-        style: Fill,
-        transform: Affine,
-        brush: impl Into<PaintRef<'a>>,
-        brush_transform: Option<Affine>,
-        shape: &impl Shape,
-    ) {
-        self.fill_with_anti_alias(style, transform, brush, brush_transform, shape, true);
-    }
 
     /// Fills a shape using the specified style and brush, anti-aliasing its edges if
     /// `anti_alias` is `true`.
@@ -283,7 +255,7 @@ pub trait PaintScene: RenderContext {
     /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
     /// with SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing
     /// ignore `anti_alias`.
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -293,48 +265,13 @@ pub trait PaintScene: RenderContext {
         anti_alias: bool,
     );
 
-    /// Draws a run of glyphs
-    ///
-    /// The glyphs are anti-aliased: see
-    /// [`draw_glyphs_with_anti_alias`](Self::draw_glyphs_with_anti_alias).
-    #[allow(clippy::too_many_arguments)]
-    fn draw_glyphs<'a, 's: 'a>(
-        &'s mut self,
-        font: &'a FontData,
-        font_size: f32,
-        hint: bool,
-        normalized_coords: &'a [NormalizedCoord],
-        embolden: kurbo::Vec2,
-        style: impl Into<StyleRef<'a>>,
-        brush: impl Into<PaintRef<'a>>,
-        brush_alpha: f32,
-        transform: Affine,
-        glyph_transform: Option<Affine>,
-        glyphs: impl Iterator<Item = Glyph> + Clone,
-    ) {
-        self.draw_glyphs_with_anti_alias(
-            font,
-            font_size,
-            hint,
-            normalized_coords,
-            embolden,
-            style,
-            brush,
-            brush_alpha,
-            transform,
-            glyph_transform,
-            glyphs,
-            true,
-        );
-    }
-
     /// Draws a run of glyphs, anti-aliasing their edges if `anti_alias` is `true`.
     ///
     /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
     /// with SVG's `text-rendering: optimizeSpeed`. Backends that can't disable anti-aliasing
     /// ignore `anti_alias`.
     #[allow(clippy::too_many_arguments)]
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         font: &'a FontData,
         font_size: f32,
@@ -392,6 +329,7 @@ pub trait PaintScene: RenderContext {
                 image.image.width as f64,
                 image.image.height as f64,
             ),
+            true,
         );
     }
 }

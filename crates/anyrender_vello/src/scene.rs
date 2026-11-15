@@ -144,7 +144,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         self.inner.pop_layer();
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -175,7 +175,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .stroke(style, transform, brush_ref, brush_transform, shape);
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -227,7 +227,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .fill(style, transform, brush_ref, brush_transform, shape);
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,

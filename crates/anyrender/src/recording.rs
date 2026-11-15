@@ -259,7 +259,7 @@ impl Scene {
                     &cmd.clip,
                 ),
                 RenderCommand::PopLayer => painter.pop_layer(),
-                RenderCommand::Stroke(cmd) => painter.stroke_with_anti_alias(
+                RenderCommand::Stroke(cmd) => painter.stroke(
                     &cmd.style,
                     transform * cmd.transform,
                     cmd.brush.as_ref(),
@@ -267,7 +267,7 @@ impl Scene {
                     &cmd.shape,
                     cmd.anti_alias,
                 ),
-                RenderCommand::Fill(cmd) => painter.fill_with_anti_alias(
+                RenderCommand::Fill(cmd) => painter.fill(
                     cmd.fill,
                     transform * cmd.transform,
                     cmd.brush.as_ref(),
@@ -275,7 +275,7 @@ impl Scene {
                     &cmd.shape,
                     cmd.anti_alias,
                 ),
-                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs_with_anti_alias(
+                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs(
                     &cmd.font_data,
                     cmd.font_size,
                     cmd.hint,
@@ -364,7 +364,7 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PopLayer);
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -386,7 +386,7 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::Stroke(stroke));
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -408,7 +408,7 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::Fill(fill));
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,

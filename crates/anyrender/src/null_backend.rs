@@ -127,7 +127,7 @@ impl PaintScene for NullScenePainter {
 
     fn pop_layer(&mut self) {}
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         _style: &kurbo::Stroke,
         _transform: kurbo::Affine,
@@ -138,7 +138,7 @@ impl PaintScene for NullScenePainter {
     ) {
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         _style: peniko::Fill,
         _transform: kurbo::Affine,
@@ -149,7 +149,7 @@ impl PaintScene for NullScenePainter {
     ) {
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         _font: &'a peniko::FontData,
         _font_size: f32,

@@ -320,7 +320,7 @@ fn fill_clip_group<S: PaintScene>(
                 if !path.is_visible() {
                     continue;
                 }
-                scene.fill_with_anti_alias(
+                scene.fill(
                     clip_fill_rule(path),
                     transform,
                     Color::BLACK,
@@ -394,7 +394,7 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
         if let Some((paint, brush_transform)) =
             util::to_brush(fill.paint(), fill.opacity(), patterns)
         {
-            scene.fill_with_anti_alias(
+            scene.fill(
                 match fill.rule() {
                     usvg::FillRule::NonZero => Fill::NonZero,
                     usvg::FillRule::EvenOdd => Fill::EvenOdd,
@@ -425,7 +425,7 @@ fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
             util::to_brush(stroke.paint(), stroke.opacity(), patterns)
         {
             let conv_stroke = util::to_stroke(stroke);
-            scene.stroke_with_anti_alias(
+            scene.stroke(
                 &conv_stroke,
                 transform,
                 paint.as_ref(),

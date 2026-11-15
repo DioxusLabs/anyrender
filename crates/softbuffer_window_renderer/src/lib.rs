@@ -220,6 +220,7 @@ impl<Renderer: ImageRenderer> WindowRenderer for SoftbufferWindowRenderer<Render
                 base_color,
                 None,
                 &Rect::new(0.0, 0.0, width, height),
+                true,
             );
             draw_fn(painter);
         };

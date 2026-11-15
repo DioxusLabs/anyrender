@@ -46,6 +46,7 @@ fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                true,
             );
             scene.pop_layer();
         },
@@ -91,6 +92,7 @@ fn render_filter(filter: Filter) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                true,
             );
             scene.pop_layer();
         },

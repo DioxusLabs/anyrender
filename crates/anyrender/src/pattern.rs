@@ -318,6 +318,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
         transform,
         glyph_transform,
         glyphs,
+        true,
     );
     painter.push_layer(
         Fill::NonZero,

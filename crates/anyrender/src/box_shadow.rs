@@ -126,6 +126,7 @@ impl BoxShadowGeometry {
             color,
             None,
             &self.unblurred_path(),
+            true,
         );
         if clip {
             scene.pop_layer();

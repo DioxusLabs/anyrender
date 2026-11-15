@@ -48,6 +48,7 @@ fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                true,
             );
             scene.pop_layer();
         },
@@ -93,6 +94,7 @@ fn render_filter(filter: Filter) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
+                true,
             );
             scene.pop_layer();
         },
@@ -261,6 +263,7 @@ fn partial_alpha_pixels(transform: Affine, clip: Rect) -> usize {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
+                true,
             );
             scene.pop_layer();
         },

@@ -19,8 +19,16 @@ fn midpoint(alpha_space: InterpolationAlphaSpace) -> [u8; 4] {
                 Color::from_rgb8(0, 0, 255),
                 None,
                 &rect,
+                true,
             );
-            scene.fill(Fill::NonZero, Affine::IDENTITY, &gradient, None, &rect);
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                &gradient,
+                None,
+                &rect,
+                true,
+            );
         },
         SIZE,
         SIZE,

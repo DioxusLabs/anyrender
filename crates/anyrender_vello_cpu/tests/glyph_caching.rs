@@ -36,6 +36,7 @@ fn render(glyph_caching: bool, font: &FontData) -> Vec<u8> {
                             x: i as f32 * 40.0,
                             y: 0.0,
                         }),
+                        true,
                     );
                 }
             },

@@ -330,6 +330,7 @@ pub(crate) fn default_error_handler<S: PaintScene>(
         color::palette::css::RED.multiply_alpha(0.5),
         None,
         &rect,
+        true,
     );
 }
 

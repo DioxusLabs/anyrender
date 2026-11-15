@@ -436,7 +436,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.fill(fill, transform, Color::BLACK, None, clip, true);
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -473,7 +473,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -505,7 +505,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -541,7 +541,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,

@@ -340,7 +340,7 @@ impl PaintScene for VelloCpuScenePainter {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.fill(fill, transform, Color::BLACK, None, clip, true);
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -375,7 +375,7 @@ impl PaintScene for VelloCpuScenePainter {
         }
     }
 
-    fn stroke_with_anti_alias<'a>(
+    fn stroke<'a>(
         &mut self,
         style: &Stroke,
         transform: Affine,
@@ -394,7 +394,7 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_aliasing_threshold(None);
     }
 
-    fn fill_with_anti_alias<'a>(
+    fn fill<'a>(
         &mut self,
         style: Fill,
         transform: Affine,
@@ -417,7 +417,7 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_aliasing_threshold(None);
     }
 
-    fn draw_glyphs_with_anti_alias<'a, 's: 'a>(
+    fn draw_glyphs<'a, 's: 'a>(
         &'a mut self,
         font: &'a FontData,
         font_size: f32,
@@ -555,6 +555,7 @@ mod clip_rule_tests {
             RED,
             None,
             &Rect::new(0.0, 0.0, 100.0, 100.0),
+            true,
         );
         scene.pop_layer();
     }
@@ -602,6 +603,7 @@ mod clip_rule_tests {
                             RED,
                             None,
                             &Rect::new(0.0, 0.0, 100.0, 100.0),
+                            true,
                         );
                     }
                     scene.pop_layer();
@@ -641,6 +643,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(0.0, 0.0, 100.0, 100.0),
+                    true,
                 );
                 scene.pop_layer();
                 scene.pop_layer();
@@ -650,6 +653,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(90.0, 90.0, 100.0, 100.0),
+                    true,
                 );
             },
             100,
@@ -854,6 +858,7 @@ mod box_shadow_tests {
                         peniko::color::palette::css::WHITE,
                         None,
                         &Rect::new(0.0, 0.0, 100.0, 100.0),
+                        true,
                     );
                     scene.draw_box_shadow(
                         Affine::IDENTITY,
