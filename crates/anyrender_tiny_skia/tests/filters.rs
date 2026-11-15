@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterImage, FilterInput,
+    FilterInputs,
     blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     composite::CompositeOperator,
@@ -195,6 +196,28 @@ fn tile_repeats_its_input_subregion() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 9, 9), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 14, 2), [0, 255, 0, 255]);
+}
+
+#[test]
+fn image_renders_its_scene() {
+    let mut content = anyrender::recording::Scene::new();
+    content.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::from_rgb8(0, 255, 0),
+        None,
+        &Rect::new(0.0, 0.0, 8.0, 8.0),
+        AntiAliasing::Enabled,
+    );
+    let mut filter = Filter::new(FULL);
+    filter.add_with_color_space(
+        FilterEffect::Image(FilterImage { scene: content }),
+        FilterInputs::NONE,
+        FilterColorSpace::LinearRgb,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 2, 2), [0, 255, 0, 255]);
+    assert_close(pixel(&buffer, 12, 12), [0, 0, 0, 0]);
 }
 
 fn turbulence(seed: f32) -> Vec<u8> {

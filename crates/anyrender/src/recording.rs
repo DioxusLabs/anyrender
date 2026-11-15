@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::filters::FilterImage;
 use crate::{
     AntiAliasing, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect, NormalizedCoord,
     Paint, PaintRef, PaintScene, RenderContext,
@@ -14,11 +15,11 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum RenderCommand<Font = FontData, Brush = Paint> {
+pub enum RenderCommand<Font = FontData, Brush = Paint, Image = FilterImage> {
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
-    PushLayer(LayerCommand),
+    PushLayer(LayerCommand<Image>),
     /// Pushes a new clip layer clipped by the specified shape.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
@@ -61,8 +62,10 @@ impl RenderCommand {
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
 #[derive(Clone, Debug, PartialEq)]
+///
+/// `Image` is the content of the filters' `feImage` primitives.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LayerCommand {
+pub struct LayerCommand<Image = FilterImage> {
     #[cfg_attr(feature = "serde", serde(default))]
     pub fill: Fill,
     pub blend: BlendMode,
@@ -70,8 +73,8 @@ pub struct LayerCommand {
     pub transform: Affine,
     #[cfg_attr(feature = "serde", serde(with = "svg_path"))]
     pub clip: BezPath, // TODO: more shape options
-    pub filter: Option<Arc<Filter>>,
-    pub backdrop_filter: Option<Arc<Filter>>,
+    pub filter: Option<Arc<Filter<Image>>>,
+    pub backdrop_filter: Option<Arc<Filter<Image>>>,
 }
 
 /// Pushes a new clip layer clipped by the specified shape.
