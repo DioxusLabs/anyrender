@@ -4,7 +4,7 @@ use anyrender::filters::{
     Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
     color_transformation::ColorMatrix,
 };
-use anyrender::{PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
 use anyrender_skia::SkiaImageRenderer;
 use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
@@ -46,7 +46,7 @@ fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
-                true,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -92,7 +92,7 @@ fn render_filter(filter: Filter) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
-                true,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },

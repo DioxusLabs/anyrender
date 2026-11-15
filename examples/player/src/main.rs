@@ -1,4 +1,4 @@
-use anyrender::{NullWindowRenderer, PaintScene, Scene, WindowRenderer};
+use anyrender::{AntiAliasing, NullWindowRenderer, PaintScene, Scene, WindowRenderer};
 use anyrender_serialize::SceneArchive;
 use anyrender_skia::SkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
@@ -266,7 +266,7 @@ fn default_scene() -> Scene {
         Color::WHITE,
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
-        true,
+        AntiAliasing::Enabled,
     );
     scene.stroke(
         &Stroke::new(2.0),
@@ -274,7 +274,7 @@ fn default_scene() -> Scene {
         Color::BLACK,
         None,
         &Rect::new(5.0, 5.0, 35.0, 35.0),
-        true,
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -282,7 +282,7 @@ fn default_scene() -> Scene {
         Color::from_rgb8(255, 0, 0),
         None,
         &Circle::new(Point::new(20.0, 20.0), 10.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     scene

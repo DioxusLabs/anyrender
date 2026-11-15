@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use anyrender::{
-    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+    ResourceId,
 };
 use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{
@@ -151,7 +152,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         paint_ref: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        _anti_alias: bool,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint_ref: anyrender::PaintRef<'a> = paint_ref.into();
         if let anyrender::Paint::Pattern(pattern) = paint_ref {
@@ -182,7 +183,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        _anti_alias: bool,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -240,7 +241,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
-        _anti_alias: bool,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {

@@ -1,4 +1,4 @@
-use anyrender::{BoxShadowKind, ImageRenderer, NonUniformRoundedRect, PaintScene};
+use anyrender::{AntiAliasing, BoxShadowKind, ImageRenderer, NonUniformRoundedRect, PaintScene};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Gradient, InterpolationAlphaSpace, Mix};
@@ -30,7 +30,7 @@ fn fill_in_clip(clip: Rect) -> Vec<u8> {
             RED,
             None,
             &Rect::new(0.0, 0.0, 40.0, 40.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
     })
@@ -64,7 +64,7 @@ fn infinite_clip_keeps_content() {
             RED,
             None,
             &Rect::new(0.0, 0.0, 40.0, 40.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
     });
@@ -96,7 +96,7 @@ fn nested_layer_in_offset_parent() {
             RED,
             None,
             &Rect::new(0.0, 0.0, 40.0, 40.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
         scene.pop_layer();
@@ -151,7 +151,7 @@ fn gradient_midpoint(space: InterpolationAlphaSpace) -> [u8; 4] {
             &gradient,
             None,
             &Rect::new(0.0, 0.0, 40.0, 40.0),
-            true,
+            AntiAliasing::Enabled,
         );
     });
     pixel_at(&buffer, 20, 20)

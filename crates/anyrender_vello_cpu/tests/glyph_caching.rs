@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyrender::{Glyph, ImageRenderer, PaintScene};
+use anyrender::{AntiAliasing, Glyph, ImageRenderer, PaintScene};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use kurbo::Affine;
 use peniko::{Blob, Color, Fill, FontData};
@@ -36,7 +36,7 @@ fn render(glyph_caching: bool, font: &FontData) -> Vec<u8> {
                             x: i as f32 * 40.0,
                             y: 0.0,
                         }),
-                        true,
+                        AntiAliasing::Enabled,
                     );
                 }
             },

@@ -1,7 +1,7 @@
 // Copyright 2023 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::{Paint, PaintScene, Pattern, recording::Scene};
+use anyrender::{AntiAliasing, Paint, PaintScene, Pattern, recording::Scene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
 use peniko::{BlendMode, Color, Compose, Fill, InterpolationAlphaSpace, Mix};
@@ -330,7 +330,7 @@ pub(crate) fn default_error_handler<S: PaintScene>(
         color::palette::css::RED.multiply_alpha(0.5),
         None,
         &rect,
-        true,
+        AntiAliasing::Enabled,
     );
 }
 

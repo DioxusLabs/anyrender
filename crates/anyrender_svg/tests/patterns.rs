@@ -1,6 +1,6 @@
 //! SVG patterns repeat their tile across the painted shape.
 
-use anyrender::{ImageRenderer, render_to_buffer};
+use anyrender::{AntiAliasing, ImageRenderer, render_to_buffer};
 use anyrender_skia::SkiaImageRenderer;
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
@@ -142,7 +142,7 @@ fn pattern_fill_fallback_tiles() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 10.0, 10.0),
-        true,
+        AntiAliasing::Enabled,
     );
     let pattern = Pattern::new(tile_scene, Rect::new(0.0, 0.0, 20.0, 20.0));
     let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
@@ -179,7 +179,7 @@ fn pattern_fill_fallback_tiles_huge_shape() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 1.0, 2.0),
-        true,
+        AntiAliasing::Enabled,
     );
     let pattern = Pattern::new(tile_scene, Rect::new(0.0, 0.0, 2.0, 2.0));
     let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
@@ -220,7 +220,7 @@ fn check_glyphs<R: ImageRenderer>(
         Color::from_rgb8(255, 0, 0),
         None,
         &tile,
-        true,
+        AntiAliasing::Enabled,
     );
     let pattern = Pattern::new(tile_scene, tile);
 
@@ -238,7 +238,7 @@ fn check_glyphs<R: ImageRenderer>(
                 GLYPHS_TRANSFORM,
                 None,
                 glyphs(),
-                true,
+                AntiAliasing::Enabled,
             )
         },
         SIZE,
@@ -291,7 +291,7 @@ fn draw_patterned_glyphs<S: anyrender::PaintScene>(
             x: i as f32 * 25.0,
             y: 0.0,
         }),
-        true,
+        AntiAliasing::Enabled,
     );
 }
 
@@ -357,7 +357,7 @@ fn offset_tile() -> anyrender::Pattern {
         red,
         None,
         &Rect::new(3.0, 4.0, 13.0, 20.0),
-        true,
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -365,7 +365,7 @@ fn offset_tile() -> anyrender::Pattern {
         blue,
         None,
         &Rect::new(13.0, 4.0, 23.0, 20.0),
-        true,
+        AntiAliasing::Enabled,
     );
     anyrender::Pattern::new(scene, Rect::new(3.0, 4.0, 23.0, 20.0))
 }
@@ -395,7 +395,7 @@ fn check_tile_origin<R: ImageRenderer>(fallback: bool) {
                     &pattern,
                     None,
                     &shape,
-                    true,
+                    AntiAliasing::Enabled,
                 );
             }
         },
@@ -442,7 +442,7 @@ fn pattern_pixel_aligned_is_sharp_vello_cpu() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 1.0, 10.0),
-        true,
+        AntiAliasing::Enabled,
     );
     let pattern = anyrender::Pattern::new(scene, Rect::new(0.0, 0.0, 10.0, 10.0));
     let buffer = render_to_buffer::<VelloCpuImageRenderer, _>(
@@ -453,7 +453,7 @@ fn pattern_pixel_aligned_is_sharp_vello_cpu() {
                 &pattern,
                 None,
                 &Rect::new(0.0, 0.0, 100.0, 100.0),
-                true,
+                AntiAliasing::Enabled,
             )
         },
         SIZE,
@@ -477,7 +477,7 @@ fn solid_tile(size: f64) -> anyrender::Pattern {
         Color::from_rgb8(255, 0, 0),
         None,
         &content,
-        true,
+        AntiAliasing::Enabled,
     );
     anyrender::Pattern::new(scene, Rect::new(0.0, 0.0, size, size))
 }
@@ -532,7 +532,7 @@ fn check_glyph_transform<R: ImageRenderer>(
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 8.0, 16.0),
-        true,
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -540,7 +540,7 @@ fn check_glyph_transform<R: ImageRenderer>(
         Color::from_rgb8(0, 0, 255),
         None,
         &Rect::new(8.0, 0.0, 16.0, 16.0),
-        true,
+        AntiAliasing::Enabled,
     );
     let pattern = anyrender::Pattern::new(scene, Rect::new(0.0, 0.0, 16.0, 16.0));
     let buffer = render_to_buffer::<R, _>(
@@ -589,7 +589,7 @@ fn draw_skewed_glyphs<S: anyrender::PaintScene>(
             x: i as f32 * 40.0,
             y: 0.0,
         }),
-        true,
+        AntiAliasing::Enabled,
     );
 }
 

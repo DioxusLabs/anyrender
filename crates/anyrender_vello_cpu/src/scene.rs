@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyrender::{Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext};
+use anyrender::{
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+};
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
@@ -340,7 +342,14 @@ impl PaintScene for VelloCpuScenePainter {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip, true);
+        self.fill(
+            fill,
+            transform,
+            Color::BLACK,
+            None,
+            clip,
+            AntiAliasing::Enabled,
+        );
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -382,10 +391,10 @@ impl PaintScene for VelloCpuScenePainter {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         self.render_ctx
-            .set_aliasing_threshold(aliasing_threshold(anti_alias));
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_stroke(style.clone());
         self.set_paint(paint.into(), transform, brush_transform);
@@ -401,10 +410,10 @@ impl PaintScene for VelloCpuScenePainter {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         self.render_ctx
-            .set_aliasing_threshold(aliasing_threshold(anti_alias));
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(style);
         self.set_paint(paint.into(), transform, brush_transform);
@@ -430,15 +439,16 @@ impl PaintScene for VelloCpuScenePainter {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         self.render_ctx
-            .set_aliasing_threshold(aliasing_threshold(anti_alias));
+            .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.set_paint(paint.into(), transform, None);
 
-        let glyph_caching =
-            anti_alias && self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+        let glyph_caching = anti_aliasing.is_enabled()
+            && self.glyph_caching
+            && supports_glyph_caching(transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
@@ -518,7 +528,7 @@ impl PaintScene for VelloCpuScenePainter {
 
 #[cfg(test)]
 mod clip_rule_tests {
-    use anyrender::{PaintScene, recording::Scene, render_to_buffer};
+    use anyrender::{AntiAliasing, PaintScene, recording::Scene, render_to_buffer};
     use kurbo::{Affine, BezPath, Rect};
     use peniko::{Fill, Mix, color::palette::css::RED};
 
@@ -555,7 +565,7 @@ mod clip_rule_tests {
             RED,
             None,
             &Rect::new(0.0, 0.0, 100.0, 100.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
     }
@@ -603,7 +613,7 @@ mod clip_rule_tests {
                             RED,
                             None,
                             &Rect::new(0.0, 0.0, 100.0, 100.0),
-                            true,
+                            AntiAliasing::Enabled,
                         );
                     }
                     scene.pop_layer();
@@ -643,7 +653,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(0.0, 0.0, 100.0, 100.0),
-                    true,
+                    AntiAliasing::Enabled,
                 );
                 scene.pop_layer();
                 scene.pop_layer();
@@ -653,7 +663,7 @@ mod clip_rule_tests {
                     RED,
                     None,
                     &Rect::new(90.0, 90.0, 100.0, 100.0),
-                    true,
+                    AntiAliasing::Enabled,
                 );
             },
             100,
@@ -767,7 +777,9 @@ mod glyph_origin_snap_tests {
 
 #[cfg(test)]
 mod box_shadow_tests {
-    use anyrender::{BoxShadowKind, NonUniformRoundedRect, PaintScene, render_to_buffer};
+    use anyrender::{
+        AntiAliasing, BoxShadowKind, NonUniformRoundedRect, PaintScene, render_to_buffer,
+    };
     use kurbo::{Affine, Rect, Vec2};
     use peniko::color::palette::css::RED;
 
@@ -858,7 +870,7 @@ mod box_shadow_tests {
                         peniko::color::palette::css::WHITE,
                         None,
                         &Rect::new(0.0, 0.0, 100.0, 100.0),
-                        true,
+                        AntiAliasing::Enabled,
                     );
                     scene.draw_box_shadow(
                         Affine::IDENTITY,
@@ -895,6 +907,6 @@ mod box_shadow_tests {
 }
 
 /// The coverage above which vello_cpu fully paints a pixel when anti-aliasing is disabled.
-fn aliasing_threshold(anti_alias: bool) -> Option<u8> {
-    (!anti_alias).then_some(127)
+fn aliasing_threshold(anti_aliasing: AntiAliasing) -> Option<u8> {
+    (!anti_aliasing.is_enabled()).then_some(127)
 }

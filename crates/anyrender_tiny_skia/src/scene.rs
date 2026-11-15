@@ -10,7 +10,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyrender::{
-    BoxShadowGeometry, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect,
+    AntiAliasing, BoxShadowGeometry, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect,
     NormalizedCoord, Paint as AnyPaint, PaintRef, PaintScene, RenderContext,
 };
 use kurbo::{Affine, PathEl, Point, Shape, Stroke, Vec2};
@@ -278,7 +278,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         transform: Affine,
         brush_transform: Option<Affine>,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
         draw: impl FnOnce(&mut Pixmap, &Paint<'_>),
     ) {
         let brush_affine = brush_transform.unwrap_or(Affine::IDENTITY);
@@ -318,7 +318,7 @@ impl TinySkiaScenePainter {
         };
         let paint = Paint {
             shader,
-            anti_alias,
+            anti_alias: anti_aliasing.is_enabled(),
             ..Default::default()
         };
         draw(self.top(), &paint);
@@ -333,7 +333,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         brush_transform: Option<Affine>,
         path: &Path,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let local = self.local(transform);
         let transform = skia_transform(local);
@@ -342,7 +342,7 @@ impl TinySkiaScenePainter {
             brush_alpha,
             local,
             brush_transform,
-            anti_alias,
+            anti_aliasing,
             |pixmap, paint| {
                 pixmap.fill_path(path, paint, fill_rule(fill), transform, None);
             },
@@ -358,7 +358,7 @@ impl TinySkiaScenePainter {
         brush_alpha: f32,
         brush_transform: Option<Affine>,
         path: &Path,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         if style.width <= 0.0 {
             return;
@@ -371,7 +371,7 @@ impl TinySkiaScenePainter {
             brush_alpha,
             local,
             brush_transform,
-            anti_alias,
+            anti_aliasing,
             |pixmap, paint| {
                 pixmap.stroke_path(path, paint, &stroke, transform, None);
             },
@@ -570,7 +570,7 @@ impl PaintScene for TinySkiaScenePainter {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let Some(path) = to_path(shape) else { return };
         self.stroke_path(
@@ -580,7 +580,7 @@ impl PaintScene for TinySkiaScenePainter {
             1.0,
             brush_transform,
             &path,
-            anti_alias,
+            anti_aliasing,
         );
     }
 
@@ -591,7 +591,7 @@ impl PaintScene for TinySkiaScenePainter {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let Some(path) = to_path(shape) else { return };
         self.fill_path(
@@ -601,7 +601,7 @@ impl PaintScene for TinySkiaScenePainter {
             1.0,
             brush_transform,
             &path,
-            anti_alias,
+            anti_aliasing,
         );
     }
 
@@ -618,7 +618,7 @@ impl PaintScene for TinySkiaScenePainter {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let style = style.into();
         let brush = brush.into();
@@ -637,9 +637,15 @@ impl PaintScene for TinySkiaScenePainter {
         }
         let Some(path) = run.finish() else { return };
         match style {
-            StyleRef::Fill(fill) => {
-                self.fill_path(fill, transform, brush, brush_alpha, None, &path, anti_alias)
-            }
+            StyleRef::Fill(fill) => self.fill_path(
+                fill,
+                transform,
+                brush,
+                brush_alpha,
+                None,
+                &path,
+                anti_aliasing,
+            ),
             StyleRef::Stroke(stroke) => self.stroke_path(
                 stroke,
                 transform,
@@ -647,7 +653,7 @@ impl PaintScene for TinySkiaScenePainter {
                 brush_alpha,
                 None,
                 &path,
-                anti_alias,
+                anti_aliasing,
             ),
         }
     }

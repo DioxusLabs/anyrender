@@ -5,7 +5,7 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use anyrender::recording::Scene;
-use anyrender::{Glyph, PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, Glyph, PaintScene, render_to_buffer};
 use anyrender_serialize::{SceneArchive, SerializeConfig};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use image::{ImageBuffer, RgbaImage};
@@ -68,7 +68,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgb8(240, 240, 245),
         None,
         &Rect::new(0.0, 0.0, WIDTH as f64, HEIGHT as f64),
-        true,
+        AntiAliasing::Enabled,
     );
 
     let card_rect = Rect::new(20.0, 20.0, 180.0, 140.0);
@@ -91,7 +91,7 @@ fn create_demo_scene() -> Scene {
         Color::WHITE,
         None,
         &rounded_card,
-        true,
+        AntiAliasing::Enabled,
     );
 
     // Card border
@@ -101,7 +101,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgb8(200, 200, 210),
         None,
         &rounded_card,
-        true,
+        AntiAliasing::Enabled,
     );
 
     // Text
@@ -125,7 +125,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgba8(255, 100, 100, 200),
         None,
         &Circle::new(Point::new(280.0, 80.0), 50.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     // Blue circle (overlapping)
@@ -135,7 +135,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgba8(100, 100, 255, 200),
         None,
         &Circle::new(Point::new(320.0, 80.0), 50.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     // Green circle (overlapping)
@@ -145,7 +145,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgba8(100, 255, 100, 200),
         None,
         &Circle::new(Point::new(300.0, 120.0), 50.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     scene.pop_layer();
@@ -175,7 +175,7 @@ fn create_demo_scene() -> Scene {
                 40.0 + ((i + 1) as f64 * 12.0),
                 280.0,
             ),
-            true,
+            AntiAliasing::Enabled,
         );
     }
 
@@ -191,7 +191,7 @@ fn create_demo_scene() -> Scene {
         image_brush.as_ref(),
         None,
         &Rect::new(0.0, 0.0, 16.0, 12.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     // Border around the checkerboard
@@ -201,7 +201,7 @@ fn create_demo_scene() -> Scene {
         Color::from_rgb8(60, 60, 80),
         None,
         &Rect::new(220.0, 180.0, 348.0, 276.0),
-        true,
+        AntiAliasing::Enabled,
     );
 
     scene
@@ -285,7 +285,7 @@ fn render_layout(
                     transform,
                     None,
                     glyphs.into_iter(),
-                    true,
+                    AntiAliasing::Enabled,
                 );
             }
         }

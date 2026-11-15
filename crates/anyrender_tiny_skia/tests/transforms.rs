@@ -1,4 +1,4 @@
-use anyrender::{ImageRenderer, PaintScene};
+use anyrender::{AntiAliasing, ImageRenderer, PaintScene};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use kurbo::{Affine, Rect};
 use peniko::{Color, Fill, Mix};
@@ -30,7 +30,7 @@ fn fill_transform_is_applied_once() {
             RED,
             None,
             &Rect::new(0.0, 0.0, 5.0, 5.0),
-            true,
+            AntiAliasing::Enabled,
         );
     });
     assert_eq!(alpha_at(&buffer, 9, 9), 0);
@@ -59,7 +59,7 @@ fn layer_transform_only_affects_clip() {
             RED,
             None,
             &Rect::new(0.0, 0.0, 40.0, 40.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
     });
@@ -81,7 +81,7 @@ fn nested_layer_transforms_do_not_accumulate() {
             RED,
             None,
             &Rect::new(0.0, 0.0, 100.0, 100.0),
-            true,
+            AntiAliasing::Enabled,
         );
         scene.pop_layer();
         scene.pop_layer();
@@ -103,7 +103,7 @@ fn rotated_brush_transform() {
             RED,
             None,
             &Rect::new(10.0, 10.0, 30.0, 30.0),
-            true,
+            AntiAliasing::Enabled,
         );
     });
     assert_eq!(alpha_at(&buffer, 11, 11), 255);

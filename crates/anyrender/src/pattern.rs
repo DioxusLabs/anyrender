@@ -8,7 +8,7 @@ use std::sync::{
 use kurbo::{Affine, Rect, Shape, Stroke, StrokeOpts, Vec2};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 
-use crate::{Glyph, NormalizedCoord, PaintScene, Scene};
+use crate::{AntiAliasing, Glyph, NormalizedCoord, PaintScene, Scene};
 
 static PATTERN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -318,7 +318,7 @@ pub fn draw_glyphs_pattern_tiles_with<'a, S: PaintScene>(
         transform,
         glyph_transform,
         glyphs,
-        true,
+        AntiAliasing::Enabled,
     );
     painter.push_layer(
         Fill::NonZero,

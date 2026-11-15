@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use anyrender::{PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{AntiAliasing, PaintScene, RenderContext, WindowHandle, WindowRenderer};
 use debug_timer::debug_timer;
 use peniko::Color;
 use raw_window_handle::RawWindowHandle;
@@ -243,7 +243,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
                 self.config.base_color,
                 None,
                 &kurbo::Rect::new(0., 0., render_size.width as f64, render_size.height as f64),
-                true,
+                AntiAliasing::Enabled,
             );
         }
         draw_fn(&mut scene_painter);

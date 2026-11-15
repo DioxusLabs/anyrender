@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect, NormalizedCoord, Paint,
-    PaintRef, PaintScene, RenderContext,
+    AntiAliasing, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect, NormalizedCoord,
+    Paint, PaintRef, PaintScene, RenderContext,
 };
 use kurbo::{Affine, BezPath, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
@@ -11,16 +11,6 @@ use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
-
-#[cfg(feature = "serde")]
-fn default_anti_alias() -> bool {
-    true
-}
-
-#[cfg(feature = "serde")]
-fn is_anti_aliased(anti_alias: &bool) -> bool {
-    *anti_alias
-}
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -125,12 +115,9 @@ pub struct StrokeCommand<Brush = Paint> {
     /// Whether the edges are anti-aliased.
     #[cfg_attr(
         feature = "serde",
-        serde(
-            default = "default_anti_alias",
-            skip_serializing_if = "is_anti_aliased"
-        )
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
     )]
-    pub anti_alias: bool,
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Fills a shape using the specified style and brush.
@@ -146,12 +133,9 @@ pub struct FillCommand<Brush = Paint> {
     /// Whether the edges are anti-aliased.
     #[cfg_attr(
         feature = "serde",
-        serde(
-            default = "default_anti_alias",
-            skip_serializing_if = "is_anti_aliased"
-        )
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
     )]
-    pub anti_alias: bool,
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Draws a run of glyphs
@@ -173,12 +157,9 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
     /// Whether the edges are anti-aliased.
     #[cfg_attr(
         feature = "serde",
-        serde(
-            default = "default_anti_alias",
-            skip_serializing_if = "is_anti_aliased"
-        )
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
     )]
-    pub anti_alias: bool,
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Draw a box shadow cast by a box
@@ -265,7 +246,7 @@ impl Scene {
                     cmd.brush.as_ref(),
                     cmd.brush_transform,
                     &cmd.shape,
-                    cmd.anti_alias,
+                    cmd.anti_aliasing,
                 ),
                 RenderCommand::Fill(cmd) => painter.fill(
                     cmd.fill,
@@ -273,7 +254,7 @@ impl Scene {
                     cmd.brush.as_ref(),
                     cmd.brush_transform,
                     &cmd.shape,
-                    cmd.anti_alias,
+                    cmd.anti_aliasing,
                 ),
                 RenderCommand::GlyphRun(cmd) => painter.draw_glyphs(
                     &cmd.font_data,
@@ -287,7 +268,7 @@ impl Scene {
                     transform * cmd.transform,
                     cmd.glyph_transform,
                     cmd.glyphs.iter().copied(),
-                    cmd.anti_alias,
+                    cmd.anti_aliasing,
                 ),
                 RenderCommand::BoxShadow(cmd) => painter.draw_box_shadow(
                     transform * cmd.transform,
@@ -371,7 +352,7 @@ impl PaintScene for Scene {
         paint_ref: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paint(paint_ref.into());
@@ -381,7 +362,7 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
-            anti_alias,
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::Stroke(stroke));
     }
@@ -393,7 +374,7 @@ impl PaintScene for Scene {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let shape = shape.into_path(self.tolerance);
         let brush = self.convert_paint(paint.into());
@@ -403,7 +384,7 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
-            anti_alias,
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::Fill(fill));
     }
@@ -421,7 +402,7 @@ impl PaintScene for Scene {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph>,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     ) {
         let brush = self.convert_paint(paint_ref.into());
         let glyph_run = GlyphRunCommand {
@@ -436,7 +417,7 @@ impl PaintScene for Scene {
             transform,
             glyph_transform,
             glyphs: glyphs.into_iter().collect(),
-            anti_alias,
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::GlyphRun(glyph_run));
     }

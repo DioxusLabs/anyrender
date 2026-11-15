@@ -6,7 +6,7 @@ use anyrender::filters::{
     composite::CompositeOperator,
     turbulence::{TurbulenceFilter, TurbulenceType},
 };
-use anyrender::{PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use kurbo::{Affine, Rect, Vec2};
 use peniko::{Color, Fill, Mix};
@@ -48,7 +48,7 @@ fn halve_red(color_space: FilterColorSpace) -> [u8; 4] {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
-                true,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -94,7 +94,7 @@ fn render_filter(filter: Filter) -> Vec<u8> {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &rect,
-                true,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },
@@ -263,7 +263,7 @@ fn partial_alpha_pixels(transform: Affine, clip: Rect) -> usize {
                 Color::from_rgb8(255, 0, 0),
                 None,
                 &Rect::new(-size, -size, 2.0 * size, 2.0 * size),
-                true,
+                AntiAliasing::Enabled,
             );
             scene.pop_layer();
         },

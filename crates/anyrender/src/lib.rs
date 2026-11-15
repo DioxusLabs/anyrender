@@ -233,12 +233,7 @@ pub trait PaintScene: RenderContext {
     /// Pops the current layer.
     fn pop_layer(&mut self);
 
-    /// Strokes a shape using the specified style and brush, anti-aliasing its edges if
-    /// `anti_alias` is `true`.
-    ///
-    /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
-    /// with SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing
-    /// ignore `anti_alias`.
+    /// Strokes a shape using the specified style and brush.
     fn stroke<'a>(
         &mut self,
         style: &Stroke,
@@ -246,15 +241,10 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     );
 
-    /// Fills a shape using the specified style and brush, anti-aliasing its edges if
-    /// `anti_alias` is `true`.
-    ///
-    /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
-    /// with SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing
-    /// ignore `anti_alias`.
+    /// Fills a shape using the specified style and brush.
     fn fill<'a>(
         &mut self,
         style: Fill,
@@ -262,14 +252,10 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     );
 
-    /// Draws a run of glyphs, anti-aliasing their edges if `anti_alias` is `true`.
-    ///
-    /// Without anti-aliasing, each pixel is either fully painted or not painted at all, as
-    /// with SVG's `text-rendering: optimizeSpeed`. Backends that can't disable anti-aliasing
-    /// ignore `anti_alias`.
+    /// Draws a run of glyphs
     #[allow(clippy::too_many_arguments)]
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
@@ -284,7 +270,7 @@ pub trait PaintScene: RenderContext {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
-        anti_alias: bool,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Draw a box shadow cast by `box_shape`, as specified by CSS `box-shadow`.
@@ -329,7 +315,7 @@ pub trait PaintScene: RenderContext {
                 image.image.width as f64,
                 image.image.height as f64,
             ),
-            true,
+            AntiAliasing::Enabled,
         );
     }
 }

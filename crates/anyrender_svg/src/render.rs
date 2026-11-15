@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use crate::{filter, util};
-use anyrender::{MaskMode, PaintScene};
+use anyrender::{AntiAliasing, MaskMode, PaintScene};
 use kurbo::{Affine, BezPath, Rect};
 use peniko::{BlendMode, Color, Fill};
 use std::sync::Arc;
@@ -326,7 +326,7 @@ fn fill_clip_group<S: PaintScene>(
                     Color::BLACK,
                     None,
                     &util::to_bez_path(path),
-                    path.rendering_mode().use_shape_antialiasing(),
+                    anti_aliasing(path),
                 );
             }
             usvg::Node::Group(g) => {
@@ -403,7 +403,7 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
                 paint.as_ref(),
                 Some(brush_transform),
                 local_path,
-                path.rendering_mode().use_shape_antialiasing(),
+                anti_aliasing(path),
             );
         } else {
             error_handler(scene, node, transform);
@@ -431,10 +431,18 @@ fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
                 paint.as_ref(),
                 Some(brush_transform),
                 local_path,
-                path.rendering_mode().use_shape_antialiasing(),
+                anti_aliasing(path),
             );
         } else {
             error_handler(scene, node, transform);
         }
+    }
+}
+
+fn anti_aliasing(path: &Path) -> AntiAliasing {
+    if path.rendering_mode().use_shape_antialiasing() {
+        AntiAliasing::Enabled
+    } else {
+        AntiAliasing::Disabled
     }
 }
