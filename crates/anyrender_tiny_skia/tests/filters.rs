@@ -285,3 +285,48 @@ fn rotated_filter_region_keeps_antialiased_edges() {
     let transform = Affine::translate((8.0, 8.0)) * Affine::rotate(0.5);
     assert!(partial_alpha_pixels(transform, clip) > 0);
 }
+
+/// Offsets a red square drawn left of the canvas into view, through a filter layer blended with
+/// `blend` over a white background.
+fn offset_from_outside_canvas(blend: Mix) -> Vec<u8> {
+    let mut filter = Filter::new(Rect::new(-8.0, 0.0, 16.0, 16.0));
+    filter.add(
+        FilterEffect::Offset(Vec2::new(8.0, 0.0)),
+        FilterInputs::NONE,
+    );
+    let filter = Arc::new(filter);
+    render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            scene.fill(Fill::NonZero, Affine::IDENTITY, Color::WHITE, None, &FULL);
+            scene.push_layer(
+                Fill::NonZero,
+                blend,
+                1.0,
+                Affine::IDENTITY,
+                &Rect::new(-8.0, 0.0, 16.0, 16.0),
+                Some(filter.clone()),
+                None,
+            );
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(-8.0, 0.0, 0.0, 16.0),
+            );
+            scene.pop_layer();
+        },
+        SIZE,
+        SIZE,
+    )
+}
+
+#[test]
+fn filters_see_content_outside_the_canvas() {
+    for blend in [Mix::Normal, Mix::Multiply] {
+        let buffer = offset_from_outside_canvas(blend);
+        assert_close(pixel(&buffer, 0, 8), [255, 0, 0, 255]);
+        assert_close(pixel(&buffer, 7, 8), [255, 0, 0, 255]);
+        assert_close(pixel(&buffer, 8, 8), [255, 255, 255, 255]);
+    }
+}

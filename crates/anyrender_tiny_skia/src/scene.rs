@@ -1,7 +1,8 @@
 //! A tiny-skia implementation of [`PaintScene`].
 //!
-//! Every layer is a premultiplied pixmap covering the pixel bounds of its clip shape (filter and
-//! mask layers cover their parent, since their output can depend on content outside the clip).
+//! Every layer is a premultiplied pixmap covering the pixel bounds of its clip shape within its
+//! parent. Mask layers cover their parent, and filter layers their whole filter region (which can
+//! extend past the parent and the canvas), since their output can depend on content outside it.
 //! Transforms are passed straight to tiny-skia (offset by the layer's origin; nothing is
 //! accumulated on the layer stack), and a non-rectangular clip shape becomes a coverage [`Mask`]
 //! that is applied when the layer is composited back into its parent. This mirrors how resvg
@@ -127,6 +128,18 @@ impl TinySkiaScenePainter {
         IntRect::from_xywh(0, 0, self.width, self.height).unwrap()
     }
 
+    /// The canvas inflated by twice its size on each side.
+    fn filter_bounds(&self) -> IntRect {
+        let (w, h) = (self.width as i32, self.height as i32);
+        IntRect::from_ltrb(
+            w.saturating_mul(-2),
+            h.saturating_mul(-2),
+            w.saturating_mul(3),
+            h.saturating_mul(3),
+        )
+        .unwrap_or_else(|| self.full_rect())
+    }
+
     fn take_pixmap(&mut self, width: u32, height: u32) -> Pixmap {
         let spare = self
             .spare_pixmaps
@@ -166,16 +179,23 @@ impl TinySkiaScenePainter {
 
     fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, kind: LayerKind) {
         let parent = self.top_rect();
-        let full_extent = matches!(
+        let has_filter = matches!(
             kind,
-            LayerKind::Mask(_)
-                | LayerKind::Group {
-                    filter: Some(_),
-                    ..
-                }
+            LayerKind::Group {
+                filter: Some(_),
+                ..
+            }
         );
+        let full_extent = matches!(kind, LayerKind::Mask(_));
         let bbox = transform_bbox(transform, clip.bounding_box());
-        let clip_rect = round_out_within(bbox, parent);
+        // A filter can move content from outside its parent (and the canvas) into view, so its
+        // layer covers the whole filter region, limited like resvg's to 5x the canvas.
+        let bounds = if has_filter {
+            self.filter_bounds()
+        } else {
+            parent
+        };
+        let clip_rect = round_out_within(bbox, bounds);
         let rect = match clip_rect {
             _ if full_extent => parent,
             Some(r) => r,
@@ -192,13 +212,7 @@ impl TinySkiaScenePainter {
         // The filter region is a hard clip (Filter Effects 1 §8). Browsers round an axis-aligned
         // region out to whole pixels rather than anti-aliasing its edges, so `region` alone
         // expresses it; a rotated or skewed region still needs the mask for its edges.
-        let hard_filter_clip = matches!(
-            kind,
-            LayerKind::Group {
-                filter: Some(_),
-                ..
-            }
-        ) && is_axis_aligned(transform);
+        let hard_filter_clip = has_filter && is_axis_aligned(transform);
         let needs_mask = !empty
             && !hard_filter_clip
             && !rect_clip.is_some_and(|r| {
@@ -833,19 +847,30 @@ fn shape_mask(fill: Fill, transform: Affine, shape: &impl Shape, rect: IntRect) 
 }
 
 /// Places a layer's clip mask (`None` meaning full coverage of `rect`) into a mask covering
-/// `parent`.
+/// `parent`. The parts of `rect` outside `parent` are dropped.
 fn expand_mask(clip: Option<&Mask>, rect: IntRect, parent: IntRect) -> Mask {
     let mut mask = Mask::new(parent.width(), parent.height()).unwrap();
-    let (dx, dy) = (
-        (rect.x() - parent.x()) as usize,
-        (rect.y() - parent.y()) as usize,
+    let Some(overlap) = rect.intersect(&parent) else {
+        return mask;
+    };
+    let (sx, sy) = (
+        (overlap.x() - rect.x()) as usize,
+        (overlap.y() - rect.y()) as usize,
     );
-    let (w, pw) = (rect.width() as usize, parent.width() as usize);
+    let (dx, dy) = (
+        (overlap.x() - parent.x()) as usize,
+        (overlap.y() - parent.y()) as usize,
+    );
+    let (w, ow, pw) = (
+        rect.width() as usize,
+        overlap.width() as usize,
+        parent.width() as usize,
+    );
     let data = mask.data_mut();
-    for y in 0..rect.height() as usize {
-        let row = &mut data[(dy + y) * pw + dx..][..w];
+    for y in 0..overlap.height() as usize {
+        let row = &mut data[(dy + y) * pw + dx..][..ow];
         match clip {
-            Some(clip) => row.copy_from_slice(&clip.data()[y * w..][..w]),
+            Some(clip) => row.copy_from_slice(&clip.data()[(sy + y) * w + sx..][..ow]),
             None => row.fill(255),
         }
     }
