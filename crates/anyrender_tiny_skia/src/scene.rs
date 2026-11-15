@@ -4,9 +4,11 @@
 //! parent. Mask layers cover their parent, and filter layers their whole filter region (which can
 //! extend past the parent and the canvas), since their output can depend on content outside it.
 //! Transforms are passed straight to tiny-skia (offset by the layer's origin; nothing is
-//! accumulated on the layer stack), and a non-rectangular clip shape becomes a coverage [`Mask`]
-//! that is applied when the layer is composited back into its parent. This mirrors how resvg
-//! renders SVG groups.
+//! accumulated on the layer stack, except that a filter layer whose transform rotates or skews
+//! runs in a scale-only space and is resampled into its parent with the rest), and a
+//! non-rectangular clip shape becomes a coverage [`Mask`] that is applied when the layer is
+//! composited back into its parent. This mirrors how resvg renders SVG
+//! groups.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -59,6 +61,13 @@ struct Layer {
     region: IntRect,
     /// The clip shape doesn't intersect the parent, so nothing drawn in the layer is visible.
     empty: bool,
+    /// Maps canvas space into the space `rect` is in. Identity unless this layer or an ancestor
+    /// is a filter layer whose transform rotates or skews.
+    space: Affine,
+    /// For a filter layer whose transform rotates or skews, the rotation and skew left over
+    /// after its filter runs in a scale-only space; it maps this layer's space into its
+    /// parent's.
+    to_parent: Option<Affine>,
     kind: LayerKind,
 }
 
@@ -128,14 +137,17 @@ impl TinySkiaScenePainter {
         IntRect::from_xywh(0, 0, self.width, self.height).unwrap()
     }
 
-    /// The canvas inflated by twice its size on each side.
-    fn filter_bounds(&self) -> IntRect {
-        let (w, h) = (self.width as i32, self.height as i32);
+    /// The canvas inflated by twice its size on each side, as pixel bounds in `space` (which maps
+    /// canvas space into a layer's space).
+    fn filter_bounds(&self, space: Affine) -> IntRect {
+        let (w, h) = (f64::from(self.width), f64::from(self.height));
+        let bounds =
+            space.transform_rect_bbox(kurbo::Rect::new(-2.0 * w, -2.0 * h, 3.0 * w, 3.0 * h));
         IntRect::from_ltrb(
-            w.saturating_mul(-2),
-            h.saturating_mul(-2),
-            w.saturating_mul(3),
-            h.saturating_mul(3),
+            bounds.x0.floor() as i32,
+            bounds.y0.floor() as i32,
+            bounds.x1.ceil() as i32,
+            bounds.y1.ceil() as i32,
         )
         .unwrap_or_else(|| self.full_rect())
     }
@@ -171,14 +183,49 @@ impl TinySkiaScenePainter {
         self.layers.last().unwrap().rect
     }
 
+    /// Maps canvas space into the space of the top layer's rect.
+    fn space(&self) -> Affine {
+        self.layers.last().unwrap().space
+    }
+
     /// Maps a canvas-space transform into the space of the top layer's pixmap.
     fn local(&self, transform: Affine) -> Affine {
         let rect = self.top_rect();
-        Affine::translate((-rect.x() as f64, -rect.y() as f64)) * transform
+        Affine::translate((-rect.x() as f64, -rect.y() as f64)) * self.space() * transform
     }
 
     fn push(&mut self, fill: Fill, transform: Affine, clip: &impl Shape, kind: LayerKind) {
-        let parent = self.top_rect();
+        let mut space = self.space();
+        let mut transform = space * transform;
+        let mut parent = self.top_rect();
+        // Filters run in a space with only the transform's scale (as resvg and browsers do), so
+        // primitives like blurs and offsets follow the user space axes; the layer is then drawn
+        // into its parent with the rotation and skew left over.
+        let mut to_parent = None;
+        if let LayerKind::Group {
+            filter: Some(_), ..
+        } = kind
+            && let Some(rest) = rotation_and_skew(transform)
+        {
+            let inverse = rest.inverse();
+            let bounds = inverse.transform_rect_bbox(kurbo::Rect::new(
+                parent.left() as f64,
+                parent.top() as f64,
+                parent.right() as f64,
+                parent.bottom() as f64,
+            ));
+            if let Some(rect) = IntRect::from_ltrb(
+                bounds.x0.floor() as i32,
+                bounds.y0.floor() as i32,
+                bounds.x1.ceil() as i32,
+                bounds.y1.ceil() as i32,
+            ) {
+                space = inverse * space;
+                transform = inverse * transform;
+                parent = rect;
+                to_parent = Some(rest);
+            }
+        }
         let has_filter = matches!(
             kind,
             LayerKind::Group {
@@ -191,7 +238,7 @@ impl TinySkiaScenePainter {
         // A filter can move content from outside its parent (and the canvas) into view, so its
         // layer covers the whole filter region, limited like resvg's to 5x the canvas.
         let bounds = if has_filter {
-            self.filter_bounds()
+            self.filter_bounds(space)
         } else {
             parent
         };
@@ -235,6 +282,8 @@ impl TinySkiaScenePainter {
             clip: mask,
             region,
             empty,
+            space,
+            to_parent,
             kind,
         });
     }
@@ -443,6 +492,8 @@ impl PaintScene for TinySkiaScenePainter {
                 clip: None,
                 region: rect,
                 empty: false,
+                space: Affine::IDENTITY,
+                to_parent: None,
                 kind: LayerKind::Root,
             });
         } else {
@@ -518,6 +569,7 @@ impl PaintScene for TinySkiaScenePainter {
             } => {
                 if let Some((filter, transform)) = filter {
                     let local = Affine::translate((-layer.rect.x() as f64, -layer.rect.y() as f64))
+                        * layer.space
                         * *transform;
                     filter::apply(filter, local, layer.region, &mut layer.pixmap);
                 }
@@ -526,10 +578,41 @@ impl PaintScene for TinySkiaScenePainter {
                     blend_mode: blend,
                     quality: FilterQuality::Nearest,
                 };
-                // Source-over is linear in the source, so the clip can be applied to the layer
-                // itself. Other blend modes must leave the parent untouched outside the clip,
-                // which needs a parent-sized mask.
-                if blend == tiny_skia::BlendMode::SourceOver {
+                if let Some(rest) = layer.to_parent {
+                    // The filter output is transparent outside the region, so only the region
+                    // is drawn into the parent, resampled with the leftover rotation and skew.
+                    if let Some(clip) = &layer.clip {
+                        layer.pixmap.apply_mask(clip);
+                    }
+                    let (x, y) = (layer.rect.x() as f32, layer.rect.y() as f32);
+                    let paint = Paint {
+                        shader: Pattern::new(
+                            layer.pixmap.as_ref(),
+                            SpreadMode::Pad,
+                            FilterQuality::Bilinear,
+                            alpha.clamp(0.0, 1.0),
+                            Transform::from_translate(x, y),
+                        ),
+                        blend_mode: blend,
+                        anti_alias: true,
+                        ..Default::default()
+                    };
+                    if let Some(region) = layer.region.translate(layer.rect.x(), layer.rect.y()) {
+                        let to_parent =
+                            Affine::translate((-parent.rect.x() as f64, -parent.rect.y() as f64))
+                                * rest;
+                        parent.pixmap.fill_path(
+                            &PathBuilder::from_rect(region.to_rect()),
+                            &paint,
+                            FillRule::Winding,
+                            skia_transform(to_parent),
+                            None,
+                        );
+                    }
+                } else if blend == tiny_skia::BlendMode::SourceOver {
+                    // Source-over is linear in the source, so the clip can be applied to the
+                    // layer itself. Other blend modes must leave the parent untouched outside
+                    // the clip, which needs a parent-sized mask.
                     if let Some(clip) = &layer.clip {
                         layer.pixmap.apply_mask(clip);
                     }
@@ -649,6 +732,7 @@ impl PaintScene for TinySkiaScenePainter {
             geometry.draw_unblurred(self, transform, color);
             return;
         }
+        let transform = self.space() * transform;
 
         // The shape to blur. For inset shadows, the box (grown so that its outer edge is
         // never reached by the blur) with the shadow's hole cut out of it.
@@ -880,6 +964,19 @@ fn expand_mask(clip: Option<&Mask>, rect: IntRect, parent: IntRect) -> Mask {
 fn is_axis_aligned(transform: Affine) -> bool {
     let [_, b, c, _, _, _] = transform.as_coeffs();
     b == 0.0 && c == 0.0
+}
+
+/// The rotation and skew left after dividing `transform`'s scale out of its columns, or `None`
+/// if it neither rotates nor skews (or is degenerate).
+fn rotation_and_skew(transform: Affine) -> Option<Affine> {
+    if is_axis_aligned(transform) {
+        return None;
+    }
+    let [a, b, c, d, _, _] = transform.as_coeffs();
+    let (sx, sy) = transform_scale(transform);
+    let rest = Affine::new([a / sx, b / sx, c / sy, d / sy, 0.0, 0.0]);
+    (rest.determinant().abs() > 1e-6 && rest.as_coeffs().iter().all(|v| v.is_finite()))
+        .then_some(rest)
 }
 
 pub(crate) fn transform_scale(transform: Affine) -> (f64, f64) {

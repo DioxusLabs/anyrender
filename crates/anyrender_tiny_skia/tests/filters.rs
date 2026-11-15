@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterInputs,
+    blur::GaussianBlurFilter,
     color_transformation::ColorMatrix,
     composite::CompositeOperator,
     turbulence::{TurbulenceFilter, TurbulenceType},
@@ -329,4 +330,47 @@ fn filters_see_content_outside_the_canvas() {
         assert_close(pixel(&buffer, 7, 8), [255, 0, 0, 255]);
         assert_close(pixel(&buffer, 8, 8), [255, 255, 255, 255]);
     }
+}
+
+#[test]
+fn filters_run_in_user_space_axes_under_rotation() {
+    // A blur along user-space x, under a quarter turn, spreads along canvas y.
+    let size = SIZE as f64;
+    let mut filter = Filter::new(Rect::new(-size, -size, size, size));
+    filter.add(
+        FilterEffect::GaussianBlur(GaussianBlurFilter {
+            std_deviation_x: 2.0,
+            std_deviation_y: 0.0,
+            edge_mode: EdgeMode::None,
+        }),
+        FilterInputs::NONE,
+    );
+    let filter = Arc::new(filter);
+    let transform = Affine::translate((8.0, 8.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2);
+    let buffer = render_to_buffer::<TinySkiaImageRenderer, _>(
+        |scene| {
+            scene.push_layer(
+                Fill::NonZero,
+                Mix::Normal,
+                1.0,
+                transform,
+                &Rect::new(-size, -size, size, size),
+                Some(filter.clone()),
+                None,
+            );
+            // A horizontal stripe on the canvas, along user-space y.
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                Color::from_rgb8(255, 0, 0),
+                None,
+                &Rect::new(-1.0, -size, 1.0, size),
+            );
+            scene.pop_layer();
+        },
+        SIZE,
+        SIZE,
+    );
+    assert!(pixel(&buffer, 8, 4)[3] > 0);
+    assert!(pixel(&buffer, 8, 8)[3] < 255);
 }
