@@ -12,7 +12,8 @@ use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
     BlendMode as SkBlendMode, BlurStyle, Canvas, ClipOp, Color, ColorFilter, ColorSpace, Data,
     Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
-    PaintJoin, PaintStyle, PathEffect, Point, Point3, RRect, Shader, Typeface,
+    PaintJoin, PaintStyle, PathEffect, Picture, PictureRecorder, Point, Point3, RRect, Shader,
+    TileMode, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -35,6 +36,7 @@ pub struct SkiaSceneCache {
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
     image_shader: GenerationalCache<u64, Shader>,
+    pattern_picture: GenerationalCache<u64, Picture>,
     font: GenerationalCache<FontCacheKey, Font>,
     font_mgr: FontMgr,
     glyph_id_buf: Vec<GlyphId>,
@@ -54,6 +56,7 @@ impl SkiaSceneCache {
         self.typeface.next_gen();
         self.normalized_typeface.next_gen();
         self.image_shader.next_gen();
+        self.pattern_picture.next_gen();
         self.font.next_gen();
     }
 }
@@ -70,6 +73,7 @@ impl Default for SkiaSceneCache {
             typeface: GenerationalCache::new(1),
             normalized_typeface: GenerationalCache::new(1),
             image_shader: GenerationalCache::new(1),
+            pattern_picture: GenerationalCache::new(1),
             font: GenerationalCache::new(10),
             font_mgr: FontMgr::new(),
             glyph_id_buf: Default::default(),
@@ -171,6 +175,25 @@ impl SkiaScenePainter<'_> {
                 self.cache.paint.set_shader(image_shader);
             }
 
+            anyrender::Paint::Pattern(pattern) => {
+                // The picture is recorded by `record_pattern` before the paint is reset.
+                if let Some(picture) = self.cache.pattern_picture.hit(&pattern.id()) {
+                    // The picture has the tile's top-left corner at the origin.
+                    let tile = pattern.tile();
+                    let local_matrix = sk_kurbo::matrix_from_affine(
+                        brush_transform.unwrap_or(kurbo::Affine::IDENTITY)
+                            * kurbo::Affine::translate(tile.origin().to_vec2()),
+                    );
+                    let shader = picture.to_shader(
+                        (TileMode::Repeat, TileMode::Repeat),
+                        skia_safe::FilterMode::Linear,
+                        Some(&local_matrix),
+                        &sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN)),
+                    );
+                    self.cache.paint.set_shader(shader);
+                }
+            }
+
             // Render unsupported custom paints as transparent
             anyrender::Paint::Resource(_) | anyrender::Paint::Custom(_) => {
                 self.cache.paint.set_color4f(
@@ -178,6 +201,28 @@ impl SkiaScenePainter<'_> {
                     &ColorSpace::new_srgb(),
                 );
             }
+        }
+    }
+
+    /// Records one tile of `pattern` as a picture, if it isn't cached already, for
+    /// `set_paint_brush` to draw it with a picture shader.
+    fn record_pattern(&mut self, brush: &anyrender::PaintRef<'_>) {
+        let anyrender::Paint::Pattern(pattern) = brush else {
+            return;
+        };
+        if self.cache.pattern_picture.hit(&pattern.id()).is_some() {
+            return;
+        }
+        let tile = pattern.tile();
+        let bounds = sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN));
+        let mut recorder = PictureRecorder::new();
+        let canvas = recorder.begin_recording(bounds, false);
+        pattern.scene().replay(
+            &mut SkiaScenePainter::new(canvas, self.cache),
+            kurbo::Affine::translate(-tile.origin().to_vec2()),
+        );
+        if let Some(picture) = recorder.finish_recording_as_picture(Some(&bounds)) {
+            self.cache.pattern_picture.insert(pattern.id(), picture);
         }
     }
 
@@ -546,6 +591,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
@@ -562,6 +609,8 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
@@ -584,14 +633,25 @@ impl PaintScene for SkiaScenePainter<'_> {
         glyph_transform: Option<kurbo::Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         if let Some(glyph_transform) = glyph_transform {
             self.concat_matrix(glyph_transform);
         }
 
+        // Keep patterns in the run's space, not the glyphs'.
+        let brush_transform = match (&brush, glyph_transform) {
+            (anyrender::Paint::Pattern(_), Some(glyph_transform))
+                if glyph_transform.determinant() != 0.0 =>
+            {
+                Some(glyph_transform.inverse())
+            }
+            _ => None,
+        };
         self.reset_paint();
-        self.set_paint_brush(brush, None);
+        self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 

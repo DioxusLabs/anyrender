@@ -20,6 +20,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
     group: &usvg::Group,
     transform: Affine,
     error_handler: &mut F,
+    patterns: &mut util::PatternCache,
 ) {
     for node in group.children() {
         match node {
@@ -113,7 +114,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                     }
                 }
 
-                render_group(scene, g, group_transform, error_handler);
+                render_group(scene, g, group_transform, error_handler, patterns);
 
                 if did_push_filter_layer {
                     scene.pop_layer();
@@ -121,7 +122,7 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
 
                 // Apply the group's mask, and any masks linked from it with `<mask mask="...">`
                 for mask in std::iter::successors(g.mask(), |mask| mask.mask()) {
-                    apply_mask(scene, mask, group_transform, error_handler);
+                    apply_mask(scene, mask, group_transform, error_handler, patterns);
                 }
 
                 // Apply any clip-path that couldn't clip the layer directly
@@ -141,12 +142,44 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
 
                 match path.paint_order() {
                     usvg::PaintOrder::FillAndStroke => {
-                        fill(scene, error_handler, path, transform, &local_path, node);
-                        stroke(scene, error_handler, path, transform, &local_path, node);
+                        fill(
+                            scene,
+                            error_handler,
+                            patterns,
+                            path,
+                            transform,
+                            &local_path,
+                            node,
+                        );
+                        stroke(
+                            scene,
+                            error_handler,
+                            patterns,
+                            path,
+                            transform,
+                            &local_path,
+                            node,
+                        );
                     }
                     usvg::PaintOrder::StrokeAndFill => {
-                        stroke(scene, error_handler, path, transform, &local_path, node);
-                        fill(scene, error_handler, path, transform, &local_path, node);
+                        stroke(
+                            scene,
+                            error_handler,
+                            patterns,
+                            path,
+                            transform,
+                            &local_path,
+                            node,
+                        );
+                        fill(
+                            scene,
+                            error_handler,
+                            patterns,
+                            path,
+                            transform,
+                            &local_path,
+                            node,
+                        );
                     }
                 }
             }
@@ -177,14 +210,14 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>
                         }
                     }
                     usvg::ImageKind::SVG(svg) => {
-                        render_group(scene, svg.root(), transform, error_handler);
+                        render_group(scene, svg.root(), transform, error_handler, patterns);
                     }
                 }
             }
             usvg::Node::Text(text) => {
                 let flattened = text.flattened();
                 let transform = transform * util::to_affine(&flattened.transform());
-                render_group(scene, flattened, transform, error_handler);
+                render_group(scene, flattened, transform, error_handler, patterns);
             }
         }
     }
@@ -334,6 +367,7 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     mask: &usvg::Mask,
     transform: Affine,
     error_handler: &mut F,
+    patterns: &mut util::PatternCache,
 ) {
     let mode = match mask.kind() {
         usvg::MaskType::Alpha => MaskMode::Alpha,
@@ -342,20 +376,23 @@ fn apply_mask<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     // Content outside of the mask's rect is masked out
     let rect = util::to_rect(mask.rect());
     scene.push_mask_layer(Fill::NonZero, mode, transform, &rect);
-    render_group(scene, mask.root(), transform, error_handler);
+    render_group(scene, mask.root(), transform, error_handler, patterns);
     scene.pop_layer();
 }
 
 fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     error_handler: &mut F,
+    patterns: &mut util::PatternCache,
     path: &Path,
     transform: Affine,
     local_path: &BezPath,
     node: &Node,
 ) {
     if let Some(fill) = &path.fill() {
-        if let Some((paint, brush_transform)) = util::to_brush(fill.paint(), fill.opacity()) {
+        if let Some((paint, brush_transform)) =
+            util::to_brush(fill.paint(), fill.opacity(), patterns)
+        {
             scene.fill(
                 match fill.rule() {
                     usvg::FillRule::NonZero => Fill::NonZero,
@@ -375,13 +412,16 @@ fn fill<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
 fn stroke<S: PaintScene, F: FnMut(&mut S, &usvg::Node, Affine)>(
     scene: &mut S,
     error_handler: &mut F,
+    patterns: &mut util::PatternCache,
     path: &Path,
     transform: Affine,
     local_path: &BezPath,
     node: &Node,
 ) {
     if let Some(stroke) = &path.stroke() {
-        if let Some((paint, brush_transform)) = util::to_brush(stroke.paint(), stroke.opacity()) {
+        if let Some((paint, brush_transform)) =
+            util::to_brush(stroke.paint(), stroke.opacity(), patterns)
+        {
             let conv_stroke = util::to_stroke(stroke);
             scene.stroke(
                 &conv_stroke,

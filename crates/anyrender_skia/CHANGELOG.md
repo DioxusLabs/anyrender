@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Paint::Pattern` support. Each pattern tile is recorded once as an `SkPicture` and painted with a repeating picture shader.
 - `push_mask_layer` support, including luminance masks.
 - Support for `Filter::region`.
 

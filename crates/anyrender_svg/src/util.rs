@@ -1,10 +1,12 @@
 // Copyright 2023 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use anyrender::{Paint, PaintScene};
+use anyrender::{Paint, PaintScene, Pattern, recording::Scene};
 use kurbo::{Affine, BezPath, Point, Rect, Stroke};
 use peniko::color::{self, DynamicColor};
 use peniko::{BlendMode, Color, Compose, Fill, InterpolationAlphaSpace, Mix};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg(feature = "image")]
 use peniko::{Blob, ImageBrush};
@@ -154,7 +156,11 @@ pub(crate) fn into_image(
     .with_quality(quality)
 }
 
-pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(Paint, Affine)> {
+pub(crate) fn to_brush(
+    paint: &usvg::Paint,
+    opacity: usvg::Opacity,
+    patterns: &mut PatternCache,
+) -> Option<(Paint, Affine)> {
     match paint {
         usvg::Paint::Color(color) => Some((
             Paint::Solid(Color::from_rgba8(
@@ -237,8 +243,61 @@ pub(crate) fn to_brush(paint: &usvg::Paint, opacity: usvg::Opacity) -> Option<(P
             .with_interpolation_alpha_space(InterpolationAlphaSpace::Unpremultiplied);
             Some((Paint::Gradient(gradient), transform))
         }
-        usvg::Paint::Pattern(_) => None,
+        usvg::Paint::Pattern(pattern) => {
+            // usvg resolves the pattern's units and view box, so its content is in the tile's
+            // space, with the tile's top-left corner at the origin.
+            let rect = pattern.rect();
+            let transform = to_affine(&pattern.transform())
+                * Affine::translate((rect.x() as f64, rect.y() as f64));
+            let alpha = opacity.get();
+            let key = (Arc::as_ptr(pattern) as usize, alpha.to_bits());
+            let pattern = match patterns.get(&key) {
+                Some(converted) => converted.clone(),
+                None => {
+                    let tile = Rect::new(0.0, 0.0, rect.width() as f64, rect.height() as f64);
+                    let converted = to_pattern(pattern, tile, alpha, patterns);
+                    patterns.insert(key, converted.clone());
+                    converted
+                }
+            };
+            Some((Paint::Pattern(pattern), transform))
+        }
     }
+}
+
+/// Patterns already converted in one render, by usvg pattern and opacity, so that every shape
+/// using a usvg pattern gets the same pattern id.
+pub(crate) type PatternCache = HashMap<(usize, u32), Pattern>;
+
+fn to_pattern(
+    pattern: &usvg::Pattern,
+    tile: Rect,
+    alpha: f32,
+    patterns: &mut PatternCache,
+) -> Pattern {
+    let mut scene = Scene::new();
+    if alpha < 1.0 {
+        scene.push_layer(
+            Fill::NonZero,
+            BlendMode::default(),
+            alpha,
+            Affine::IDENTITY,
+            &tile,
+            None,
+            None,
+        );
+    }
+    crate::render::render_group(
+        &mut scene,
+        pattern.root(),
+        Affine::IDENTITY,
+        &mut default_error_handler,
+        patterns,
+    );
+    if alpha < 1.0 {
+        scene.pop_layer();
+    }
+    Pattern::new(scene, tile)
 }
 
 fn to_extend(spread_method: usvg::SpreadMethod) -> peniko::Extend {

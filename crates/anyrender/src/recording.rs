@@ -195,6 +195,70 @@ impl Scene {
             // TODO: handle this somehow
             Paint::Resource(id) => Paint::Resource(id),
             Paint::Custom(_) => Paint::Solid(Color::TRANSPARENT),
+            Paint::Pattern(pattern) => Paint::Pattern(pattern.clone()),
+        }
+    }
+
+    /// Draw the recorded commands into `painter`, transformed by `transform`.
+    pub fn replay<S: PaintScene + ?Sized>(&self, painter: &mut S, transform: Affine) {
+        for cmd in &self.commands {
+            match cmd {
+                RenderCommand::PushLayer(cmd) => painter.push_layer(
+                    cmd.fill,
+                    cmd.blend,
+                    cmd.alpha,
+                    transform * cmd.transform,
+                    &cmd.clip,
+                    cmd.filter.clone(),
+                    cmd.backdrop_filter.clone(),
+                ),
+                RenderCommand::PushClipLayer(cmd) => {
+                    painter.push_clip_layer(cmd.fill, transform * cmd.transform, &cmd.clip)
+                }
+                RenderCommand::PushMaskLayer(cmd) => painter.push_mask_layer(
+                    cmd.fill,
+                    cmd.mode,
+                    transform * cmd.transform,
+                    &cmd.clip,
+                ),
+                RenderCommand::PopLayer => painter.pop_layer(),
+                RenderCommand::Stroke(cmd) => painter.stroke(
+                    &cmd.style,
+                    transform * cmd.transform,
+                    cmd.brush.as_ref(),
+                    cmd.brush_transform,
+                    &cmd.shape,
+                ),
+                RenderCommand::Fill(cmd) => painter.fill(
+                    cmd.fill,
+                    transform * cmd.transform,
+                    cmd.brush.as_ref(),
+                    cmd.brush_transform,
+                    &cmd.shape,
+                ),
+                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs(
+                    &cmd.font_data,
+                    cmd.font_size,
+                    cmd.hint,
+                    &cmd.normalized_coords,
+                    cmd.embolden,
+                    &cmd.style,
+                    cmd.brush.as_ref(),
+                    cmd.brush_alpha,
+                    transform * cmd.transform,
+                    cmd.glyph_transform,
+                    cmd.glyphs.iter().copied(),
+                ),
+                RenderCommand::BoxShadow(cmd) => painter.draw_box_shadow(
+                    transform * cmd.transform,
+                    &cmd.box_shape,
+                    cmd.offset,
+                    cmd.spread,
+                    cmd.std_dev,
+                    cmd.color,
+                    cmd.kind,
+                ),
+            }
         }
     }
 }
