@@ -1,6 +1,8 @@
 //! A dummy implementation of the AnyRender traits while simply ignores all commands
 
-use crate::{Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use crate::{
+    AntiAliasing, Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer,
+};
 use std::sync::Arc;
 
 #[derive(Copy, Clone, Default)]
@@ -134,6 +136,7 @@ impl PaintScene for NullScenePainter {
         _brush: impl Into<crate::PaintRef<'a>>,
         _brush_transform: Option<kurbo::Affine>,
         _shape: &impl kurbo::Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
     }
 
@@ -144,6 +147,7 @@ impl PaintScene for NullScenePainter {
         _brush: impl Into<crate::PaintRef<'a>>,
         _brush_transform: Option<kurbo::Affine>,
         _shape: &impl kurbo::Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
     }
 
@@ -160,6 +164,7 @@ impl PaintScene for NullScenePainter {
         _transform: kurbo::Affine,
         _glyph_transform: Option<kurbo::Affine>,
         _glyphs: impl Iterator<Item = crate::Glyph>,
+        _anti_aliasing: AntiAliasing,
     ) {
     }
 

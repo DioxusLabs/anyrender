@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
 use anyrender::{
-    Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext, ResourceId,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+    ResourceId,
 };
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
@@ -436,7 +437,14 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.fill(
+            fill,
+            transform,
+            Color::BLACK,
+            None,
+            clip,
+            AntiAliasing::Enabled,
+        );
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -480,6 +488,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -511,6 +520,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -552,6 +562,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {

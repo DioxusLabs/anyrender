@@ -1,5 +1,6 @@
 use anyrender::{
-    PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle, WindowRenderer,
+    AntiAliasing, PaintScene, RegisterResourceErrorKind, RenderContext, ResourceId, WindowHandle,
+    WindowRenderer,
 };
 use debug_timer::debug_timer;
 use futures_channel::oneshot;
@@ -427,6 +428,7 @@ impl WindowRenderer for VelloHybridWindowRenderer {
                     render_surface.config.width as f64,
                     render_surface.config.height as f64,
                 ),
+                AntiAliasing::Enabled,
             );
         }
         // Regenerate the vello scene

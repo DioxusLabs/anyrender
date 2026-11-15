@@ -3,7 +3,7 @@
 use std::io::{Cursor, Read};
 
 use anyrender::recording::{RenderCommand, Scene};
-use anyrender::{Glyph, Paint, PaintScene};
+use anyrender::{AntiAliasing, Glyph, Paint, PaintScene};
 use anyrender_serialize::{
     ArchiveError, ResourceManifest, SceneArchive, SerializableRenderCommand, SerializeConfig,
 };
@@ -50,6 +50,59 @@ fn legacy_clips_default_to_nonzero() {
     }
 }
 
+#[test]
+fn anti_aliasing_roundtrips_and_defaults_to_enabled() {
+    let mut scene = Scene::new();
+    let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        AntiAliasing::Enabled,
+    );
+    scene.fill(
+        Fill::NonZero,
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        AntiAliasing::Disabled,
+    );
+    scene.stroke(
+        &Stroke::new(1.0),
+        Affine::IDENTITY,
+        Color::BLACK,
+        None,
+        &rect,
+        AntiAliasing::Disabled,
+    );
+    let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
+    let restored = archive.to_scene().unwrap();
+    let flags: Vec<AntiAliasing> = restored
+        .commands
+        .iter()
+        .map(|command| match command {
+            RenderCommand::Fill(fill) => fill.anti_aliasing,
+            RenderCommand::Stroke(stroke) => stroke.anti_aliasing,
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        [
+            AntiAliasing::Enabled,
+            AntiAliasing::Disabled,
+            AntiAliasing::Disabled
+        ]
+    );
+
+    let value = serde_json::to_value(&archive.commands[0]).unwrap();
+    let fields = value.as_object().unwrap().values().next().unwrap();
+    assert!(fields.get("anti_aliasing").is_none());
+}
+
 /// Tests that all non-image and non-font command types survive a roundtrip.
 #[test]
 fn test_all_command_types_roundtrip() {
@@ -73,6 +126,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 100.0, 50.0),
+        AntiAliasing::Enabled,
     );
 
     // Fill (EvenOdd) with brush transform
@@ -82,6 +136,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(0, 0, 255),
         Some(Affine::rotate(std::f64::consts::PI / 4.0)),
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
 
     // Stroke
@@ -91,6 +146,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(0, 255, 0),
         None,
         &Rect::new(10.0, 10.0, 90.0, 90.0),
+        AntiAliasing::Enabled,
     );
 
     // Box shadow
@@ -126,6 +182,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(255, 255, 0),
         None,
         &Rect::new(0.0, 0.0, 200.0, 200.0),
+        AntiAliasing::Enabled,
     );
     scene.pop_layer();
 
@@ -145,6 +202,7 @@ fn test_all_command_types_roundtrip() {
         Color::from_rgb8(128, 128, 128),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        AntiAliasing::Enabled,
     );
     scene.pop_layer();
 
@@ -176,6 +234,7 @@ fn test_image_data_roundtrip() {
         ImageBrush::new(image_data).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        AntiAliasing::Enabled,
     );
 
     let data = serialize_to_vec(&scene, &default_config()).unwrap();
@@ -204,6 +263,7 @@ fn test_image_deduplication() {
         image_brush.as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -211,6 +271,7 @@ fn test_image_deduplication() {
         image_brush.as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
 
     let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
@@ -230,6 +291,7 @@ fn test_multiple_different_images() {
         ImageBrush::new(make_1x1_image(255, 0, 0, 255)).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -237,6 +299,7 @@ fn test_multiple_different_images() {
         ImageBrush::new(make_1x1_image(0, 0, 255, 255)).as_ref(),
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
 
     let archive = SceneArchive::from_scene(&scene, &default_config()).unwrap();
@@ -347,6 +410,7 @@ fn test_font_deduplication() {
                 y: 0.0,
             }]
             .into_iter(),
+            AntiAliasing::Enabled,
         );
     }
 
@@ -369,6 +433,7 @@ fn test_archive_contains_expected_files() {
         Color::from_rgb8(255, 0, 0),
         None,
         &Rect::new(0.0, 0.0, 100.0, 100.0),
+        AntiAliasing::Enabled,
     );
 
     let data = serialize_to_vec(&scene, &default_config()).unwrap();
@@ -489,6 +554,7 @@ fn build_glyph_scene(font: &FontData) -> Scene {
         Affine::translate((10.0, 50.0)),
         None,
         glyphs.into_iter(),
+        AntiAliasing::Enabled,
     );
     scene
 }

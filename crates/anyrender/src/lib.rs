@@ -241,6 +241,7 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Fills a shape using the specified style and brush.
@@ -251,6 +252,7 @@ pub trait PaintScene: RenderContext {
         brush: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Draws a run of glyphs
@@ -268,6 +270,7 @@ pub trait PaintScene: RenderContext {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
+        anti_aliasing: AntiAliasing,
     );
 
     /// Draw a box shadow cast by `box_shape`, as specified by CSS `box-shadow`.
@@ -312,6 +315,7 @@ pub trait PaintScene: RenderContext {
                 image.image.width as f64,
                 image.image.height as f64,
             ),
+            AntiAliasing::Enabled,
         );
     }
 }

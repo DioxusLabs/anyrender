@@ -206,6 +206,7 @@ impl ResourceCollector {
                 brush: self.convert_brush(&stroke.brush)?,
                 brush_transform: stroke.brush_transform,
                 shape: stroke.shape.clone(),
+                anti_aliasing: stroke.anti_aliasing,
             }),
             RenderCommand::Fill(fill) => SerializableRenderCommand::Fill(FillCommand {
                 fill: fill.fill,
@@ -213,6 +214,7 @@ impl ResourceCollector {
                 brush: self.convert_brush(&fill.brush)?,
                 brush_transform: fill.brush_transform,
                 shape: fill.shape.clone(),
+                anti_aliasing: fill.anti_aliasing,
             }),
             RenderCommand::GlyphRun(glyph_run) => {
                 let resource_id = self.fonts.register(&glyph_run.font_data);
@@ -233,6 +235,7 @@ impl ResourceCollector {
                     transform: glyph_run.transform,
                     glyph_transform: glyph_run.glyph_transform,
                     glyphs: glyph_run.glyphs.clone(),
+                    anti_aliasing: glyph_run.anti_aliasing,
                 })
             }
             RenderCommand::BoxShadow(shadow) => {
@@ -300,6 +303,7 @@ impl ResourceReconstructor {
                 brush: self.convert_brush(&stroke.brush)?,
                 brush_transform: stroke.brush_transform,
                 shape: stroke.shape.clone(),
+                anti_aliasing: stroke.anti_aliasing,
             }),
             SerializableRenderCommand::Fill(fill) => RenderCommand::Fill(FillCommand {
                 fill: fill.fill,
@@ -307,6 +311,7 @@ impl ResourceReconstructor {
                 brush: self.convert_brush(&fill.brush)?,
                 brush_transform: fill.brush_transform,
                 shape: fill.shape.clone(),
+                anti_aliasing: fill.anti_aliasing,
             }),
             SerializableRenderCommand::GlyphRun(glyph_run) => {
                 let font = self.get_font(glyph_run.font_data.resource_id)?;
@@ -324,6 +329,7 @@ impl ResourceReconstructor {
                     transform: glyph_run.transform,
                     glyph_transform: glyph_run.glyph_transform,
                     glyphs: glyph_run.glyphs.clone(),
+                    anti_aliasing: glyph_run.anti_aliasing,
                 })
             }
             SerializableRenderCommand::BoxShadow(shadow) => {

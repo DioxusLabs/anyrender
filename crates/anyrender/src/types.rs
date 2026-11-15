@@ -23,6 +23,27 @@ pub enum MaskMode {
     Luminance,
 }
 
+/// Whether the edges of a shape or glyph are anti-aliased.
+///
+/// Without anti-aliasing, each pixel is either fully painted or not painted at all, as with
+/// SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing ignore it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AntiAliasing {
+    /// Edges are anti-aliased.
+    #[default]
+    Enabled,
+    /// Edges are not anti-aliased.
+    Disabled,
+}
+
+impl AntiAliasing {
+    /// Returns `true` if edges are anti-aliased.
+    pub fn is_enabled(&self) -> bool {
+        *self == Self::Enabled
+    }
+}
+
 /// A positioned glyph.
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

@@ -1,7 +1,8 @@
 //! WebGL-compatible [`PaintScene`] implementation for [`vello_gpu::Scene`].
 
 use anyrender::{
-    Filter, Glyph, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+    AntiAliasing, Filter, Glyph, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene,
+    RenderContext,
 };
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
@@ -266,7 +267,14 @@ impl PaintScene for WebGlScenePainter<'_> {
             None,
             None,
         );
-        self.fill(fill, transform, Color::BLACK, None, clip);
+        self.fill(
+            fill,
+            transform,
+            Color::BLACK,
+            None,
+            clip,
+            AntiAliasing::Enabled,
+        );
         self.pop_layer();
 
         // Luminance masks aren't supported yet, so they are treated as alpha masks
@@ -310,6 +318,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -341,6 +350,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -382,6 +392,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
+        _anti_aliasing: AntiAliasing,
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
