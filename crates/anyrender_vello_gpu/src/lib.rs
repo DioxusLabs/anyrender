@@ -8,7 +8,7 @@ mod webgl;
 #[path = "wgpu/mod.rs"]
 mod wgpu_backend;
 
-pub use common::{ImageCache, VelloHybridRendererOptions};
+pub use common::{ImageCache, VelloGpuRendererOptions};
 #[cfg(all(target_arch = "wasm32", feature = "webgl"))]
 pub use webgl::*;
 pub use wgpu_backend::*;

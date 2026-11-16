@@ -7,7 +7,7 @@ pub(crate) fn convert_filter(filter: &Filter) -> Option<vello_common::filter_eff
         return None;
     }
 
-    // Vello Hybrid only supports single-node filters at the moment
+    // Vello GPU only supports single-node filters at the moment
     let node = &filter.nodes()[0];
     let primitive = convert_filter_effect(&node.effect)?;
     Some(vello_common::filter_effects::Filter::from_primitive(

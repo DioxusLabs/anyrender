@@ -2,7 +2,7 @@ use anyrender::{AntiAliasing, PaintScene, WindowRenderer};
 use anyrender_skia::{SkiaImageRenderer, SkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
-use anyrender_vello_gpu::VelloHybridWindowRenderer;
+use anyrender_vello_gpu::VelloGpuWindowRenderer;
 use bunny::BunnyManager;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
@@ -33,8 +33,8 @@ struct App {
 enum Renderer {
     Skia(Box<SkiaWindowRenderer>),
     SkiaRaster(Box<SkiaRasterWindowRenderer>),
-    Gpu(Box<VelloWindowRenderer>),
-    Hybrid(Box<VelloHybridWindowRenderer>),
+    Vello(Box<VelloWindowRenderer>),
+    Gpu(Box<VelloGpuWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
 }
 
@@ -43,8 +43,8 @@ impl Renderer {
         match self {
             Renderer::Skia(r) => r.is_active(),
             Renderer::SkiaRaster(r) => r.is_active(),
+            Renderer::Vello(r) => r.is_active(),
             Renderer::Gpu(r) => r.is_active(),
-            Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
         }
     }
@@ -53,8 +53,8 @@ impl Renderer {
         match self {
             Renderer::Skia(r) => r.set_size(w, h),
             Renderer::SkiaRaster(r) => r.set_size(w, h),
+            Renderer::Vello(r) => r.set_size(w, h),
             Renderer::Gpu(r) => r.set_size(w, h),
-            Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
         }
     }
@@ -218,8 +218,8 @@ impl ApplicationHandler for App {
                 let renderer_name = match renderer {
                     Renderer::Skia(_) => "skia",
                     Renderer::SkiaRaster(_) => "skia(raster)",
-                    Renderer::Gpu(_) => "vello",
-                    Renderer::Hybrid(_) => "vello_hybrid",
+                    Renderer::Vello(_) => "vello",
+                    Renderer::Gpu(_) => "vello_gpu",
                     Renderer::Cpu(_) => "vello_cpu",
                 };
                 print!(
@@ -248,7 +248,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::Gpu(r) => r.render(|scene_painter| {
+                    Renderer::Vello(r) => r.render(|scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -258,7 +258,7 @@ impl ApplicationHandler for App {
                             Color::from_rgb8(255, 0, 0),
                         );
                     }),
-                    Renderer::Hybrid(r) => r.render(|scene_painter| {
+                    Renderer::Gpu(r) => r.render(|scene_painter| {
                         App::draw_scene(
                             scene_painter,
                             self.logical_width,
@@ -301,16 +301,16 @@ impl ApplicationHandler for App {
                             });
                         }
                         Renderer::Cpu(_) => {
-                            self.set_backend(VelloHybridWindowRenderer::new(), event_loop, |r| {
-                                Renderer::Hybrid(Box::new(r))
-                            });
-                        }
-                        Renderer::Hybrid(_) => {
-                            self.set_backend(VelloWindowRenderer::new(), event_loop, |r| {
+                            self.set_backend(VelloGpuWindowRenderer::new(), event_loop, |r| {
                                 Renderer::Gpu(Box::new(r))
                             });
                         }
                         Renderer::Gpu(_) => {
+                            self.set_backend(VelloWindowRenderer::new(), event_loop, |r| {
+                                Renderer::Vello(Box::new(r))
+                            });
+                        }
+                        Renderer::Vello(_) => {
                             self.set_backend(SkiaWindowRenderer::new(), event_loop, |r| {
                                 Renderer::Skia(Box::new(r))
                             });
