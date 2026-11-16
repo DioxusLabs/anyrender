@@ -239,6 +239,42 @@ impl<I> Filter<I> {
         &self.primitives
     }
 
+    /// The content of every [`FilterEffect::Image`] primitive, in node order.
+    pub fn images(&self) -> impl Iterator<Item = &I> {
+        self.primitives
+            .iter()
+            .filter_map(|node| match &node.effect {
+                FilterEffect::Image(image) => Some(image),
+                _ => None,
+            })
+    }
+
+    /// Convert the content of every [`FilterEffect::Image`] primitive with `f`, keeping the rest
+    /// of the graph.
+    pub fn try_map_images<J, E>(
+        &self,
+        mut f: impl FnMut(&I) -> Result<J, E>,
+    ) -> Result<Filter<J>, E> {
+        Ok(Filter {
+            primitives: self
+                .primitives
+                .iter()
+                .map(|node| {
+                    Ok(FilterGraphNode {
+                        effect: node.effect.try_map_image(&mut f)?,
+                        inputs: node.inputs.clone(),
+                        color_space: node.color_space,
+                        subregion: node.subregion,
+                        region: node.region,
+                    })
+                })
+                .collect::<Result<_, E>>()?,
+            output: self.output,
+            expansion_rect: self.expansion_rect,
+            region: self.region,
+        })
+    }
+
     /// The output filter for the graph.
     pub fn output(&self) -> FilterId {
         self.output
@@ -576,6 +612,31 @@ pub enum FilterEffect<I> {
 }
 
 impl<I> FilterEffect<I> {
+    /// Convert the content of a [`FilterEffect::Image`] with `f`. Other effects are copied.
+    pub fn try_map_image<J, E>(
+        &self,
+        f: impl FnOnce(&I) -> Result<J, E>,
+    ) -> Result<FilterEffect<J>, E> {
+        Ok(match self {
+            Self::Flood(color) => FilterEffect::Flood(*color),
+            Self::GaussianBlur(blur) => FilterEffect::GaussianBlur(*blur),
+            Self::DropShadow(shadow) => FilterEffect::DropShadow(shadow.clone()),
+            Self::ColorMatrix(matrix) => FilterEffect::ColorMatrix(matrix.clone()),
+            Self::Offset(offset) => FilterEffect::Offset(*offset),
+            Self::Composite(operator) => FilterEffect::Composite(*operator),
+            Self::Blend(mode) => FilterEffect::Blend(*mode),
+            Self::Morphology(morphology) => FilterEffect::Morphology(*morphology),
+            Self::ConvolveMatrix(kernel) => FilterEffect::ConvolveMatrix(kernel.clone()),
+            Self::Turbulence(turbulence) => FilterEffect::Turbulence(*turbulence),
+            Self::DisplacementMap(map) => FilterEffect::DisplacementMap(*map),
+            Self::ComponentTransfer(transfer) => FilterEffect::ComponentTransfer(transfer.clone()),
+            Self::Image(image) => FilterEffect::Image(f(image)?),
+            Self::Tile => FilterEffect::Tile,
+            Self::DiffuseLighting(lighting) => FilterEffect::DiffuseLighting(lighting.clone()),
+            Self::SpecularLighting(lighting) => FilterEffect::SpecularLighting(lighting.clone()),
+        })
+    }
+
     /// Gaussian blur effect.
     ///
     /// Applies a Gaussian blur to the input image. Larger radius values

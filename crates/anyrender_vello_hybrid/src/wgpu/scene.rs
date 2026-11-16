@@ -488,7 +488,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
@@ -505,6 +505,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
@@ -515,6 +517,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             self.scene
                 .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn fill_shape(
@@ -524,7 +527,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
         shape: PaintShape<'_>,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
@@ -541,6 +544,8 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         }
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
@@ -551,6 +556,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
             self.scene
                 .fill_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn draw_glyphs<'a, 's: 'a>(
@@ -566,7 +572,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph> + Clone,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -593,8 +599,11 @@ impl PaintScene for VelloHybridScenePainter<'_> {
         self.scene.reset_paint_transform();
         self.scene.set_transform(transform);
 
-        let glyph_caching =
-            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
+        let glyph_caching = anti_aliasing.is_enabled()
+            && self.glyph_caching
+            && supports_glyph_caching(transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
         match style {
@@ -632,6 +641,7 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                     }));
             }
         }
+        self.scene.set_aliasing_threshold(None);
     }
     fn draw_box_shadow(
         &mut self,

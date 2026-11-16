@@ -5,22 +5,28 @@
 //! The serialized scene is a zip archive containing:
 //!
 //! - `resources.json` - Metadata mapping resource files to IDs
-//! - `draw_commands.json` - Serialized draw commands referencing resources by ID
+//! - `draw_commands.json` - Serialized draw commands referencing resources by ID. The scene
+//!   drawn by an `feImage` filter primitive is stored inline in its filter graph node.
 //! - `images/<sha256_hash>.png` - Image files (PNG format)
 //! - `fonts/<sha256_hash>.{woff2,ttf}` - Font data files (optionally WOFF2-compressed and subsetted)
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
+use std::sync::Arc;
 
-use anyrender::Paint;
+use anyrender::filters::FilterImage;
+use anyrender::{Filter, Paint};
 use image::{ImageBuffer, ImageEncoder, RgbaImage};
 use peniko::{Blob, Color, FontData, Gradient, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::convert::Infallible;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
-use anyrender::recording::{FillCommand, GlyphRunCommand, RenderCommand, Scene, StrokeCommand};
+use anyrender::recording::{
+    FillCommand, GlyphRunCommand, LayerCommand, RenderCommand, Scene, StrokeCommand,
+};
 
 mod font_writer;
 mod json_formatter;
@@ -28,10 +34,21 @@ mod json_formatter;
 use font_writer::FontWriter;
 
 /// A render command with resources replaced by IDs.
-pub type SerializableRenderCommand = RenderCommand<FontResourceId, SerializableBrush>;
+pub type SerializableRenderCommand =
+    RenderCommand<FontResourceId, SerializableBrush, SerializableFilterImage>;
+
+/// A filter graph with its [`FilterImage`] scenes' resources replaced by IDs.
+pub type SerializableFilter = Filter<SerializableFilterImage>;
 
 // /// A brush with images replaced by IDs.
 // pub type SerializableBrush = Paint<ImageBrush<ResourceId>>;
+
+/// The scene of a [`FilterImage`], with resources replaced by IDs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SerializableFilterImage {
+    pub tolerance: f64,
+    pub commands: Vec<SerializableRenderCommand>,
+}
 
 /// A brush with images replaced by IDs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,7 +99,10 @@ pub struct ResourceManifest {
 
 impl ResourceManifest {
     /// Current archive format version. Bump this when the format changes.
-    pub const CURRENT_VERSION: u32 = 2;
+    pub const CURRENT_VERSION: u32 = 3;
+
+    /// The oldest archive format version that can still be read.
+    pub const MIN_SUPPORTED_VERSION: u32 = 2;
 
     pub fn new(tolerance: f64) -> Self {
         Self {
@@ -157,6 +177,23 @@ impl ResourceCollector {
         }
     }
 
+    fn convert_commands(&mut self, commands: &[RenderCommand]) -> Vec<SerializableRenderCommand> {
+        commands
+            .iter()
+            .filter_map(|cmd| self.convert_command(cmd))
+            .collect()
+    }
+
+    fn convert_filter(&mut self, filter: &Option<Arc<Filter>>) -> Option<Arc<SerializableFilter>> {
+        let Ok(filter) = filter.as_ref()?.try_map_images(|image| {
+            Ok::<_, Infallible>(SerializableFilterImage {
+                tolerance: image.scene.tolerance,
+                commands: self.convert_commands(&image.scene.commands),
+            })
+        });
+        Some(Arc::new(filter))
+    }
+
     /// Register an image and return its [`ResourceId`].
     fn register_image(&mut self, image: &ImageData) -> ResourceId {
         let blob_id = image.data.id();
@@ -192,7 +229,15 @@ impl ResourceCollector {
     /// Convert a [`RenderCommand`] to a [`SerializableRenderCommand`].
     fn convert_command(&mut self, cmd: &RenderCommand) -> Option<SerializableRenderCommand> {
         Some(match cmd {
-            RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(layer.clone()),
+            RenderCommand::PushLayer(layer) => SerializableRenderCommand::PushLayer(LayerCommand {
+                filter: self.convert_filter(&layer.filter),
+                backdrop_filter: self.convert_filter(&layer.backdrop_filter),
+                fill: layer.fill,
+                blend: layer.blend,
+                alpha: layer.alpha,
+                transform: layer.transform,
+                clip: layer.clip.clone(),
+            }),
             RenderCommand::PushClipLayer(clip) => {
                 SerializableRenderCommand::PushClipLayer(clip.clone())
             }
@@ -256,6 +301,34 @@ impl ResourceReconstructor {
         Self { fonts, images }
     }
 
+    fn convert_commands(
+        &self,
+        commands: &[SerializableRenderCommand],
+    ) -> Result<Vec<RenderCommand>, ArchiveError> {
+        commands
+            .iter()
+            .map(|cmd| self.convert_command(cmd))
+            .collect()
+    }
+
+    fn convert_filter(
+        &self,
+        filter: &Option<Arc<SerializableFilter>>,
+    ) -> Result<Option<Arc<Filter>>, ArchiveError> {
+        let Some(filter) = filter else {
+            return Ok(None);
+        };
+        let filter = filter.try_map_images(|image| {
+            Ok::<_, ArchiveError>(FilterImage {
+                scene: Scene {
+                    tolerance: image.tolerance,
+                    commands: self.convert_commands(&image.commands)?,
+                },
+            })
+        })?;
+        Ok(Some(Arc::new(filter)))
+    }
+
     fn get_font(&self, id: ResourceId) -> Result<&FontData, ArchiveError> {
         self.fonts
             .get(id.0)
@@ -289,7 +362,15 @@ impl ResourceReconstructor {
         cmd: &SerializableRenderCommand,
     ) -> Result<RenderCommand, ArchiveError> {
         Ok(match cmd {
-            SerializableRenderCommand::PushLayer(layer) => RenderCommand::PushLayer(layer.clone()),
+            SerializableRenderCommand::PushLayer(layer) => RenderCommand::PushLayer(LayerCommand {
+                filter: self.convert_filter(&layer.filter)?,
+                backdrop_filter: self.convert_filter(&layer.backdrop_filter)?,
+                fill: layer.fill,
+                blend: layer.blend,
+                alpha: layer.alpha,
+                transform: layer.transform,
+                clip: layer.clip.clone(),
+            }),
             SerializableRenderCommand::PushClipLayer(clip) => {
                 RenderCommand::PushClipLayer(clip.clone())
             }
@@ -415,11 +496,7 @@ impl SceneArchive {
         let mut manifest = ResourceManifest::new(scene.tolerance);
         let mut collector = ResourceCollector::new(config.clone());
 
-        let commands: Vec<_> = scene
-            .commands
-            .iter()
-            .filter_map(|cmd| collector.convert_command(cmd))
-            .collect();
+        let commands = collector.convert_commands(&scene.commands);
 
         // Normalize all images to RGBA8
         let images: Vec<ImageData> = collector
@@ -521,15 +598,9 @@ impl SceneArchive {
 
         let reconstructor = ResourceReconstructor::new(fonts_ttf, images);
 
-        let commands: Result<Vec<_>, _> = self
-            .commands
-            .iter()
-            .map(|cmd| reconstructor.convert_command(cmd))
-            .collect();
-
         Ok(Scene {
             tolerance: self.manifest.tolerance,
-            commands: commands?,
+            commands: reconstructor.convert_commands(&self.commands)?,
         })
     }
 
@@ -584,7 +655,9 @@ impl SceneArchive {
         };
 
         // Check version
-        if manifest.version != ResourceManifest::CURRENT_VERSION {
+        if !(ResourceManifest::MIN_SUPPORTED_VERSION..=ResourceManifest::CURRENT_VERSION)
+            .contains(&manifest.version)
+        {
             return Err(ArchiveError::UnsupportedVersion(manifest.version));
         }
 

@@ -1234,7 +1234,22 @@ fn convert_filter_effect(
         // These require resources or bounds that aren't available at this layer, so they are
         // not yet implemented.
         // - `Image` needs to resolve an external image by id from a resource registry.
-        FilterEffect::Image(_external_image_source) => None,
+        FilterEffect::Image(image) => {
+            let bounds = sk_kurbo::rect_from(node.subregion);
+            let mut recorder = skia_safe::PictureRecorder::new();
+            let mut cache = SkiaSceneCache::new();
+            SkiaScenePainter::new(recorder.begin_recording(bounds, false), &mut cache)
+                .append_scene(image.scene.clone(), kurbo::Affine::IDENTITY);
+            let picture = recorder.finish_recording_as_picture(None);
+            let image = picture.and_then(|picture| image_filters::picture(picture, None));
+            // The content is drawn in sRGB.
+            match color_space {
+                FilterColorSpace::Srgb => image,
+                FilterColorSpace::LinearRgb => {
+                    image_filters::color_filter(color_filters::srgb_to_linear_gamma(), image, None)
+                }
+            }
+        }
         FilterEffect::Tile => {
             let input_node = match node.inputs.primary {
                 Some(FilterInput::Result(input_id)) => Some(input_id.0),
