@@ -113,13 +113,20 @@ impl GlyphOriginSnap {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ClipKind {
+    Rect,
+    /// An isolated clip layer.
+    Path,
+}
+
 enum LayerKind {
     Layer,
-    Clip,
+    Clip(ClipKind),
     /// A filter layer whose input and output are clipped to its filter region.
     FilterRegionLayer,
-    /// An unclipped `DestIn` layer with a clip (`Layer` or `Clip`) inside it.
-    Mask(Box<LayerKind>),
+    /// An unclipped `DestIn` layer with a clip inside it.
+    Mask(ClipKind),
 }
 
 pub struct VelloCpuScenePainter {
@@ -160,32 +167,39 @@ impl VelloCpuScenePainter {
         self.glyph_caching = enabled;
     }
 
-    fn push_clip(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) -> LayerKind {
+    fn push_clip(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) -> ClipKind {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
         if let Some(rect) = clip.as_rect() {
             self.render_ctx.push_clip_rect(&rect);
-            LayerKind::Clip
+            ClipKind::Rect
         } else {
             // An isolated layer (rather than `push_clip_path`) so that overlapping draws are
             // anti-aliased against the clip edge once, instead of once per draw.
             self.render_ctx
                 .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
-            LayerKind::Layer
+            ClipKind::Path
+        }
+    }
+
+    fn pop_clip(&mut self, kind: ClipKind) {
+        match kind {
+            ClipKind::Rect => self.render_ctx.pop_clip(),
+            ClipKind::Path => self.render_ctx.pop_layer(),
         }
     }
 
     fn pop(&mut self, kind: LayerKind) {
         match kind {
             LayerKind::Layer => self.render_ctx.pop_layer(),
-            LayerKind::Clip => self.render_ctx.pop_clip(),
+            LayerKind::Clip(clip) => self.pop_clip(clip),
             LayerKind::FilterRegionLayer => {
                 self.render_ctx.pop_clip();
                 self.render_ctx.pop_layer();
                 self.render_ctx.pop_clip();
             }
             LayerKind::Mask(clip) => {
-                self.pop(*clip);
+                self.pop_clip(clip);
                 self.render_ctx.pop_layer();
             }
         }
@@ -373,12 +387,12 @@ impl PaintScene for VelloCpuScenePainter {
             None,
         );
         let clip = self.push_clip(fill, transform, clip);
-        self.layer_stack.push(LayerKind::Mask(Box::new(clip)));
+        self.layer_stack.push(LayerKind::Mask(clip));
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
         let clip = self.push_clip(fill, transform, clip);
-        self.layer_stack.push(clip);
+        self.layer_stack.push(LayerKind::Clip(clip));
     }
 
     fn pop_layer(&mut self) {
