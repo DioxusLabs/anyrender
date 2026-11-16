@@ -318,7 +318,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -336,11 +336,14 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         self.scene.set_transform(transform);
         self.scene.set_stroke(style.clone());
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
         self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn fill<'a>(
@@ -350,7 +353,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -368,6 +371,8 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(style);
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
         self.scene
@@ -377,6 +382,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         } else {
             self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
         }
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn draw_glyphs<'a, 's2: 'a>(
@@ -392,7 +398,7 @@ impl PaintScene for WebGlScenePainter<'_> {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph> + Clone,
-        _anti_aliasing: AntiAliasing,
+        anti_aliasing: AntiAliasing,
     ) {
         let paint: PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
@@ -418,8 +424,11 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene.set_transform(transform);
 
-        let glyph_caching =
-            self.glyph_caching && supports_glyph_caching(transform, glyph_transform);
+        self.scene
+            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
+        let glyph_caching = anti_aliasing.is_enabled()
+            && self.glyph_caching
+            && supports_glyph_caching(transform, glyph_transform);
         let style: StyleRef<'a> = style.into();
         match style {
             StyleRef::Fill(fill) => {
@@ -456,6 +465,7 @@ impl PaintScene for WebGlScenePainter<'_> {
                     }));
             }
         }
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn draw_box_shadow(
