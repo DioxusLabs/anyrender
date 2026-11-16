@@ -231,6 +231,9 @@ fn single_clip_shape(clip: &usvg::ClipPath) -> Option<(&usvg::Path, Fill, Affine
     }
     let (path, transform) =
         find_single_clip_shape(clip.root(), util::to_affine(&clip.transform()))?;
+    if !anti_aliasing(path).is_enabled() {
+        return None;
+    }
     Some((path, clip_fill_rule(path), transform))
 }
 
