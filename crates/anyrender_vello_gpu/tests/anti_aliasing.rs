@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyrender::{AntiAliasing, PaintScene};
-use anyrender_vello_hybrid::{ExternalTextures, ImageCache, ImageManager, VelloHybridScenePainter};
+use anyrender_vello_gpu::{ExternalTextures, ImageCache, ImageManager, VelloHybridScenePainter};
 use kurbo::{Affine, Circle, Stroke, Vec2};
 use peniko::{Blob, Color, Fill, FontData};
 use vello_gpu::{RenderOptions, RenderSize, RenderTarget, RenderTargetConfig, Renderer, Scene};

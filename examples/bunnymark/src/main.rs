@@ -2,7 +2,7 @@ use anyrender::{AntiAliasing, PaintScene, WindowRenderer};
 use anyrender_skia::{SkiaImageRenderer, SkiaWindowRenderer};
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
-use anyrender_vello_hybrid::VelloHybridWindowRenderer;
+use anyrender_vello_gpu::VelloHybridWindowRenderer;
 use bunny::BunnyManager;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the crate to `anyrender_vello_gpu`.
+
 ### Added
 
 - `Paint::Pattern` support, drawing the tile's recorded scene at each repeat.
@@ -34,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated to AnyRender 0.14 and explicit clip fill rules (#105).
-- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30. The AnyRender crate name remains `anyrender_vello_hybrid` (#109).
+- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30 (#109).
 
 ### Fixed
 

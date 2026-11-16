@@ -28,7 +28,7 @@ The core [anyrender](https://docs.rs/anyrender) crate is a lightweight type/trai
 
 Currently existing backends are:
 
-- [anyrender_vello_hybrid](https://docs.rs/anyrender_vello_hybrid) which draws using [vello_gpu](https://docs.rs/vello_gpu) (formerly `vello_hybrid`)
+- [anyrender_vello_gpu](https://docs.rs/anyrender_vello_gpu) which draws using [vello_gpu](https://docs.rs/vello_gpu) (formerly `vello_hybrid`)
 - [anyrender_vello_cpu](https://docs.rs/anyrender_vello_cpu) which draws using [vello_cpu](https://docs.rs/vello_cpu)
 - [anyrender_vello](https://docs.rs/anyrender_vello) which draws using [vello](https://docs.rs/vello)
 - [anyrender_skia](https://crates.io/crates/anyrender_skia) which draws using Skia (via the [skia-safe](https://github.com/rust-skia/rust-skia) crate)
@@ -75,7 +75,7 @@ crates in your project.
     <tr><th colspan="10" align=left>Vello GPU / Hybrid</th></tr>
     <tr><td><code>vello_hybrid</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>—</td></tr>
     <tr><td><code>vello_gpu</code></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.3</td></tr>
-    <tr><td><code>anyrender_vello_hybrid</code></td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.4</td><td>0.5</td><td>0.7–0.8</td><td>0.9</td><td>0.10</td><td>0.11</td></tr>
+    <tr><td><code>anyrender_vello_gpu</code></td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.4</td><td>0.5</td><td>0.7–0.8</td><td>0.9</td><td>0.10</td><td>0.11</td></tr>
     <tr><th colspan="10" align=left>Vello CPU</th></tr>
     <tr><td><code>vello_cpu</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>0.3</td></tr>
     <tr><td><code>anyrender_vello_cpu</code></td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.14</td><td>0.15</td><td>0.16–0.17</td><td>0.18</td></tr>
@@ -94,7 +94,7 @@ crates in your project.
 1. <a id="fn-vello-git"></a>The 0.7 release line depended on a git revision of Vello, equivalent to Vello 0.7 and sparse strips 0.0.6.
 2. <a id="fn-skia-097"></a>Within the 0.10 line, `anyrender_skia` 0.8.x upgraded `skia-safe` from 0.93 to 0.97.
 
-In the 0.14 line, upstream `vello_hybrid` was renamed to `vello_gpu`. The AnyRender backend remains named `anyrender_vello_hybrid`.
+In the 0.14 line, upstream `vello_hybrid` was renamed to `vello_gpu`. The AnyRender backend is now named `anyrender_vello_gpu`.
 
 ## Minimum supported Rust Version (MSRV)
 

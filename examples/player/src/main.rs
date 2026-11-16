@@ -3,7 +3,7 @@ use anyrender_serialize::SceneArchive;
 use anyrender_skia::SkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
-use anyrender_vello_hybrid::VelloHybridWindowRenderer;
+use anyrender_vello_gpu::VelloHybridWindowRenderer;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
 use std::{path::PathBuf, sync::Arc};

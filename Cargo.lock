@@ -289,7 +289,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyrender_vello_hybrid"
+name = "anyrender_vello_gpu"
 version = "0.11.0"
 dependencies = [
  "anyrender",
@@ -522,7 +522,7 @@ dependencies = [
  "anyrender_skia",
  "anyrender_vello",
  "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
+ "anyrender_vello_gpu",
  "fastrand",
  "image",
  "kurbo",
@@ -2912,7 +2912,7 @@ dependencies = [
  "anyrender_skia",
  "anyrender_vello",
  "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
+ "anyrender_vello_gpu",
  "kurbo",
  "peniko",
  "winit",
