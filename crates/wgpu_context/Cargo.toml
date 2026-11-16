@@ -11,6 +11,7 @@ edition.workspace = true
 [dependencies]
 wgpu = { workspace = true }
 futures-intrusive = { workspace = true }
+log = { workspace = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGColorSpace"] }

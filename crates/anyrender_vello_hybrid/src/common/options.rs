@@ -1,6 +1,7 @@
 use peniko::Color;
 use vello_gpu::RenderSettings;
 use wgpu::{Features, Limits};
+use wgpu_context::DeviceCreator;
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -22,6 +23,9 @@ pub struct VelloHybridRendererOptions {
     ///
     /// Note: Vello considers atlas-backed glyph caching experimental.
     pub glyph_caching: bool,
+    /// Creates the wgpu device in place of `Adapter::request_device`, e.g. to enable
+    /// hardware video decoding. See [`DeviceCreator`].
+    pub device_creator: Option<DeviceCreator>,
 }
 
 impl Default for VelloHybridRendererOptions {
@@ -34,6 +38,7 @@ impl Default for VelloHybridRendererOptions {
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
             glyph_caching: false,
+            device_creator: None,
         }
     }
 }
@@ -91,6 +96,13 @@ impl VelloHybridRendererOptions {
     pub fn glyph_caching(self, glyph_caching: bool) -> Self {
         Self {
             glyph_caching,
+            ..self
+        }
+    }
+
+    pub fn device_creator(self, device_creator: DeviceCreator) -> Self {
+        Self {
+            device_creator: Some(device_creator),
             ..self
         }
     }
