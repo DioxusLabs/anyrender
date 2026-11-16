@@ -4,7 +4,7 @@ use wgpu::{Features, Limits};
 
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct VelloHybridRendererOptions {
+pub struct VelloGpuRendererOptions {
     pub features: Option<Features>,
     pub limits: Option<Limits>,
     pub render_settings: RenderSettings,
@@ -24,7 +24,7 @@ pub struct VelloHybridRendererOptions {
     pub glyph_caching: bool,
 }
 
-impl Default for VelloHybridRendererOptions {
+impl Default for VelloGpuRendererOptions {
     fn default() -> Self {
         Self {
             features: None,
@@ -38,7 +38,7 @@ impl Default for VelloHybridRendererOptions {
     }
 }
 
-impl VelloHybridRendererOptions {
+impl VelloGpuRendererOptions {
     pub fn new() -> Self {
         // Within default of RenderSettings there are calls to non const methods so no const for new
         Self::default()
@@ -96,7 +96,7 @@ impl VelloHybridRendererOptions {
     }
 }
 
-impl From<anyrender::RendererConfig> for VelloHybridRendererOptions {
+impl From<anyrender::RendererConfig> for VelloGpuRendererOptions {
     fn from(config: anyrender::RendererConfig) -> Self {
         Self {
             base_color: config.base_color.unwrap_or(Color::WHITE),

@@ -1,8 +1,8 @@
 [package]
-name = "anyrender_vello_hybrid"
+name = "anyrender_vello_gpu"
 description = "vello_gpu (formerly vello_hybrid) backend for anyrender"
 version = "0.11.0"
-documentation = "https://docs.rs/anyrender_vello_hybrid"
+documentation = "https://docs.rs/anyrender_vello_gpu"
 homepage.workspace = true
 repository.workspace = true
 license.workspace = true

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the crate to `anyrender_vello_gpu` and its public types from
+  `VelloHybrid*` to `VelloGpu*` (`RendererOptions`, `ScenePainter`,
+  `WindowRenderer`, and `WebGlWindowRenderer`).
+
 ### Added
 
 - `Paint::Pattern` support, drawing the tile's recorded scene at each repeat.
@@ -17,24 +23,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
-- Free hybrid renderer images when their source image data is dropped.
-- Evict unused hybrid renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
+- Free GPU renderer images when their source image data is dropped.
+- Evict unused GPU renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
 
 ### Added
 
 - Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
-  `VelloHybridRendererOptions::glyph_caching` / `VelloHybridScenePainter::with_glyph_caching` / `WebGlScenePainter::with_glyph_caching`.
+  `VelloGpuRendererOptions::glyph_caching` / `VelloGpuScenePainter::with_glyph_caching` / `WebGlScenePainter::with_glyph_caching`.
 
 ## [0.11.0] - 2026-10-03
 
 ### Added
 
-- Configurable `desired_maximum_frame_latency` on `VelloHybridRendererOptions`, defaulting to 1 (#93).
+- Configurable `desired_maximum_frame_latency` on `VelloGpuRendererOptions`, defaulting to 1 (#93).
 
 ### Changed
 
 - Updated to AnyRender 0.14 and explicit clip fill rules (#105).
-- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30. The AnyRender crate name remains `anyrender_vello_hybrid` (#109).
+- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30 (#109).
 
 ### Fixed
 
@@ -52,11 +58,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Configurable composite alpha mode and base color via `VelloHybridRendererOptions`, with builder-pattern methods (#71).
+- Configurable composite alpha mode and base color via `VelloGpuRendererOptions`, with builder-pattern methods (#71).
 
 ### Changed
 
-- Marked `VelloHybridRendererOptions` as `#[non_exhaustive]` (#71).
+- Marked `VelloGpuRendererOptions` as `#[non_exhaustive]` (#71).
 
 ## [0.8.0] - 2026-06-23
 

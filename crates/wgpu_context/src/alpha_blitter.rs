@@ -9,7 +9,7 @@
 //! - A [`wgpu::CompositeAlphaMode::PreMultiplied`] surface expects colour that
 //!   has *already* been multiplied by alpha.
 //!
-//! Renderers differ: Vello Hybrid emits premultiplied alpha, whereas Vello
+//! Renderers differ: Vello GPU emits premultiplied alpha, whereas Vello
 //! Classic emits straight alpha. Feeding the wrong representation to a surface
 //! either darkens (premultiplied into PostMultiplied) or brightens (straight
 //! into PreMultiplied) partially-transparent pixels. This blitter applies the

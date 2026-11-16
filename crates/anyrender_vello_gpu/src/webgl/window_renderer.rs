@@ -14,7 +14,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
 
 use super::scene::{WebGlImageManager, WebGlScenePainter};
-use crate::common::{ImageCache, VelloHybridRendererOptions};
+use crate::common::{ImageCache, VelloGpuRendererOptions};
 
 struct ActiveRenderState {
     renderer: WebGlRenderer,
@@ -35,7 +35,7 @@ enum RenderState {
 
 /// A [`WindowRenderer`] that draws to the window's `<canvas>` using Vello GPU's WebGL2 backend.
 ///
-/// Unlike [`VelloHybridWindowRenderer`](crate::VelloHybridWindowRenderer), this does not need
+/// Unlike [`VelloGpuWindowRenderer`](crate::VelloGpuWindowRenderer), this does not need
 /// WebGPU, so it works in any browser that supports WebGL2.
 ///
 /// `resume` only starts shader compilation and never calls `on_ready`. The renderer stays
@@ -44,25 +44,25 @@ enum RenderState {
 /// `true`, so the browser's main thread isn't blocked where `KHR_parallel_shader_compile` is
 /// available.
 ///
-/// The wgpu-specific fields of [`VelloHybridRendererOptions`] (`features`, `limits`,
+/// The wgpu-specific fields of [`VelloGpuRendererOptions`] (`features`, `limits`,
 /// `composite_alpha_mode` and `desired_maximum_frame_latency`) are ignored.
 ///
 /// Custom resources and WebGL context loss are not yet supported.
-pub struct VelloHybridWebGlWindowRenderer {
+pub struct VelloGpuWebGlWindowRenderer {
     render_state: RenderState,
     scene: Scene,
-    config: VelloHybridRendererOptions,
+    config: VelloGpuRendererOptions,
     cached_images: ImageCache,
     texture_bindings: WebGlTextureBindings,
 }
 
-impl VelloHybridWebGlWindowRenderer {
+impl VelloGpuWebGlWindowRenderer {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self::with_options(VelloHybridRendererOptions::default())
+        Self::with_options(VelloGpuRendererOptions::default())
     }
 
-    pub fn with_options(config: impl Into<VelloHybridRendererOptions>) -> Self {
+    pub fn with_options(config: impl Into<VelloGpuRendererOptions>) -> Self {
         let config = config.into();
         Self {
             render_state: RenderState::Suspended,
@@ -98,7 +98,7 @@ fn canvas_from_window_handle(window: &dyn WindowHandle) -> HtmlCanvasElement {
                 .expect("No canvas matches the window handle")
                 .unchecked_into()
         }
-        _ => panic!("VelloHybridWebGlWindowRenderer requires a web canvas window handle"),
+        _ => panic!("VelloGpuWebGlWindowRenderer requires a web canvas window handle"),
     }
 }
 
@@ -112,9 +112,9 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, width: u32, height: u32) {
     }
 }
 
-impl RenderContext for VelloHybridWebGlWindowRenderer {}
+impl RenderContext for VelloGpuWebGlWindowRenderer {}
 
-impl WindowRenderer for VelloHybridWebGlWindowRenderer {
+impl WindowRenderer for VelloGpuWebGlWindowRenderer {
     type ScenePainter<'a>
         = WebGlScenePainter<'a>
     where
@@ -270,7 +270,7 @@ impl WindowRenderer for VelloHybridWebGlWindowRenderer {
         .finish_frame()
         .expect("failed to evict images");
         timer.record_time("render");
-        timer.print_times("vello_hybrid (webgl): ");
+        timer.print_times("vello_gpu (webgl): ");
 
         self.scene.reset();
     }
