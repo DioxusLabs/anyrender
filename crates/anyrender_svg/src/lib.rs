@@ -3,9 +3,7 @@
 
 //! Render an SVG into any impl of [`anyrender::PaintScene`].
 //!
-//! Group backgrounds (`enable-background` and the `BackgroundImage`/`BackgroundAlpha` filter inputs)
-//! are not supported, as usvg does not support them. Luminance masks are rendered as alpha masks by
-//! backends without luminance mask support.
+//! Luminance masks are rendered as alpha masks by backends without luminance mask support.
 //!
 //! Filter effects are translated into [`anyrender::Filter`] graphs attached to layers.
 //! Whether (and how faithfully) they are applied depends on the rendering backend.
