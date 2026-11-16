@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated to AnyRender 0.15, CSS box shadows and explicit antialiasing parameters (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
 - Upgraded `vello` to 0.12 ([#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+- Upgraded `pollster` to 1.0.
 
 ## [0.15.0] - 2026-10-03
 

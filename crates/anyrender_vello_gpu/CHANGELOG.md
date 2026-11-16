@@ -25,6 +25,7 @@ Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
   `WindowRenderer`, and `WebGlWindowRenderer`).
 - Updated to AnyRender 0.15, CSS box shadows, explicit antialiasing and required filter regions (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
 - Upgraded `vello_gpu`/`vello_common` to 0.4 and `glifo` to 0.5 with PNG glyph support ([#145](https://github.com/DioxusLabs/anyrender/pull/145), [#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+- Upgraded `pollster` to 1.0.
 - Use rectangle fast paths for fills and clips ([#114](https://github.com/DioxusLabs/anyrender/pull/114)).
 - The crate and public-type rename is breaking: update dependency names, imports and type names. Version 0.12.0 continues the series from `anyrender_vello_hybrid` 0.11.0 ([#209](https://github.com/DioxusLabs/anyrender/pull/209)).
 
