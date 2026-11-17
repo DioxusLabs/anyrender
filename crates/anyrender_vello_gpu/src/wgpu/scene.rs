@@ -107,7 +107,7 @@ impl GlyphOriginSnap {
     }
 }
 
-fn anyrender_paint_to_vello_hybrid_paint<'a>(
+fn anyrender_paint_to_vello_gpu_paint<'a>(
     paint: PaintRef<'a>,
     image_manager: &mut ImageManager<'_>,
 ) -> PaintType {
@@ -287,7 +287,7 @@ impl<'a> ImageManager<'a> {
     }
 }
 
-pub struct VelloHybridScenePainter<'s> {
+pub struct VelloGpuScenePainter<'s> {
     pub(crate) scene: &'s mut vello_gpu::Scene,
     pub(crate) layer_stack: Vec<LayerKind>,
     pub(crate) image_manager: ImageManager<'s>,
@@ -295,7 +295,7 @@ pub struct VelloHybridScenePainter<'s> {
     pub(crate) glyph_caching: bool,
 }
 
-impl VelloHybridScenePainter<'_> {
+impl VelloGpuScenePainter<'_> {
     fn cull_rect(&self) -> Option<Rect> {
         Some(Rect::new(
             0.0,
@@ -309,8 +309,8 @@ impl VelloHybridScenePainter<'_> {
         scene: &'s mut vello_gpu::Scene,
         image_manager: ImageManager<'s>,
         device_handle: &'s DeviceHandle,
-    ) -> VelloHybridScenePainter<'s> {
-        VelloHybridScenePainter {
+    ) -> VelloGpuScenePainter<'s> {
+        VelloGpuScenePainter {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
@@ -330,11 +330,11 @@ impl VelloHybridScenePainter<'_> {
     }
 
     fn convert_paint(&mut self, paint: PaintRef<'_>) -> PaintType {
-        anyrender_paint_to_vello_hybrid_paint(paint, &mut self.image_manager)
+        anyrender_paint_to_vello_gpu_paint(paint, &mut self.image_manager)
     }
 }
 
-impl RenderContext for VelloHybridScenePainter<'_> {
+impl RenderContext for VelloGpuScenePainter<'_> {
     fn try_register_custom_resource(
         &mut self,
         resource: Box<dyn std::any::Any>,
@@ -373,7 +373,7 @@ impl RenderContext for VelloHybridScenePainter<'_> {
     }
 }
 
-impl PaintScene for VelloHybridScenePainter<'_> {
+impl PaintScene for VelloGpuScenePainter<'_> {
     fn reset(&mut self) {
         self.scene.reset();
     }

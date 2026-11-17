@@ -5,25 +5,37 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
+
+## [0.12.0] - 2026-11-16
 
 ### Added
 
 - `Paint::Pattern` support, drawing the tile's recorded scene at each repeat.
 - `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
 - Filter layers are clipped to `Filter::region`.
+- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
+  `VelloGpuRendererOptions::glyph_caching` / `VelloGpuScenePainter::with_glyph_caching` / `WebGlScenePainter::with_glyph_caching`.
+- WebGL window renderer ([#146](https://github.com/DioxusLabs/anyrender/pull/146)).
+
+### Changed
+
+- Renamed the crate to `anyrender_vello_gpu` and its public types from
+  `VelloHybrid*` to `VelloGpu*` (`RendererOptions`, `ScenePainter`,
+  `WindowRenderer`, and `WebGlWindowRenderer`).
+- Updated to AnyRender 0.15, CSS box shadows, explicit antialiasing and required filter regions (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Upgraded `vello_gpu`/`vello_common` to 0.4 and `glifo` to 0.5 with PNG glyph support ([#145](https://github.com/DioxusLabs/anyrender/pull/145), [#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+- Use rectangle fast paths for fills and clips ([#114](https://github.com/DioxusLabs/anyrender/pull/114)).
+- The crate and public-type rename is breaking: update dependency names, imports and type names. Version 0.12.0 continues the series from `anyrender_vello_hybrid` 0.11.0 ([#209](https://github.com/DioxusLabs/anyrender/pull/209)).
 
 ### Fixed
 
+- Match platform glyph-origin snapping on Apple and other platforms ([#137](https://github.com/DioxusLabs/anyrender/pull/137), [#141](https://github.com/DioxusLabs/anyrender/pull/141), [#144](https://github.com/DioxusLabs/anyrender/pull/144)).
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
-- Free hybrid renderer images when their source image data is dropped.
-- Evict unused hybrid renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
-
-### Added
-
-- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
-  `VelloHybridRendererOptions::glyph_caching` / `VelloHybridScenePainter::with_glyph_caching` / `WebGlScenePainter::with_glyph_caching`.
+- Free GPU renderer images when their source image data is dropped.
+- Evict unused GPU renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
+- Honour antialiasing on fills, strokes and glyphs ([#206](https://github.com/DioxusLabs/anyrender/pull/206)).
 
 ## [0.11.0] - 2026-10-03
 

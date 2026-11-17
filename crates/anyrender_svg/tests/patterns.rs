@@ -128,7 +128,7 @@ fn pattern_stroke_skia() {
     check_stroke::<SkiaImageRenderer>();
 }
 
-/// The generic tile-by-tile fallback, which vello and vello_hybrid use.
+/// The generic tile-by-tile fallback, which vello and vello_gpu use.
 #[test]
 fn pattern_fill_fallback_tiles() {
     use anyrender::{PaintScene, Pattern, recording::Scene};
@@ -316,7 +316,7 @@ fn pattern_glyphs_skia() {
     check_glyphs::<SkiaImageRenderer>(|s, p, f| draw_patterned_glyphs(s, p, f));
 }
 
-/// The generic glyph fallback, which vello and vello_hybrid use.
+/// The generic glyph fallback, which vello and vello_gpu use.
 #[test]
 fn pattern_glyphs_fallback_tiles() {
     check_glyphs::<VelloCpuImageRenderer>(|scene, pattern, font| {
