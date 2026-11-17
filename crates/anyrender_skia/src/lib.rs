@@ -4,6 +4,8 @@ mod window_renderer;
 
 // Backends
 mod cache;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+mod ct_collection;
 #[cfg(windows)]
 mod d3d;
 #[cfg(any(target_os = "macos", target_os = "ios"))]

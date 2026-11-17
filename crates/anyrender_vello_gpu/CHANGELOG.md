@@ -1,0 +1,167 @@
+# Changelog
+
+All notable changes to this crate are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
+
+## [0.12.0] - 2026-11-16
+
+### Added
+
+- `Paint::Pattern` support, drawing the tile's recorded scene at each repeat.
+- `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
+- Filter layers are clipped to `Filter::region`.
+- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
+  `VelloGpuRendererOptions::glyph_caching` / `VelloGpuScenePainter::with_glyph_caching` / `WebGlScenePainter::with_glyph_caching`.
+- WebGL window renderer ([#146](https://github.com/DioxusLabs/anyrender/pull/146)).
+
+### Changed
+
+- Renamed the crate to `anyrender_vello_gpu` and its public types from
+  `VelloHybrid*` to `VelloGpu*` (`RendererOptions`, `ScenePainter`,
+  `WindowRenderer`, and `WebGlWindowRenderer`).
+- Updated to AnyRender 0.15, CSS box shadows, explicit antialiasing and required filter regions (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Upgraded `vello_gpu`/`vello_common` to 0.4 and `glifo` to 0.5 with PNG glyph support ([#145](https://github.com/DioxusLabs/anyrender/pull/145), [#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+- Use rectangle fast paths for fills and clips ([#114](https://github.com/DioxusLabs/anyrender/pull/114)).
+- The crate and public-type rename is breaking: update dependency names, imports and type names. Version 0.12.0 continues the series from `anyrender_vello_hybrid` 0.11.0 ([#209](https://github.com/DioxusLabs/anyrender/pull/209)).
+
+### Fixed
+
+- Match platform glyph-origin snapping on Apple and other platforms ([#137](https://github.com/DioxusLabs/anyrender/pull/137), [#141](https://github.com/DioxusLabs/anyrender/pull/141), [#144](https://github.com/DioxusLabs/anyrender/pull/144)).
+- On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
+  amount again, matching glifo's emboldening, which scales with the transform.
+- Free GPU renderer images when their source image data is dropped.
+- Evict unused GPU renderer images with a 64 MiB LRU budget and invalidate cached image IDs when renderer resources are recreated.
+- Honour antialiasing on fills, strokes and glyphs ([#206](https://github.com/DioxusLabs/anyrender/pull/206)).
+
+## [0.11.0] - 2026-10-03
+
+### Added
+
+- Configurable `desired_maximum_frame_latency` on `VelloHybridRendererOptions`, defaulting to 1 (#93).
+
+### Changed
+
+- Updated to AnyRender 0.14 and explicit clip fill rules (#105).
+- Replaced the upstream `vello_hybrid` dependency with `vello_gpu` 0.3, and upgraded `vello_common` to 0.3, `glifo` to 0.4 and `wgpu` to 30. The AnyRender crate name remains `anyrender_vello_hybrid` (#109).
+
+### Fixed
+
+- Reset the scene when surface acquisition or presentation fails, preventing skipped-frame commands from leaking into subsequent frames (#107).
+- Render external textures through the regular image paint path so clipping, opacity, blending and filters apply (#110).
+- Reset the paint transform before drawing box shadows, including in the WebGL backend (#111).
+
+## [0.10.0] - 2026-08-16
+
+### Changed
+
+- Upgraded `vello_hybrid` to 0.1 (#80).
+
+## [0.9.0] - 2026-07-23
+
+### Added
+
+- Configurable composite alpha mode and base color via `VelloHybridRendererOptions`, with builder-pattern methods (#71).
+
+### Changed
+
+- Marked `VelloHybridRendererOptions` as `#[non_exhaustive]` (#71).
+
+## [0.8.0] - 2026-06-23
+
+### Changed
+
+- Bumped `vello_hybrid` and related backend dependencies ([`e465127`](https://github.com/dioxuslabs/anyrender/commit/e465127)).
+
+## [0.7.0] - 2026-06-04
+
+### Added
+
+- Support for filter effects (#64).
+
+## [0.6.0] - 2026-05-31
+
+### Changed
+
+- Always use a clip path for clips in the WebGL renderer ([`262f36a`](https://github.com/dioxuslabs/anyrender/commit/262f36a)).
+
+## [0.5.2] - 2026-05-25
+
+### Changed
+
+- Use `push_clip_path` for clipping layers ([`324f0b7`](https://github.com/dioxuslabs/anyrender/commit/324f0b7)).
+
+## [0.5.1] - 2026-05-15
+
+### Fixed
+
+- Don't automatically apply a shift to emboldened glyphs ([`0da6d5d`](https://github.com/dioxuslabs/anyrender/commit/0da6d5d)).
+
+## [0.5.0] - 2026-05-15
+
+### Changed
+
+- Upgraded to WGPU v29, Vello 0.9 and Sparse Strips 0.0.8 (#62).
+
+## [0.4.0] - 2026-05-10
+
+### Added
+
+- Render `Context` and resource (e.g. wgpu `Texture`) registration (#58).
+
+### Changed
+
+- Made `WindowRenderer::resume` async (with a callback) for wasm-friendly wgpu initialization (#59).
+
+## [0.3.0] - 2026-03-25
+
+### Added
+
+- WebGL support (#43).
+- Exposed the hybrid image manager (#44).
+
+### Changed
+
+- Upgraded to wgpu v28, Vello v0.8 and Sparse Strips v0.0.7 ([`9864394`](https://github.com/dioxuslabs/anyrender/commit/9864394)).
+
+### Fixed
+
+- Handle transient WGPU `SurfaceError`s without panicking (#46).
+
+## [0.2.2] - 2026-02-04
+
+### Fixed
+
+- Use `Rgba8Unorm` rather than `Bgra8Unorm` on Android (via `wgpu_context`) ([`6167f19`](https://github.com/dioxuslabs/anyrender/commit/6167f19)).
+
+## [0.2.1] - 2026-02-02
+
+### Changed
+
+- Set `Scene` dimensions in the `resume` method ([`0142a74`](https://github.com/dioxuslabs/anyrender/commit/0142a74)).
+- Use `push_clip_layer` ([`7d82dd2`](https://github.com/dioxuslabs/anyrender/commit/7d82dd2)).
+
+### Fixed
+
+- Fixed a `Timeout` crash when getting the surface texture (via `wgpu_context`) (#38).
+
+## [0.2.0] - 2026-01-15
+
+### Changed
+
+- Upgraded to kurbo 0.13, peniko 0.6, wgpu 27, vello 0.7 and vello_cpu/hybrid 0.0.6 (#37).
+
+## [0.1.1] - 2025-10-30
+
+### Added
+
+- `push_clip_layer` support (#30).
+
+## [0.1.0] - 2025-10-17
+
+### Added
+
+- Initial `vello_hybrid` backend for anyrender (#13).

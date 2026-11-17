@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-11-16
+
+### Added
+
+- `Paint::Pattern` support. Each pattern tile is converted once per frame into a `vello::Scene`, which is appended at each repeat.
+- `push_mask_layer` support, using Vello's native luminance mask layers for luminance masks.
+
+### Changed
+
+- Updated to AnyRender 0.15, CSS box shadows and explicit antialiasing parameters (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Upgraded `vello` to 0.12 ([#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+
 ## [0.15.0] - 2026-10-03
 
 ### Added

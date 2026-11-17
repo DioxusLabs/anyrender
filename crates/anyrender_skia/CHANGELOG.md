@@ -5,6 +5,29 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-11-16
+
+### Added
+
+- `Paint::Pattern` support. Each pattern tile is recorded once as an `SkPicture` and painted with a repeating picture shader.
+- `push_mask_layer` support, including luminance masks.
+- Support for `Filter::region`.
+- Fallible backend constructors and `SkiaBackendPreference`; Windows prefers D3D12 with OpenGL fallback (breaking) ([#126](https://github.com/DioxusLabs/anyrender/pull/126), [#127](https://github.com/DioxusLabs/anyrender/pull/127)).
+
+### Changed
+
+- Updated to AnyRender 0.15, including CSS box shadows, explicit antialiasing, required filter regions and recorded-scene filter images (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198), [#176](https://github.com/DioxusLabs/anyrender/pull/176)).
+- Upgraded `skia-safe` to 0.157 ([#124](https://github.com/DioxusLabs/anyrender/pull/124), [#183](https://github.com/DioxusLabs/anyrender/pull/183)).
+- Implemented expanded SVG filter parameters, colour spaces, tiling and lighter compositing ([#168](https://github.com/DioxusLabs/anyrender/pull/168), [#169](https://github.com/DioxusLabs/anyrender/pull/169), [#170](https://github.com/DioxusLabs/anyrender/pull/170), [#171](https://github.com/DioxusLabs/anyrender/pull/171), [#172](https://github.com/DioxusLabs/anyrender/pull/172), [#174](https://github.com/DioxusLabs/anyrender/pull/174), [#186](https://github.com/DioxusLabs/anyrender/pull/186), [#187](https://github.com/DioxusLabs/anyrender/pull/187)).
+- Use zero-copy font and image data; open Apple TTC faces through CoreText without copying ([#125](https://github.com/DioxusLabs/anyrender/pull/125), [#185](https://github.com/DioxusLabs/anyrender/pull/185)).
+- Use platform text contrast/gamma, CoreText smoothing for emboldened glyphs, and sRGB Metal layers ([#134](https://github.com/DioxusLabs/anyrender/pull/134), [#135](https://github.com/DioxusLabs/anyrender/pull/135), [#138](https://github.com/DioxusLabs/anyrender/pull/138)).
+
+### Fixed
+
+- Gradients respect `interpolation_alpha_space`. They were always interpolated premultiplied.
+- Map variable-font coordinates through `avar` and multiply glyph brush alpha rather than replacing it ([#128](https://github.com/DioxusLabs/anyrender/pull/128), [#131](https://github.com/DioxusLabs/anyrender/pull/131)).
+- Keep only alpha for `SourceAlpha` filter inputs and clamp negative diffuse constants to zero ([#203](https://github.com/DioxusLabs/anyrender/pull/203), [#204](https://github.com/DioxusLabs/anyrender/pull/204)).
+
 ## [0.12.0] - 2026-10-03
 
 ### Changed

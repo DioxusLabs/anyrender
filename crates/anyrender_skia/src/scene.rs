@@ -6,13 +6,16 @@ use anyrender::filters::displacement::ColorChannel;
 use anyrender::filters::lighting::{DistantLightSource, LightSource};
 use anyrender::filters::morphology::MorphologyOperator;
 use anyrender::filters::turbulence::TurbulenceType;
-use anyrender::filters::{Filter, FilterEffect, FilterId, FilterInput};
-use anyrender::{PaintScene, RenderContext};
-use peniko::color::AlphaColor;
+use anyrender::filters::{
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterInput, FilterSource,
+};
+use anyrender::{AntiAliasing, PaintScene, RenderContext};
+use peniko::color::{AlphaColor, LinearSrgb, Srgb};
 use skia_safe::{
-    BlendMode as SkBlendMode, BlurStyle, Canvas, Color, ColorSpace, Data, Font, FontArguments,
-    FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap, PaintJoin, PaintStyle,
-    PathEffect, Point, Point3, RRect, Shader, Typeface,
+    BlendMode as SkBlendMode, BlurStyle, Canvas, ClipOp, Color, ColorFilter, ColorSpace, Data,
+    Font, FontArguments, FontHinting, FontMgr, GlyphId, ImageFilter, MaskFilter, Paint, PaintCap,
+    PaintJoin, PaintStyle, PathEffect, Picture, PictureRecorder, Point, Point3, RRect, Shader,
+    TileMode, Typeface,
     canvas::{GlyphPositions, SaveLayerRec},
     font::Edging,
     font_arguments::{VariationPosition, variation_position::Coordinate},
@@ -29,9 +32,13 @@ pub struct SkiaSceneCache {
     dash_intervals: Vec<f32>,
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     extracted_font_data: GenerationalCache<(u64, u32), peniko::FontData>,
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    collection_descriptors:
+        GenerationalCache<u64, Option<crate::ct_collection::CollectionDescriptors>>,
     typeface: GenerationalCache<(u64, u32), Typeface>,
     normalized_typeface: GenerationalCache<NormalizedTypefaceCacheKey, Typeface>,
     image_shader: GenerationalCache<u64, Shader>,
+    pattern_picture: GenerationalCache<u64, Picture>,
     font: GenerationalCache<FontCacheKey, Font>,
     font_mgr: FontMgr,
     glyph_id_buf: Vec<GlyphId>,
@@ -46,9 +53,12 @@ impl SkiaSceneCache {
 
     /// Increment the generation on the caches. Should be called once per frame.
     pub fn next_gen(&mut self) {
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        self.collection_descriptors.next_gen();
         self.typeface.next_gen();
         self.normalized_typeface.next_gen();
         self.image_shader.next_gen();
+        self.pattern_picture.next_gen();
         self.font.next_gen();
     }
 }
@@ -60,9 +70,12 @@ impl Default for SkiaSceneCache {
             dash_intervals: Vec::new(),
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             extracted_font_data: GenerationalCache::new(10),
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            collection_descriptors: GenerationalCache::new(10),
             typeface: GenerationalCache::new(1),
             normalized_typeface: GenerationalCache::new(1),
             image_shader: GenerationalCache::new(1),
+            pattern_picture: GenerationalCache::new(1),
             font: GenerationalCache::new(10),
             font_mgr: FontMgr::new(),
             glyph_id_buf: Default::default(),
@@ -114,15 +127,18 @@ impl SkiaScenePainter<'_> {
     }
 
     fn clip(&self, fill: peniko::Fill, shape: &impl kurbo::Shape) {
+        self.clip_with_op(fill, shape, ClipOp::Intersect);
+    }
+
+    fn clip_with_op(&self, fill: peniko::Fill, shape: &impl kurbo::Shape, op: ClipOp) {
         if let Some(rect) = shape.as_rect() {
-            self.inner.clip_rect(sk_kurbo::rect_from(rect), None, true);
+            self.inner.clip_rect(sk_kurbo::rect_from(rect), op, true);
         } else if let Some(rrect) = shape.as_rounded_rect() {
-            self.inner
-                .clip_rrect(sk_kurbo::rrect_from(rrect), None, true);
+            self.inner.clip_rrect(sk_kurbo::rrect_from(rrect), op, true);
         } else {
             let mut path = sk_kurbo::path_from_shape(shape);
             path.set_fill_type(sk_peniko::path_fill_type_from_fill(fill));
-            self.inner.clip_path(&path, None, true);
+            self.inner.clip_path(&path, op, true);
         }
     }
 
@@ -161,6 +177,25 @@ impl SkiaScenePainter<'_> {
                 self.cache.paint.set_shader(image_shader);
             }
 
+            anyrender::Paint::Pattern(pattern) => {
+                // The picture is recorded by `record_pattern` before the paint is reset.
+                if let Some(picture) = self.cache.pattern_picture.hit(&pattern.id()) {
+                    // The picture has the tile's top-left corner at the origin.
+                    let tile = pattern.tile();
+                    let local_matrix = sk_kurbo::matrix_from_affine(
+                        brush_transform.unwrap_or(kurbo::Affine::IDENTITY)
+                            * kurbo::Affine::translate(tile.origin().to_vec2()),
+                    );
+                    let shader = picture.to_shader(
+                        (TileMode::Repeat, TileMode::Repeat),
+                        skia_safe::FilterMode::Linear,
+                        Some(&local_matrix),
+                        &sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN)),
+                    );
+                    self.cache.paint.set_shader(shader);
+                }
+            }
+
             // Render unsupported custom paints as transparent
             anyrender::Paint::Resource(_) | anyrender::Paint::Custom(_) => {
                 self.cache.paint.set_color4f(
@@ -168,6 +203,28 @@ impl SkiaScenePainter<'_> {
                     &ColorSpace::new_srgb(),
                 );
             }
+        }
+    }
+
+    /// Records one tile of `pattern` as a picture, if it isn't cached already, for
+    /// `set_paint_brush` to draw it with a picture shader.
+    fn record_pattern(&mut self, brush: &anyrender::PaintRef<'_>) {
+        let anyrender::Paint::Pattern(pattern) = brush else {
+            return;
+        };
+        if self.cache.pattern_picture.hit(&pattern.id()).is_some() {
+            return;
+        }
+        let tile = pattern.tile();
+        let bounds = sk_kurbo::rect_from(tile.with_origin(kurbo::Point::ORIGIN));
+        let mut recorder = PictureRecorder::new();
+        let canvas = recorder.begin_recording(bounds, false);
+        pattern.scene().replay(
+            &mut SkiaScenePainter::new(canvas, self.cache),
+            kurbo::Affine::translate(-tile.origin().to_vec2()),
+        );
+        if let Some(picture) = recorder.finish_recording_as_picture(Some(&bounds)) {
+            self.cache.pattern_picture.insert(pattern.id(), picture);
         }
     }
 
@@ -368,6 +425,10 @@ impl SkiaScenePainter<'_> {
     ) -> Option<Typeface> {
         let cache_key = (font.data.id(), font.index);
 
+        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
+            return Some(cached.clone());
+        }
+
         #[cfg(any(target_os = "macos", target_os = "ios"))]
         #[allow(clippy::map_entry, reason = "Cannot early-return with entry API")]
         {
@@ -375,6 +436,25 @@ impl SkiaScenePainter<'_> {
             use std::sync::Arc;
 
             if let Some(collection) = oaty::Collection::new(font.data.data()) {
+                let blob_id = font.data.id();
+                if !self.cache.collection_descriptors.contains_key(&blob_id) {
+                    let descriptors = crate::ct_collection::CollectionDescriptors::new(&font.data);
+                    self.cache
+                        .collection_descriptors
+                        .insert(blob_id, descriptors);
+                }
+                if let Some(typeface) = self
+                    .cache
+                    .collection_descriptors
+                    .hit(&blob_id)
+                    .unwrap()
+                    .as_ref()
+                    .and_then(|descriptors| descriptors.typeface(font))
+                {
+                    self.cache.typeface.insert(cache_key, typeface.clone());
+                    return Some(typeface);
+                }
+
                 if !self.cache.extracted_font_data.contains_key(&cache_key) {
                     let Some(data) = collection
                         .get_font(font.index)
@@ -393,10 +473,6 @@ impl SkiaScenePainter<'_> {
                 }
                 font = self.cache.extracted_font_data.hit(&cache_key).unwrap()
             }
-        }
-
-        if let Some(cached) = self.cache.typeface.hit(&cache_key) {
-            return Some(cached.clone());
         }
 
         let Some(typeface) = self
@@ -461,6 +537,36 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.inner.save_layer(&save_layer_rec);
     }
 
+    fn push_mask_layer(
+        &mut self,
+        fill: peniko::Fill,
+        mode: anyrender::MaskMode,
+        transform: kurbo::Affine,
+        clip: &impl kurbo::Shape,
+    ) {
+        self.reset_paint();
+        self.cache.paint.set_blend_mode(SkBlendMode::DstIn);
+        if mode == anyrender::MaskMode::Luminance {
+            self.cache.paint.set_color_filter(ColorFilter::luma());
+        }
+
+        self.inner.save();
+
+        self.set_matrix(transform);
+
+        // Everything outside of the clip is masked out
+        self.inner.save();
+        self.clip_with_op(fill, clip, ClipOp::Difference);
+        self.inner
+            .draw_color(Color::TRANSPARENT, SkBlendMode::Clear);
+        self.inner.restore();
+
+        self.clip(fill, clip);
+
+        self.inner
+            .save_layer(&SaveLayerRec::default().paint(&self.cache.paint));
+    }
+
     fn push_clip_layer(
         &mut self,
         fill: peniko::Fill,
@@ -486,10 +592,14 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
+        anti_aliasing: AntiAliasing,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
+        self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape(shape);
@@ -502,10 +612,14 @@ impl PaintScene for SkiaScenePainter<'_> {
         brush: impl Into<anyrender::PaintRef<'a>>,
         brush_transform: Option<kurbo::Affine>,
         shape: &impl kurbo::Shape,
+        anti_aliasing: AntiAliasing,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         self.reset_paint();
+        self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
         self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.draw_shape_with_fill(shape, style);
@@ -524,15 +638,28 @@ impl PaintScene for SkiaScenePainter<'_> {
         transform: kurbo::Affine,
         glyph_transform: Option<kurbo::Affine>,
         glyphs: impl Iterator<Item = anyrender::Glyph>,
+        anti_aliasing: AntiAliasing,
     ) {
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
         self.set_matrix(transform);
 
         if let Some(glyph_transform) = glyph_transform {
             self.concat_matrix(glyph_transform);
         }
 
+        // Keep patterns in the run's space, not the glyphs'.
+        let brush_transform = match (&brush, glyph_transform) {
+            (anyrender::Paint::Pattern(_), Some(glyph_transform))
+                if glyph_transform.determinant() != 0.0 =>
+            {
+                Some(glyph_transform.inverse())
+            }
+            _ => None,
+        };
         self.reset_paint();
-        self.set_paint_brush(brush, None);
+        self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
+        self.set_paint_brush(brush, brush_transform);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 
@@ -542,9 +669,13 @@ impl PaintScene for SkiaScenePainter<'_> {
         let hint = hint
             || (cfg!(any(target_os = "macos", target_os = "ios")) && embolden != kurbo::Vec2::ZERO);
 
-        let Some(font) = self.get_or_cache_font(font, normalized_coords, font_size, hint) else {
+        let Some(mut font) = self.get_or_cache_font(font, normalized_coords, font_size, hint)
+        else {
             return;
         };
+        if !anti_aliasing.is_enabled() {
+            font.set_edging(skia_safe::font::Edging::Alias);
+        }
 
         let (min_size, _) = glyphs.size_hint();
         self.cache.glyph_id_buf.reserve(min_size);
@@ -673,22 +804,126 @@ fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
 }
 
 fn convert_filter(filter: &Filter) -> Option<ImageFilter> {
-    convert_filter_effect(filter, filter.output())
+    // Convert each node once, in order, so that inputs are looked up rather than reconverted.
+    let mut results: Vec<(Option<ImageFilter>, FilterColorSpace)> =
+        Vec::with_capacity(filter.nodes().len());
+    for id in 0..=filter.output().0 {
+        let result = convert_filter_effect(filter, FilterId(id), &results);
+        results.push(result);
+    }
+    let (output, color_space) = results.pop().unwrap_or((None, FilterColorSpace::Srgb));
+    convert_color_space(output, color_space, FilterColorSpace::Srgb)
 }
 
-fn resolve_input(filter: &Filter, input: &Option<FilterInput>) -> Option<ImageFilter> {
-    input.as_ref().and_then(|input| match input {
-        FilterInput::Source(_) => None,
-        FilterInput::Result(input_id) => convert_filter_effect(filter, *input_id),
-    })
+/// Resolves an input of the primitive `id` from the results of the primitives before it, converted
+/// into `color_space`. Skia reads a `None` filter as the source graphic, which is sRGB-encoded.
+/// The source graphic, and results of primitives with a different filter region, are clipped to
+/// the primitive's filter `region`.
+fn resolve_input(
+    filter: &Filter,
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
+    id: FilterId,
+    input: &Option<FilterInput>,
+    color_space: FilterColorSpace,
+    region: kurbo::Rect,
+) -> Option<ImageFilter> {
+    let crop = |input: Option<ImageFilter>| {
+        skia_safe::image_filters::crop(sk_kurbo::rect_from(region), None, input)
+    };
+    let source = (crop(None), FilterColorSpace::Srgb);
+    let result = |id: u16| match results.get(id as usize) {
+        Some((result, result_color_space)) => {
+            let result = match filter.nodes()[id as usize].region == region {
+                true => result.clone(),
+                false => crop(result.clone()),
+            };
+            (result, *result_color_space)
+        }
+        None => source.clone(),
+    };
+    let (input, input_color_space) = match input {
+        None => id.0.checked_sub(1).map_or(source.clone(), result),
+        Some(FilterInput::Source(FilterSource::SourceAlpha)) => {
+            (source_alpha(source.0), FilterColorSpace::Srgb)
+        }
+        Some(FilterInput::Source(_)) => source.clone(),
+        Some(FilterInput::Result(input_id)) => result(input_id.0),
+    };
+    convert_color_space(input, input_color_space, color_space)
 }
 
-fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
+/// Keep only the alpha channel of `source`, as black.
+fn source_alpha(source: Option<ImageFilter>) -> Option<ImageFilter> {
+    #[rustfmt::skip]
+    let alpha_only = [
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0, 0.0,
+    ];
+    let color_filter = skia_safe::color_filters::matrix_row_major(
+        &alpha_only,
+        skia_safe::color_filters::Clamp::Yes,
+    );
+    skia_safe::image_filters::color_filter(color_filter, source, None)
+}
+
+/// Wrap `filter` (`None` meaning the source graphic) in a gamma colour filter converting it
+/// between colour spaces, the way Chrome implements `color-interpolation-filters`.
+fn convert_color_space(
+    filter: Option<ImageFilter>,
+    from: FilterColorSpace,
+    to: FilterColorSpace,
+) -> Option<ImageFilter> {
+    let color_filter = match (from, to) {
+        (FilterColorSpace::Srgb, FilterColorSpace::LinearRgb) => {
+            skia_safe::color_filters::srgb_to_linear_gamma()
+        }
+        (FilterColorSpace::LinearRgb, FilterColorSpace::Srgb) => {
+            skia_safe::color_filters::linear_to_srgb_gamma()
+        }
+        _ => return filter,
+    };
+    skia_safe::image_filters::color_filter(color_filter, filter, None)
+}
+
+/// Express an sRGB colour in the colour space a primitive operates in.
+fn color_in_space(color: AlphaColor<Srgb>, color_space: FilterColorSpace) -> AlphaColor<Srgb> {
+    match color_space {
+        FilterColorSpace::Srgb => color,
+        FilterColorSpace::LinearRgb => AlphaColor::new(color.convert::<LinearSrgb>().components),
+    }
+}
+
+/// Convert a filter node, returning the result and the colour space it is encoded in.
+fn convert_filter_effect(
+    filter: &Filter,
+    id: FilterId,
+    results: &[(Option<ImageFilter>, FilterColorSpace)],
+) -> (Option<ImageFilter>, FilterColorSpace) {
     let node = &filter.nodes()[id.0 as usize];
-    let input = resolve_input(filter, &node.inputs.primary);
+    let color_space = node.color_space;
+    let region = node.region;
+    let input = resolve_input(
+        filter,
+        results,
+        id,
+        &node.inputs.primary,
+        color_space,
+        region,
+    );
     // Secondary input ("in2" in SVG), used by filters that combine two inputs such as
     // composite, blend and displacement map.
-    let secondary = resolve_input(filter, &node.inputs.secondary);
+    let secondary = resolve_input(
+        filter,
+        results,
+        id,
+        &node.inputs.secondary,
+        color_space,
+        region,
+    );
+    // The result is clipped to the primitive subregion, which is within the filter region.
+    let crop = node.subregion;
 
     // Clone to avoid borrow checking issues. Cloning is cheap as filters are refcounted.
     let input_clone = input.clone();
@@ -697,18 +932,21 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
 
     let filter: Option<ImageFilter> = match &node.effect {
         FilterEffect::Flood(color) => {
-            let rgba8 = color.to_rgba8();
+            let rgba8 = color_in_space(*color, color_space).to_rgba8();
             let sk_color = Color::from_argb(rgba8.a, rgba8.r, rgba8.g, rgba8.b);
             let shader = skia_safe::shaders::color(sk_color);
             image_filters::shader(shader, None)
         }
-        FilterEffect::GaussianBlur(blur) => {
-            image_filters::blur((blur.std_deviation, blur.std_deviation), None, input, None)
-        }
+        FilterEffect::GaussianBlur(blur) => image_filters::blur(
+            (blur.std_deviation_x, blur.std_deviation_y),
+            None,
+            input,
+            None,
+        ),
         FilterEffect::DropShadow(drop_shadow) => image_filters::drop_shadow(
             (drop_shadow.dx, drop_shadow.dy),
-            (drop_shadow.std_deviation, drop_shadow.std_deviation),
-            color4f_from_alpha_color(drop_shadow.color),
+            (drop_shadow.std_deviation_x, drop_shadow.std_deviation_y),
+            color4f_from_alpha_color(color_in_space(drop_shadow.color, color_space)),
             None,
             input,
             None,
@@ -810,6 +1048,7 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
                     CompositeOperator::Out => SkBlendMode::SrcOut,
                     CompositeOperator::Atop => SkBlendMode::SrcATop,
                     CompositeOperator::Xor => SkBlendMode::Xor,
+                    CompositeOperator::Lighter => SkBlendMode::Plus,
                     CompositeOperator::Arithmetic(_) => unreachable!(),
                 };
                 image_filters::blend(mode, secondary, input, None)
@@ -826,47 +1065,58 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
             image_filters::blend(mode, secondary, input, None)
         }
         FilterEffect::Morphology(morphology_filter) => {
-            let radius = (morphology_filter.radius, morphology_filter.radius);
+            let radius = (morphology_filter.radius_x, morphology_filter.radius_y);
             match morphology_filter.operator {
                 MorphologyOperator::Dilate => image_filters::dilate(radius, input, None),
                 MorphologyOperator::Erode => image_filters::erode(radius, input, None),
             }
         }
-        FilterEffect::ConvolveMatrix(convolution_kernel) => {
-            let size = convolution_kernel.size as i32;
-            // Skia applies `gain` as a multiplier, so invert the divisor.
-            let gain = if convolution_kernel.divisor != 0.0 {
-                1.0 / convolution_kernel.divisor
-            } else {
-                1.0
+        FilterEffect::ConvolveMatrix(kernel) => {
+            // Skia applies `gain` as a multiplier, so invert the divisor. As in SVG, a zero
+            // divisor falls back to the sum of the kernel, or 1 if that is zero too.
+            let divisor = match kernel.divisor {
+                0.0 => match kernel.values.iter().sum::<f32>() {
+                    0.0 => 1.0,
+                    sum => sum,
+                },
+                divisor => divisor,
             };
-            // Center the kernel over each pixel (SVG default targetX/Y = floor(order / 2)).
-            let offset = size / 2;
+            let tile_mode = match kernel.edge_mode {
+                EdgeMode::Duplicate => skia_safe::TileMode::Clamp,
+                EdgeMode::Wrap => skia_safe::TileMode::Repeat,
+                EdgeMode::Mirror => skia_safe::TileMode::Mirror,
+                EdgeMode::None => skia_safe::TileMode::Decal,
+            };
             image_filters::matrix_convolution(
-                skia_safe::ISize::new(size, size),
-                &convolution_kernel.values,
-                gain,
-                convolution_kernel.bias,
-                skia_safe::IPoint::new(offset, offset),
-                skia_safe::TileMode::Clamp,
-                !convolution_kernel.preserve_alpha,
+                skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
+                &kernel.values,
+                1.0 / divisor,
+                kernel.bias,
+                skia_safe::IPoint::new(kernel.target_x as i32, kernel.target_y as i32),
+                tile_mode,
+                !kernel.preserve_alpha,
                 input,
                 None,
             )
         }
         FilterEffect::Turbulence(turbulence_filter) => {
             let base_frequency = (
-                turbulence_filter.base_frequency,
-                turbulence_filter.base_frequency,
+                turbulence_filter.base_frequency_x,
+                turbulence_filter.base_frequency_y,
             );
+            // Skia stitches over a tile the size of the primitive subregion.
+            let tile_size = turbulence_filter.stitch_tiles.then(|| {
+                let r = node.subregion;
+                skia_safe::ISize::new(r.width().round() as i32, r.height().round() as i32)
+            });
             let num_octaves = turbulence_filter.num_octaves as usize;
-            let seed = turbulence_filter.seed as f32;
+            let seed = turbulence_filter.seed.trunc();
             let shader = match turbulence_filter.turbulence_type {
                 TurbulenceType::FractalNoise => {
-                    shaders::fractal_noise(base_frequency, num_octaves, seed, None)
+                    shaders::fractal_noise(base_frequency, num_octaves, seed, tile_size)
                 }
                 TurbulenceType::Turbulence => {
-                    shaders::turbulence(base_frequency, num_octaves, seed, None)
+                    shaders::turbulence(base_frequency, num_octaves, seed, tile_size)
                 }
             };
             shader.and_then(|shader| image_filters::shader(shader, None))
@@ -886,10 +1136,14 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
             )
         }
         FilterEffect::DiffuseLighting(diffuse_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(diffuse_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = diffuse_lighting_filter.surface_scale;
-            let kd = diffuse_lighting_filter.diffuse_constant;
+            // Skia rejects a negative constant; like resvg, light nothing (black) instead.
+            let kd = diffuse_lighting_filter.diffuse_constant.max(0.0);
             match &diffuse_lighting_filter.light_source {
                 LightSource::Distant(distant) => image_filters::distant_lit_diffuse(
                     distant_light_direction(distant),
@@ -921,8 +1175,11 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
             }
         }
         FilterEffect::SpecularLighting(specular_lighting_filter) => {
-            // SVG lighting-color defaults to white.
-            let light_color = Color::WHITE;
+            let light_color = {
+                let c =
+                    color_in_space(specular_lighting_filter.lighting_color, color_space).to_rgba8();
+                Color::from_argb(c.a, c.r, c.g, c.b)
+            };
             let surface_scale = specular_lighting_filter.surface_scale;
             let ks = specular_lighting_filter.specular_constant;
             let shininess = specular_lighting_filter.specular_exponent;
@@ -963,15 +1220,47 @@ fn convert_filter_effect(filter: &Filter, id: FilterId) -> Option<ImageFilter> {
         // These require resources or bounds that aren't available at this layer, so they are
         // not yet implemented.
         // - `Image` needs to resolve an external image by id from a resource registry.
-        // - `Tile` needs the filter primitive subregion (src/dst rects) to tile into.
-        FilterEffect::Image(_external_image_source) => None,
-        FilterEffect::Tile => None,
+        FilterEffect::Image(image) => {
+            let bounds = sk_kurbo::rect_from(node.subregion);
+            let mut recorder = skia_safe::PictureRecorder::new();
+            let mut cache = SkiaSceneCache::new();
+            SkiaScenePainter::new(recorder.begin_recording(bounds, false), &mut cache)
+                .append_scene(image.scene.clone(), kurbo::Affine::IDENTITY);
+            let picture = recorder.finish_recording_as_picture(None);
+            let image = picture.and_then(|picture| image_filters::picture(picture, None));
+            // The content is drawn in sRGB.
+            match color_space {
+                FilterColorSpace::Srgb => image,
+                FilterColorSpace::LinearRgb => {
+                    image_filters::color_filter(color_filters::srgb_to_linear_gamma(), image, None)
+                }
+            }
+        }
+        FilterEffect::Tile => {
+            let input_node = match node.inputs.primary {
+                Some(FilterInput::Result(input_id)) => Some(input_id.0),
+                None => id.0.checked_sub(1),
+                Some(FilterInput::Source(_)) => None,
+            };
+            // The source graphic fills the filter region.
+            let src = match input_node.map(|id| &filter.nodes()[id as usize]) {
+                Some(input) if input.region == region => input.subregion,
+                _ => region,
+            };
+            image_filters::tile(
+                sk_kurbo::rect_from(src),
+                sk_kurbo::rect_from(node.subregion),
+                input,
+            )
+        }
     };
 
     // If we do not implement given type of filter then the match statement above returns None
     // In that case, if we have an input then we pass that along instead. In the case of filter chains
     // with some unimplemented filters that allows the remaining filters to work
-    filter.or(input_clone)
+    let filter = filter.or(input_clone);
+    let filter = image_filters::crop(sk_kurbo::rect_from(crop), None, filter);
+    (filter, color_space)
 }
 
 /// Convert an anyrender displacement-map [`ColorChannel`] to the corresponding Skia channel.
@@ -1001,7 +1290,7 @@ mod sk_peniko {
     use peniko::color::{AlphaColor, ColorSpaceTag, HueDirection, Srgb};
     use peniko::{
         BlendMode, Compose, Extend, Gradient, GradientKind, ImageAlphaType, ImageBrush, ImageData,
-        ImageFormat, Mix,
+        ImageFormat, InterpolationAlphaSpace, Mix,
     };
     use peniko::{Fill, color::DynamicColor};
     use skia_safe::AlphaType as SkAlphaType;
@@ -1069,6 +1358,16 @@ mod sk_peniko {
         )
     }
 
+    fn in_premul_from_alpha_space(
+        alpha_space: InterpolationAlphaSpace,
+    ) -> skia_safe::gradient_shader::interpolation::InPremul {
+        use skia_safe::gradient_shader::interpolation::InPremul;
+        match alpha_space {
+            InterpolationAlphaSpace::Premultiplied => InPremul::Yes,
+            InterpolationAlphaSpace::Unpremultiplied => InPremul::No,
+        }
+    }
+
     pub(super) fn shader_from_gradient(
         gradient: &Gradient,
         brush_transform: Option<kurbo::Affine>,
@@ -1095,7 +1394,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
@@ -1132,7 +1431,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
@@ -1183,7 +1482,7 @@ mod sk_peniko {
 
                 let interpolation = skia_safe::gradient_shader::Interpolation {
                     color_space: gradient_shader_cs_from_cs_tag(gradient.interpolation_cs),
-                    in_premul: skia_safe::gradient_shader::interpolation::InPremul::Yes,
+                    in_premul: in_premul_from_alpha_space(gradient.interpolation_alpha_space),
                     hue_method: gradient_shader_hue_method_from_hue_direction(
                         gradient.hue_direction,
                     ),
@@ -1497,5 +1796,35 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "ios")))]
+mod ct_collection_cache_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn releases_collection_once_its_faces_leave_the_cache() {
+        // Keep Skia's global typeface cache from holding on to the typeface (and so the blob).
+        skia_safe::graphics::set_typeface_cache_count_limit(0);
+        let bytes = Arc::new(std::fs::read("/System/Library/Fonts/Helvetica.ttc").unwrap());
+        let weak = Arc::downgrade(&bytes);
+        let font = peniko::FontData::new(peniko::Blob::new(bytes), 1);
+        let mut surface = skia_safe::surfaces::raster_n32_premul((8, 8)).unwrap();
+        let mut cache = SkiaSceneCache::default();
+        let typeface =
+            SkiaScenePainter::new(surface.canvas(), &mut cache).get_or_cache_typeface(&font);
+        assert_eq!(
+            typeface.unwrap().post_script_name().as_deref(),
+            Some("Helvetica-Bold")
+        );
+        drop(font);
+        for _ in 0..10 {
+            cache.next_gen();
+        }
+        assert!(weak.upgrade().is_some());
+        cache.next_gen();
+        assert!(weak.upgrade().is_none(), "blob outlived the cache");
     }
 }

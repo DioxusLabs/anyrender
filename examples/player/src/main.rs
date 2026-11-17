@@ -1,9 +1,9 @@
-use anyrender::{NullWindowRenderer, PaintScene, Scene, WindowRenderer};
+use anyrender::{AntiAliasing, NullWindowRenderer, PaintScene, Scene, WindowRenderer};
 use anyrender_serialize::SceneArchive;
 use anyrender_skia::SkiaWindowRenderer;
 use anyrender_vello::VelloWindowRenderer;
 use anyrender_vello_cpu::{PixelsWindowRenderer, SoftbufferWindowRenderer, VelloCpuImageRenderer};
-use anyrender_vello_hybrid::VelloHybridWindowRenderer;
+use anyrender_vello_gpu::VelloGpuWindowRenderer;
 use kurbo::{Affine, Circle, Point, Rect, Stroke};
 use peniko::{Color, Fill};
 use std::{path::PathBuf, sync::Arc};
@@ -27,14 +27,14 @@ type VelloCpuWindowRenderer = PixelsWindowRenderer<VelloCpuImageRenderer>;
 
 type InitialBackend = SkiaWindowRenderer;
 // type InitialBackend = VelloWindowRenderer;
-// type InitialBackend = VelloHybridWindowRenderer;
+// type InitialBackend = VelloGpuWindowRenderer;
 // type InitialBackend = VelloCpuWindowRenderer;
 // type InitialBackend = VelloCpuSBWindowRenderer;
 // type InitialBackend = NullWindowRenderer;
 
 enum Renderer {
-    Gpu(Box<VelloWindowRenderer>),
-    Hybrid(Box<VelloHybridWindowRenderer>),
+    Vello(Box<VelloWindowRenderer>),
+    Gpu(Box<VelloGpuWindowRenderer>),
     Cpu(Box<VelloCpuWindowRenderer>),
     CpuSoftbuffer(Box<VelloCpuSBWindowRenderer>),
     Skia(Box<SkiaWindowRenderer>),
@@ -42,12 +42,12 @@ enum Renderer {
 }
 impl From<VelloWindowRenderer> for Renderer {
     fn from(renderer: VelloWindowRenderer) -> Self {
-        Self::Gpu(Box::new(renderer))
+        Self::Vello(Box::new(renderer))
     }
 }
-impl From<VelloHybridWindowRenderer> for Renderer {
-    fn from(renderer: VelloHybridWindowRenderer) -> Self {
-        Self::Hybrid(Box::new(renderer))
+impl From<VelloGpuWindowRenderer> for Renderer {
+    fn from(renderer: VelloGpuWindowRenderer) -> Self {
+        Self::Gpu(Box::new(renderer))
     }
 }
 impl From<VelloCpuWindowRenderer> for Renderer {
@@ -74,8 +74,8 @@ impl From<NullWindowRenderer> for Renderer {
 impl Renderer {
     fn is_active(&self) -> bool {
         match self {
+            Renderer::Vello(r) => r.is_active(),
             Renderer::Gpu(r) => r.is_active(),
-            Renderer::Hybrid(r) => r.is_active(),
             Renderer::Cpu(r) => r.is_active(),
             Renderer::CpuSoftbuffer(r) => r.is_active(),
             Renderer::Null(r) => r.is_active(),
@@ -85,8 +85,8 @@ impl Renderer {
 
     fn set_size(&mut self, w: u32, h: u32) {
         match self {
+            Renderer::Vello(r) => r.set_size(w, h),
             Renderer::Gpu(r) => r.set_size(w, h),
-            Renderer::Hybrid(r) => r.set_size(w, h),
             Renderer::Cpu(r) => r.set_size(w, h),
             Renderer::CpuSoftbuffer(r) => r.set_size(w, h),
             Renderer::Null(r) => r.set_size(w, h),
@@ -185,10 +185,10 @@ impl ApplicationHandler for App {
                 Renderer::Skia(r) => {
                     r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
                 }
-                Renderer::Gpu(r) => {
+                Renderer::Vello(r) => {
                     r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
                 }
-                Renderer::Hybrid(r) => {
+                Renderer::Gpu(r) => {
                     r.render(|painter| painter.append_scene(self.scene.clone(), Affine::IDENTITY))
                 }
                 Renderer::Cpu(r) => {
@@ -211,12 +211,12 @@ impl ApplicationHandler for App {
                 ..
             } => match renderer {
                 Renderer::Cpu(_) | Renderer::CpuSoftbuffer(_) => {
-                    self.set_backend(VelloHybridWindowRenderer::new(), event_loop);
-                }
-                Renderer::Hybrid(_) => {
-                    self.set_backend(VelloWindowRenderer::new(), event_loop);
+                    self.set_backend(VelloGpuWindowRenderer::new(), event_loop);
                 }
                 Renderer::Gpu(_) => {
+                    self.set_backend(VelloWindowRenderer::new(), event_loop);
+                }
+                Renderer::Vello(_) => {
                     self.set_backend(SkiaWindowRenderer::new(), event_loop);
                 }
                 Renderer::Skia(_) => {
@@ -266,6 +266,7 @@ fn default_scene() -> Scene {
         Color::WHITE,
         None,
         &Rect::new(0.0, 0.0, 50.0, 50.0),
+        AntiAliasing::Enabled,
     );
     scene.stroke(
         &Stroke::new(2.0),
@@ -273,6 +274,7 @@ fn default_scene() -> Scene {
         Color::BLACK,
         None,
         &Rect::new(5.0, 5.0, 35.0, 35.0),
+        AntiAliasing::Enabled,
     );
     scene.fill(
         Fill::NonZero,
@@ -280,6 +282,7 @@ fn default_scene() -> Scene {
         Color::from_rgb8(255, 0, 0),
         None,
         &Circle::new(Point::new(20.0, 20.0), 10.0),
+        AntiAliasing::Enabled,
     );
 
     scene

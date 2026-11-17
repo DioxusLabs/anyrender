@@ -5,6 +5,18 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-16
+
+### Added
+
+- Serialization of mask layers.
+- Serialization of pattern paints ([#191](https://github.com/DioxusLabs/anyrender/pull/191)).
+
+### Changed
+
+- Updated recorded drawing commands for AnyRender 0.15, including CSS box shadows and explicit antialiasing (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Filter image content is now serialized as a recorded scene (breaking) ([#176](https://github.com/DioxusLabs/anyrender/pull/176)).
+
 ## [0.8.0] - 2026-10-03
 
 ### Changed

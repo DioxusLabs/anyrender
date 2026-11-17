@@ -5,6 +5,30 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-11-16
+
+### Added
+
+- Support for SVG patterns, rendered as `Paint::Pattern`.
+- Support for SVG masks. Backends without luminance mask support render luminance masks as alpha masks.
+- Support for SVG filter effects, translated into AnyRender `Filter` graphs. How faithfully they are applied depends on the backend.
+- Filters set the `Filter::region` from the `<filter>` element's region, and primitive subregions are clipped to it.
+
+### Changed
+
+- Upgraded to `usvg` 0.50 ([#152](https://github.com/DioxusLabs/anyrender/pull/152)).
+- Updated to AnyRender 0.15, required filter regions and recorded-scene `feImage` content (breaking) ([#176](https://github.com/DioxusLabs/anyrender/pull/176), [#188](https://github.com/DioxusLabs/anyrender/pull/188), [#194](https://github.com/DioxusLabs/anyrender/pull/194), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Updated missing-feature documentation ([#208](https://github.com/DioxusLabs/anyrender/pull/208)).
+
+### Fixed
+
+- Keep the `<image>` placement for nested groups and raster images inside embedded SVG images.
+- Draw the red placeholder for unsupported elements at the element's position, including the transform passed to `render_svg_tree`.
+- Interpolate gradient stops unpremultiplied, as SVG requires (and resvg does). A transparent white stop no longer fades through black.
+- Apply `clip-path`s whose content is transformed, nested in groups, made of several shapes or text, or itself clipped. Previously only a clip whose first child was a plain path was applied, and the clip path's own `transform` (including `objectBoundingBox` units) was ignored.
+- Honour `shape-rendering` on single-shape clip paths ([#207](https://github.com/DioxusLabs/anyrender/pull/207)).
+- Compose relative transforms and isolate groups with `isolation: isolate` ([#189](https://github.com/DioxusLabs/anyrender/pull/189), [#190](https://github.com/DioxusLabs/anyrender/pull/190)).
+
 ## [0.15.0] - 2026-10-03
 
 ### Added

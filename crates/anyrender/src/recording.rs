@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use crate::filters::FilterImage;
 use crate::{
-    BoxShadowKind, Filter, Glyph, NonUniformRoundedRect, NormalizedCoord, Paint, PaintRef,
-    PaintScene, RenderContext,
+    AntiAliasing, BoxShadowKind, Filter, Glyph, MaskMode, NonUniformRoundedRect, NormalizedCoord,
+    Paint, PaintRef, PaintScene, RenderContext,
 };
 use kurbo::{Affine, BezPath, PathEl, Point, Rect, RoundedRect, Shape, Stroke, Vec2};
 use peniko::{BlendMode, Color, Fill, FontData, Style, StyleRef};
@@ -14,15 +15,19 @@ const DEFAULT_TOLERANCE: f64 = 0.1;
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum RenderCommand<Font = FontData, Brush = Paint> {
+pub enum RenderCommand<Font = FontData, Brush = Paint, Image = FilterImage> {
     /// Pushes a new layer clipped by the specified shape and composed with previous layers using the specified blend mode.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
-    PushLayer(LayerCommand),
+    PushLayer(LayerCommand<Image>),
     /// Pushes a new clip layer clipped by the specified shape.
     /// Every drawing command after this call will be clipped by the shape until the layer is popped.
     /// However, the transforms are not saved or modified by the layer stack.
     PushClipLayer(ClipCommand),
+    /// Pushes a new mask layer clipped by the specified shape.
+    /// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+    /// Everything outside of the clip shape counts as fully masked.
+    PushMaskLayer(MaskLayerCommand),
     /// Pops the current layer.
     PopLayer,
     /// Strokes a shape using the specified style and brush.
@@ -41,6 +46,7 @@ impl RenderCommand {
         match &mut self {
             RenderCommand::PushLayer(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::PushClipLayer(cmd) => cmd.transform = transform * cmd.transform,
+            RenderCommand::PushMaskLayer(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::PopLayer => {}
             RenderCommand::Stroke(cmd) => cmd.transform = transform * cmd.transform,
             RenderCommand::Fill(cmd) => cmd.transform = transform * cmd.transform,
@@ -56,16 +62,18 @@ impl RenderCommand {
 /// Every drawing command after this call will be clipped by the shape until the layer is popped.
 /// However, the transforms are not saved or modified by the layer stack.
 #[derive(Clone, Debug, PartialEq)]
+///
+/// `Image` is the content of the filters' `feImage` primitives.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct LayerCommand {
+pub struct LayerCommand<Image = FilterImage> {
     #[cfg_attr(feature = "serde", serde(default))]
     pub fill: Fill,
     pub blend: BlendMode,
     pub alpha: f32,
     pub transform: Affine,
     pub clip: RecordedShape,
-    pub filter: Option<Arc<Filter>>,
-    pub backdrop_filter: Option<Arc<Filter>>,
+    pub filter: Option<Arc<Filter<Image>>>,
+    pub backdrop_filter: Option<Arc<Filter<Image>>>,
 }
 
 /// Pushes a new clip layer clipped by the specified shape.
@@ -80,6 +88,20 @@ pub struct ClipCommand {
     pub clip: RecordedShape,
 }
 
+/// Pushes a new mask layer clipped by the specified shape.
+/// Content drawn until the layer is popped is used as a mask for the content drawn before it.
+/// Everything outside of the clip shape counts as fully masked.
+/// However, the transforms are not saved or modified by the layer stack.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MaskLayerCommand {
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub fill: Fill,
+    pub mode: MaskMode,
+    pub transform: Affine,
+    pub clip: RecordedShape,
+}
+
 /// Strokes a shape using the specified style and brush.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -89,6 +111,12 @@ pub struct StrokeCommand<Brush = Paint> {
     pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     pub shape: RecordedShape,
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
+    )]
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Fills a shape using the specified style and brush.
@@ -100,6 +128,12 @@ pub struct FillCommand<Brush = Paint> {
     pub brush: Brush, // TODO: review ownership to avoid cloning. Should brushes be a "resource"?
     pub brush_transform: Option<Affine>,
     pub shape: RecordedShape,
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
+    )]
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Draws a run of glyphs
@@ -118,6 +152,12 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
     pub transform: Affine,
     pub glyph_transform: Option<Affine>,
     pub glyphs: Vec<Glyph>,
+    /// Whether the edges are anti-aliased.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "AntiAliasing::is_enabled")
+    )]
+    pub anti_aliasing: AntiAliasing,
 }
 
 /// Draw a box shadow cast by a box
@@ -291,6 +331,73 @@ impl Scene {
             // TODO: handle this somehow
             Paint::Resource(id) => Paint::Resource(id),
             Paint::Custom(_) => Paint::Solid(Color::TRANSPARENT),
+            Paint::Pattern(pattern) => Paint::Pattern(pattern.clone()),
+        }
+    }
+
+    /// Draw the recorded commands into `painter`, transformed by `transform`.
+    pub fn replay<S: PaintScene + ?Sized>(&self, painter: &mut S, transform: Affine) {
+        for cmd in &self.commands {
+            match cmd {
+                RenderCommand::PushLayer(cmd) => painter.push_layer(
+                    cmd.fill,
+                    cmd.blend,
+                    cmd.alpha,
+                    transform * cmd.transform,
+                    &cmd.clip,
+                    cmd.filter.clone(),
+                    cmd.backdrop_filter.clone(),
+                ),
+                RenderCommand::PushClipLayer(cmd) => {
+                    painter.push_clip_layer(cmd.fill, transform * cmd.transform, &cmd.clip)
+                }
+                RenderCommand::PushMaskLayer(cmd) => painter.push_mask_layer(
+                    cmd.fill,
+                    cmd.mode,
+                    transform * cmd.transform,
+                    &cmd.clip,
+                ),
+                RenderCommand::PopLayer => painter.pop_layer(),
+                RenderCommand::Stroke(cmd) => painter.stroke(
+                    &cmd.style,
+                    transform * cmd.transform,
+                    cmd.brush.as_ref(),
+                    cmd.brush_transform,
+                    &cmd.shape,
+                    cmd.anti_aliasing,
+                ),
+                RenderCommand::Fill(cmd) => painter.fill(
+                    cmd.fill,
+                    transform * cmd.transform,
+                    cmd.brush.as_ref(),
+                    cmd.brush_transform,
+                    &cmd.shape,
+                    cmd.anti_aliasing,
+                ),
+                RenderCommand::GlyphRun(cmd) => painter.draw_glyphs(
+                    &cmd.font_data,
+                    cmd.font_size,
+                    cmd.hint,
+                    &cmd.normalized_coords,
+                    cmd.embolden,
+                    &cmd.style,
+                    cmd.brush.as_ref(),
+                    cmd.brush_alpha,
+                    transform * cmd.transform,
+                    cmd.glyph_transform,
+                    cmd.glyphs.iter().copied(),
+                    cmd.anti_aliasing,
+                ),
+                RenderCommand::BoxShadow(cmd) => painter.draw_box_shadow(
+                    transform * cmd.transform,
+                    &cmd.box_shape,
+                    cmd.offset,
+                    cmd.spread,
+                    cmd.std_dev,
+                    cmd.color,
+                    cmd.kind,
+                ),
+            }
         }
     }
 }
@@ -335,6 +442,23 @@ impl PaintScene for Scene {
         self.commands.push(RenderCommand::PushClipLayer(layer));
     }
 
+    fn push_mask_layer(
+        &mut self,
+        fill: Fill,
+        mode: MaskMode,
+        transform: Affine,
+        clip: &impl Shape,
+    ) {
+        let clip = RecordedShape::from_shape(clip, self.tolerance);
+        let layer = MaskLayerCommand {
+            fill,
+            mode,
+            transform,
+            clip,
+        };
+        self.commands.push(RenderCommand::PushMaskLayer(layer));
+    }
+
     fn pop_layer(&mut self) {
         self.commands.push(RenderCommand::PopLayer);
     }
@@ -346,6 +470,7 @@ impl PaintScene for Scene {
         paint_ref: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_aliasing: AntiAliasing,
     ) {
         let shape = RecordedShape::from_shape(shape, self.tolerance);
         let brush = self.convert_paint(paint_ref.into());
@@ -355,6 +480,7 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::Stroke(stroke));
     }
@@ -366,6 +492,7 @@ impl PaintScene for Scene {
         paint: impl Into<PaintRef<'a>>,
         brush_transform: Option<Affine>,
         shape: &impl Shape,
+        anti_aliasing: AntiAliasing,
     ) {
         let shape = RecordedShape::from_shape(shape, self.tolerance);
         let brush = self.convert_paint(paint.into());
@@ -375,6 +502,7 @@ impl PaintScene for Scene {
             brush,
             brush_transform,
             shape,
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::Fill(fill));
     }
@@ -392,6 +520,7 @@ impl PaintScene for Scene {
         transform: Affine,
         glyph_transform: Option<Affine>,
         glyphs: impl Iterator<Item = Glyph>,
+        anti_aliasing: AntiAliasing,
     ) {
         let brush = self.convert_paint(paint_ref.into());
         let glyph_run = GlyphRunCommand {
@@ -406,6 +535,7 @@ impl PaintScene for Scene {
             transform,
             glyph_transform,
             glyphs: glyphs.into_iter().collect(),
+            anti_aliasing,
         };
         self.commands.push(RenderCommand::GlyphRun(glyph_run));
     }

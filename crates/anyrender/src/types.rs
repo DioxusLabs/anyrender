@@ -6,9 +6,43 @@ use std::{any::Any, sync::Arc};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::ResourceId;
+use crate::{Pattern, ResourceId};
 
 pub type NormalizedCoord = i16;
+
+/// How the content of a mask layer is converted to a mask. See [`PaintScene::push_mask_layer`].
+///
+/// [`PaintScene::push_mask_layer`]: crate::PaintScene::push_mask_layer
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum MaskMode {
+    /// The mask is the alpha of the mask content.
+    #[default]
+    Alpha,
+    /// The mask is the luminance of the mask content multiplied by its alpha.
+    Luminance,
+}
+
+/// Whether the edges of a shape or glyph are anti-aliased.
+///
+/// Without anti-aliasing, each pixel is either fully painted or not painted at all, as with
+/// SVG's `shape-rendering: crispEdges`. Backends that can't disable anti-aliasing ignore it.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AntiAliasing {
+    /// Edges are anti-aliased.
+    #[default]
+    Enabled,
+    /// Edges are not anti-aliased.
+    Disabled,
+}
+
+impl AntiAliasing {
+    /// Returns `true` if edges are anti-aliased.
+    pub fn is_enabled(&self) -> bool {
+        *self == Self::Enabled
+    }
+}
 
 /// A positioned glyph.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -21,7 +55,7 @@ pub struct Glyph {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
+pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>, P = Pattern> {
     /// Solid color brush.
     Solid(Color),
     /// Gradient brush.
@@ -33,9 +67,14 @@ pub enum Paint<I = ImageBrush, G = Gradient, C = Arc<dyn Any + Send + Sync>> {
     /// Custom paint (type erased as each backend will have their own)
     #[cfg_attr(feature = "serde", serde(skip))]
     Custom(C),
+    /// Pattern brush (a recorded scene repeated as a tile)
+    #[cfg_attr(feature = "serde", serde(skip))]
+    Pattern(P),
 }
 
-impl<I: PartialEq, G: PartialEq> PartialEq for Paint<I, G, Arc<dyn Any + Send + Sync>> {
+impl<I: PartialEq, G: PartialEq, P: PartialEq> PartialEq
+    for Paint<I, G, Arc<dyn Any + Send + Sync>, P>
+{
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Solid(l0), Self::Solid(r0)) => l0 == r0,
@@ -43,12 +82,14 @@ impl<I: PartialEq, G: PartialEq> PartialEq for Paint<I, G, Arc<dyn Any + Send + 
             (Self::Image(l0), Self::Image(r0)) => l0 == r0,
             (Self::Resource(l0), Self::Resource(r0)) => l0 == r0,
             (Self::Custom(l0), Self::Custom(r0)) => Arc::ptr_eq(l0, r0),
+            (Self::Pattern(l0), Self::Pattern(r0)) => l0 == r0,
             _ => false,
         }
     }
 }
 
-pub type PaintRef<'a> = Paint<ImageBrushRef<'a>, &'a Gradient, &'a (dyn Any + Send + Sync)>;
+pub type PaintRef<'a> =
+    Paint<ImageBrushRef<'a>, &'a Gradient, &'a (dyn Any + Send + Sync), &'a Pattern>;
 
 impl Paint {
     pub fn as_ref(&self) -> PaintRef<'_> {
@@ -58,6 +99,7 @@ impl Paint {
             Paint::Image(image) => Paint::Image(image.as_ref()),
             Paint::Resource(id) => Paint::Resource(*id),
             Paint::Custom(custom) => Paint::Custom(custom.as_ref()),
+            Paint::Pattern(pattern) => Paint::Pattern(pattern),
         }
     }
 }
@@ -78,6 +120,7 @@ impl<'a> From<PaintRef<'a>> for BrushRef<'a> {
             // Custom paints are translated into "invisible" where they are not supported
             Paint::Resource(_) => Brush::Solid(Color::TRANSPARENT),
             Paint::Custom(_) => Brush::Solid(Color::TRANSPARENT),
+            Paint::Pattern(_) => Brush::Solid(Color::TRANSPARENT),
         }
     }
 }
@@ -94,24 +137,34 @@ impl<'a> From<PaintRef<'a>> for BrushRef<'a> {
 //     Custom(Arc<dyn Any + Send + Sync>),
 // }
 
-impl<I, G, C> From<Color> for Paint<I, G, C> {
+impl<I, G, C, P> From<Color> for Paint<I, G, C, P> {
     fn from(value: Color) -> Self {
         Paint::Solid(value)
     }
 }
-impl<'a, I, C> From<&'a Gradient> for Paint<I, &'a Gradient, C> {
+impl<'a, I, C, P> From<&'a Gradient> for Paint<I, &'a Gradient, C, P> {
     fn from(value: &'a Gradient) -> Self {
         Paint::Gradient(value)
     }
 }
-impl<'a, G, C> From<ImageBrushRef<'a>> for Paint<ImageBrushRef<'a>, G, C> {
+impl<'a, G, C, P> From<ImageBrushRef<'a>> for Paint<ImageBrushRef<'a>, G, C, P> {
     fn from(value: ImageBrushRef<'a>) -> Self {
         Paint::Image(value)
     }
 }
-impl<I, G> From<Arc<dyn Any + Send + Sync>> for Paint<I, G, Arc<dyn Any + Send + Sync>> {
+impl<I, G, P> From<Arc<dyn Any + Send + Sync>> for Paint<I, G, Arc<dyn Any + Send + Sync>, P> {
     fn from(value: Arc<dyn Any + Send + Sync>) -> Self {
         Paint::Custom(value)
+    }
+}
+impl<I, G, C> From<Pattern> for Paint<I, G, C, Pattern> {
+    fn from(value: Pattern) -> Self {
+        Paint::Pattern(value)
+    }
+}
+impl<'a, I, G, C> From<&'a Pattern> for Paint<I, G, C, &'a Pattern> {
+    fn from(value: &'a Pattern) -> Self {
+        Paint::Pattern(value)
     }
 }
 impl<'a> From<BrushRef<'a>> for PaintRef<'a> {

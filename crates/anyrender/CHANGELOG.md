@@ -5,6 +5,32 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-11-16
+
+### Added
+
+- `Paint::Pattern`, a paint that repeats a recorded `Scene` as a tile, with a stable id for caching the rasterized tile (breaking for code matching on `Paint`).
+- `Scene::replay`, which draws a recorded scene into any `PaintScene`.
+- `ColorMatrix::SOURCE_ALPHA` and `ColorMatrix::LUMINANCE_TO_ALPHA` constants.
+- `PaintScene::push_mask_layer` with `MaskMode::Alpha` and `MaskMode::Luminance`, and the recorded `MaskLayerCommand` (breaking for `PaintScene` implementors).
+- `Filter::region`, an optional filter region that clips the source graphic and every primitive result, and is the default subregion of primitives that fill an area. `None` (the default) is unbounded.
+- `NonUniformRoundedRect` for CSS-compatible box shadows ([#117](https://github.com/DioxusLabs/anyrender/pull/117)).
+
+### Changed
+
+- The filter types now live in the new `image_filters_types` crate, generic over the content of `feImage` primitives, and `anyrender::filters` re-exports them. `Filter`, `FilterGraphNode` and `FilterEffect` are aliases that use `ExternalImageSource` for `feImage`, so existing code keeps compiling.
+- `Filter::add` now makes the added primitive the graph's output, so graphs built with `Filter::empty` and `add` output their last node instead of their first.
+- Added an `AntiAliasing` parameter to `fill`, `stroke` and `draw_glyphs` (breaking) ([#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Changed `draw_box_shadow` to follow CSS geometry and spread semantics (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117)).
+- Filter regions, node regions and primitive subregions are now required; filter constructors require bounds (breaking) ([#188](https://github.com/DioxusLabs/anyrender/pull/188), [#194](https://github.com/DioxusLabs/anyrender/pull/194), [#196](https://github.com/DioxusLabs/anyrender/pull/196)).
+- `feImage` content is now a recorded `Scene`, rather than an external image source (breaking) ([#176](https://github.com/DioxusLabs/anyrender/pull/176)).
+- Expanded filter primitives with per-primitive colour spaces, separate X/Y parameters, full convolution parameters, lighting colour, stitched turbulence, primitive subregions and tiling (breaking) ([#168](https://github.com/DioxusLabs/anyrender/pull/168), [#169](https://github.com/DioxusLabs/anyrender/pull/169), [#170](https://github.com/DioxusLabs/anyrender/pull/170), [#171](https://github.com/DioxusLabs/anyrender/pull/171), [#172](https://github.com/DioxusLabs/anyrender/pull/172), [#174](https://github.com/DioxusLabs/anyrender/pull/174)).
+- Added `CompositeOperator::Lighter`; turbulence seeds are now `f32`, truncated toward zero (breaking) ([#186](https://github.com/DioxusLabs/anyrender/pull/186), [#187](https://github.com/DioxusLabs/anyrender/pull/187)).
+
+### Fixed
+
+- Fixed the `FilterEffect` size assertion on 32-bit x86 ([#120](https://github.com/DioxusLabs/anyrender/pull/120)).
+
 ## [0.14.0] - 2026-10-03
 
 ### Added
