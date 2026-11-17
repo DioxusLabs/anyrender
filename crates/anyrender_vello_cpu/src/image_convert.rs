@@ -53,6 +53,32 @@ pub(crate) fn convert_image(image: &peniko::ImageData) -> Arc<Pixmap> {
     ))
 }
 
+/// Prefilter premultiplied pixels: straight-alpha resizing creates dark fringes.
+pub(crate) fn minify_image(image: &peniko::ImageData, width: u32, height: u32) -> Arc<Pixmap> {
+    let source = convert_image(image);
+    let bytes = source
+        .data()
+        .iter()
+        .flat_map(|p| [p.r, p.g, p.b, p.a])
+        .collect();
+    let rgba = image::RgbaImage::from_raw(image.width, image.height, bytes).unwrap();
+    let mut resized =
+        image::imageops::resize(&rgba, width, height, image::imageops::FilterType::Lanczos3)
+            .into_raw();
+    for p in resized.chunks_exact_mut(4) {
+        p[0] = p[0].min(p[3]);
+        p[1] = p[1].min(p[3]);
+        p[2] = p[2].min(p[3]);
+    }
+    let transparent = resized.chunks_exact(4).any(|p| p[3] != 255);
+    Arc::new(Pixmap::from_parts(
+        resized,
+        width as u16,
+        height as u16,
+        PixelMetadata::new(peniko::ImageAlphaType::AlphaPremultiplied, transparent),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,6 +92,16 @@ mod tests {
             width: pixels.len() as u32,
             height: 1,
         }
+    }
+
+    #[test]
+    fn minification_does_not_bleed_transparent_rgb() {
+        let image = image(&[[255, 0, 0, 255], [0, 0, 255, 0]]);
+        let pixmap = minify_image(&image, 1, 1);
+        let p = pixmap.data()[0];
+        assert_eq!((p.g, p.b), (0, 0));
+        assert_eq!(p.r, p.a);
+        assert!((120..=135).contains(&p.a));
     }
 
     #[test]

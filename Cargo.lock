@@ -280,6 +280,7 @@ dependencies = [
  "color",
  "debug_timer",
  "glifo",
+ "image",
  "kurbo",
  "peniko",
  "pixels_window_renderer",
