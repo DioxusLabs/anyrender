@@ -5,27 +5,32 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-11-16
 
 ### Added
 
 - `Paint::Pattern` support. Each pattern tile is rasterized once, cached, and painted as a repeating image.
 - `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
 - Filter layers are clipped to `Filter::region`.
+- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
+  `VelloCpuScenePainter::set_glyph_caching` / `VelloCpuImageRenderer::set_glyph_caching`.
+
+### Changed
+
+- Updated to AnyRender 0.15, CSS box shadows, explicit antialiasing and required filter regions (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
+- Upgraded `vello_cpu`/`vello_common` to 0.4 and `glifo` to 0.5 with PNG glyph support ([#145](https://github.com/DioxusLabs/anyrender/pull/145), [#151](https://github.com/DioxusLabs/anyrender/pull/151)).
+- Use rectangle fast paths and isolated non-rectangular clips ([#114](https://github.com/DioxusLabs/anyrender/pull/114), [#115](https://github.com/DioxusLabs/anyrender/pull/115)).
 
 ### Fixed
 
+- Match platform glyph-origin snapping on Apple and other platforms ([#137](https://github.com/DioxusLabs/anyrender/pull/137), [#141](https://github.com/DioxusLabs/anyrender/pull/141), [#144](https://github.com/DioxusLabs/anyrender/pull/144)).
 - `VelloCpuScenePainter::finish` no longer panics with the `multithreading` feature (it now flushes before rendering).
 - On Apple, emboldened glyphs drawn under a scaling transform are lifted by the full embolden
   amount again, matching glifo's emboldening, which scales with the transform.
 - `push_mask_layer` pushes one `DestIn` layer, bounded by the enclosing layer, with the mask
   content clipped inside it, instead of an unbounded layer plus a second mask layer. This makes
   masks and multi-shape SVG clip paths about a third faster.
-
-### Added
-
-- Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
-  `VelloCpuScenePainter::set_glyph_caching` / `VelloCpuImageRenderer::set_glyph_caching`.
+- Do not forward unsupported ColorMatrix/Blend filters to Vello CPU ([#159](https://github.com/DioxusLabs/anyrender/pull/159)).
 
 ## [0.18.0] - 2026-10-03
 
