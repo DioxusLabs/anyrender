@@ -259,6 +259,8 @@ name = "anyrender_vello"
 version = "0.16.0"
 dependencies = [
  "anyrender",
+ "anyrender_tiny_skia",
+ "anyrender_vello_cpu",
  "debug_timer",
  "futures-channel",
  "kurbo",
