@@ -122,10 +122,6 @@ impl SkiaScenePainter<'_> {
         self.inner.set_matrix(&sk_kurbo::m44_from_affine(transform));
     }
 
-    fn concat_matrix(&self, transform: kurbo::Affine) {
-        self.inner.concat(&sk_kurbo::matrix_from_affine(transform));
-    }
-
     fn clip(&self, fill: peniko::Fill, shape: &impl kurbo::Shape) {
         self.clip_with_op(fill, shape, ClipOp::Intersect);
     }
@@ -625,6 +621,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.draw_shape_with_fill(shape, style);
     }
 
+    /// Applies `glyph_transform` in y-down glyph space before placing each glyph in the run.
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         #[allow(unused_mut)] mut font: &'a peniko::FontData,
@@ -644,22 +641,23 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.record_pattern(&brush);
         self.set_matrix(transform);
 
-        if let Some(glyph_transform) = glyph_transform {
-            self.concat_matrix(glyph_transform);
-        }
-
-        // Keep patterns in the run's space, not the glyphs'.
-        let brush_transform = match (&brush, glyph_transform) {
-            (anyrender::Paint::Pattern(_), Some(glyph_transform))
-                if glyph_transform.determinant() != 0.0 =>
-            {
-                Some(glyph_transform.inverse())
-            }
-            _ => None,
+        let inverse_glyph_transform = if let Some(glyph_transform) = glyph_transform {
+            let matrix = sk_kurbo::matrix_from_affine(glyph_transform);
+            let Some(inverse) = matrix.invert() else {
+                return; // A singular transform collapses the glyphs.
+            };
+            self.inner.concat(&matrix);
+            Some(inverse)
+        } else {
+            None
         };
         self.reset_paint();
         self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
-        self.set_paint_brush(brush, brush_transform);
+        self.set_paint_brush(brush, None);
+        // The brush stays in run space.
+        if let (Some(inverse), Some(shader)) = (&inverse_glyph_transform, self.cache.paint.shader()) {
+            self.cache.paint.set_shader(shader.with_local_matrix(inverse));
+        }
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 
@@ -684,6 +682,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         for glyph in glyphs {
             self.cache.glyph_id_buf.push(GlyphId::from(glyph.id as u16));
             self.cache.glyph_pos_buf.push(Point::new(glyph.x, glyph.y));
+        }
+
+        if let Some(inverse) = inverse_glyph_transform {
+            // Undo the linear transform on run offsets, but let the glyph-local translation apply.
+            inverse.map_vectors_inplace(&mut self.cache.glyph_pos_buf);
         }
 
         self.inner.draw_glyphs_at(
