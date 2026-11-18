@@ -255,7 +255,10 @@ pub trait PaintScene: RenderContext {
         anti_aliasing: AntiAliasing,
     );
 
-    /// Draws a run of glyphs
+    /// Draws a run of glyphs.
+    ///
+    /// `glyph_transform` acts on each sized glyph in y-down space, relative to its own origin,
+    /// before placement at its run position. `transform` acts on the positioned run.
     #[allow(clippy::too_many_arguments)]
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,

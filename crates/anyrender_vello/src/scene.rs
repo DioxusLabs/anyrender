@@ -278,7 +278,9 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             .brush(brush_ref)
             .brush_alpha(brush_alpha)
             .transform(transform)
-            .glyph_transform(glyph_transform)
+            .glyph_transform(
+                glyph_transform.map(|transform| Affine::FLIP_Y * transform * Affine::FLIP_Y),
+            )
             .draw(
                 style,
                 glyphs.map(|g: anyrender::Glyph| vello::Glyph {
