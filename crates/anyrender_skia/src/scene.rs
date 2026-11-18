@@ -345,6 +345,57 @@ impl SkiaScenePainter<'_> {
         Some(font)
     }
 
+    fn draw_glyphs_with_canvas_transform(
+        &self,
+        font: &Font,
+        transform: kurbo::Affine,
+        glyph_transform: kurbo::Affine,
+        glyphs: impl Iterator<Item = anyrender::Glyph>,
+    ) {
+        let mut glyphs = glyphs.peekable();
+        if glyphs.peek().is_none() {
+            return;
+        }
+
+        let paint = &self.cache.paint;
+        let shader = paint.shader();
+        let mask_paint;
+        let glyph_paint = if shader.is_some() {
+            // Composite the brush in run space without transforming it with each glyph.
+            self.inner.save_layer(&SaveLayerRec::default());
+            mask_paint = {
+                let mut mask = paint.clone();
+                mask.set_shader(None).set_alpha_f(1.0);
+                mask
+            };
+            &mask_paint
+        } else {
+            paint
+        };
+        let origin = Point::new(0.0, 0.0);
+        for glyph in glyphs {
+            let placement = kurbo::Affine::translate((f64::from(glyph.x), f64::from(glyph.y)));
+            self.set_matrix(transform * placement * glyph_transform);
+            self.inner.draw_glyphs_at(
+                &[glyph.id as GlyphId],
+                GlyphPositions::Points(&[origin]),
+                origin,
+                font,
+                glyph_paint,
+            );
+        }
+        self.set_matrix(transform);
+        if let Some(shader) = shader {
+            let mut brush = Paint::default();
+            brush
+                .set_shader(shader)
+                .set_alpha_f(paint.alpha_f())
+                .set_blend_mode(SkBlendMode::SrcIn);
+            self.inner.draw_paint(&brush);
+            self.inner.restore();
+        }
+    }
+
     fn get_or_cache_normalized_typeface(
         &mut self,
         font: &peniko::FontData,
@@ -641,26 +692,9 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.record_pattern(&brush);
         self.set_matrix(transform);
 
-        let inverse_glyph_transform = if let Some(glyph_transform) = glyph_transform {
-            let matrix = sk_kurbo::matrix_from_affine(glyph_transform);
-            let Some(inverse) = matrix.invert() else {
-                return; // A singular transform collapses the glyphs.
-            };
-            self.inner.concat(&matrix);
-            Some(inverse)
-        } else {
-            None
-        };
         self.reset_paint();
         self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
         self.set_paint_brush(brush, None);
-        // The brush stays in run space.
-        if let (Some(inverse), Some(shader)) = (&inverse_glyph_transform, self.cache.paint.shader())
-        {
-            self.cache
-                .paint
-                .set_shader(shader.with_local_matrix(inverse));
-        }
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 
@@ -678,18 +712,37 @@ impl PaintScene for SkiaScenePainter<'_> {
             font.set_edging(skia_safe::font::Edging::Alias);
         }
 
+        let mut offset = kurbo::Vec2::ZERO;
+        if let Some(glyph_transform) = glyph_transform {
+            let [a, b, c, d, x, y] = glyph_transform.as_coeffs();
+            // Skia applies size, then horizontal scale and y-down shear.
+            let size = (f64::from(font.size()) * d) as f32;
+            let scale_x = (a / d) as f32;
+            let skew_x = (c / d) as f32;
+            if b == 0.0
+                && d > 0.0
+                && size > 0.0
+                && size.is_finite()
+                && scale_x != 0.0
+                && scale_x.is_finite()
+                && skew_x.is_finite()
+            {
+                font.set_size(size).set_scale_x(scale_x).set_skew_x(skew_x);
+                offset = kurbo::Vec2::new(x, y);
+            } else {
+                self.draw_glyphs_with_canvas_transform(&font, transform, glyph_transform, glyphs);
+                return;
+            }
+        }
+
         let (min_size, _) = glyphs.size_hint();
         self.cache.glyph_id_buf.reserve(min_size);
         self.cache.glyph_pos_buf.reserve(min_size);
 
         for glyph in glyphs {
             self.cache.glyph_id_buf.push(GlyphId::from(glyph.id as u16));
-            self.cache.glyph_pos_buf.push(Point::new(glyph.x, glyph.y));
-        }
-
-        if let Some(inverse) = inverse_glyph_transform {
-            // Undo the linear transform on run offsets, but let the glyph-local translation apply.
-            inverse.map_vectors_inplace(&mut self.cache.glyph_pos_buf);
+            let pos = kurbo::Point::new(f64::from(glyph.x), f64::from(glyph.y)) + offset;
+            self.cache.glyph_pos_buf.push(sk_kurbo::pt_from(pos));
         }
 
         self.inner.draw_glyphs_at(

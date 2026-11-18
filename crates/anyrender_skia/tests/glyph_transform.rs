@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use anyrender::{AntiAliasing, Glyph, PaintScene, render_to_buffer};
+use anyrender::{AntiAliasing, Glyph, PaintRef, PaintScene, render_to_buffer};
 use anyrender_skia::SkiaImageRenderer;
 use kurbo::Affine;
-use peniko::{Blob, Color, Fill, FontData};
+use peniko::{Blob, Color, Fill, FontData, Gradient};
 use skrifa::{FontRef, MetadataProvider};
 
 #[test]
@@ -29,9 +29,10 @@ fn glyph_transform_is_y_down_and_applied_before_placement() {
         },
     ];
     let run_transform = Affine::translate((7.0, 11.0)) * Affine::scale_non_uniform(1.0, 1.5);
-    let glyph_transform = Affine::new([2.0, 0.0, -0.5, 2.0, 4.0, -6.0]);
+    let font_transform = Affine::new([1.5, 0.0, -0.5, 2.0, 4.0, -6.0]);
+    let canvas_transform = Affine::new([1.5, 0.5, -0.5, 2.0, 4.0, -6.0]);
 
-    let render = |apply_per_glyph: bool| {
+    let render = |apply_per_glyph: bool, glyph_transform, brush: PaintRef<'_>| {
         render_to_buffer::<SkiaImageRenderer, _>(
             |scene| {
                 let mut draw = |transform, glyph_transform, glyphs: &[Glyph]| {
@@ -42,7 +43,7 @@ fn glyph_transform_is_y_down_and_applied_before_placement() {
                         &[],
                         Default::default(),
                         Fill::NonZero,
-                        Color::WHITE,
+                        brush.clone(),
                         1.0,
                         transform,
                         glyph_transform,
@@ -69,16 +70,43 @@ fn glyph_transform_is_y_down_and_applied_before_placement() {
         )
     };
 
-    let expected = render(true);
-    assert!(
-        expected
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|pixel| pixel[0] == 255)
-    );
-    assert!(
-        render(false) == expected,
-        "glyph placement or shape differed"
-    );
+    for glyph_transform in [font_transform, canvas_transform] {
+        let expected = render(true, glyph_transform, Color::WHITE.into());
+        assert!(
+            expected
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[0] == 255)
+        );
+        assert!(
+            render(false, glyph_transform, Color::WHITE.into()) == expected,
+            "glyph placement or shape differed for {glyph_transform:?}"
+        );
+    }
+
+    let gradient = Gradient::new_linear((55.0, 0.0), (65.0, 0.0))
+        .with_stops([Color::from_rgb8(255, 0, 0), Color::from_rgb8(0, 0, 255)]);
+    let shaded = render(false, canvas_transform, (&gradient).into());
+    let mask = render(true, canvas_transform, Color::WHITE.into());
+    let mut left = 0;
+    let mut right = 0;
+    for (i, (pixel, mask)) in shaded
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(mask.as_chunks::<4>().0)
+        .enumerate()
+    {
+        if mask[0] == 0 {
+            assert_eq!(pixel[..3], [0, 0, 0]);
+        } else if i % 200 < 62 {
+            assert_eq!(pixel[..3], [255, 0, 0]);
+            left += 1;
+        } else if i % 200 >= 72 {
+            assert_eq!(pixel[..3], [0, 0, 255]);
+            right += 1;
+        }
+    }
+    assert!(left > 0 && right > 0, "brush did not paint both glyphs");
 }
