@@ -345,6 +345,8 @@ impl SkiaScenePainter<'_> {
         Some(font)
     }
 
+    /// Draws transforms that `Font` cannot express: a nonzero y-shear coefficient
+    /// (`b`, as in a rotation), or a negative y scale (`d`, as in a vertical flip).
     fn draw_glyphs_with_canvas_transform(
         &self,
         font: &Font,
