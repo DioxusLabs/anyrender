@@ -655,8 +655,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
         self.set_paint_brush(brush, None);
         // The brush stays in run space.
-        if let (Some(inverse), Some(shader)) = (&inverse_glyph_transform, self.cache.paint.shader()) {
-            self.cache.paint.set_shader(shader.with_local_matrix(inverse));
+        if let (Some(inverse), Some(shader)) = (&inverse_glyph_transform, self.cache.paint.shader())
+        {
+            self.cache
+                .paint
+                .set_shader(shader.with_local_matrix(inverse));
         }
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
