@@ -70,7 +70,13 @@ fn glyph_transform_is_y_down_and_applied_before_placement() {
         )
     };
 
-    for glyph_transform in [font_transform, canvas_transform] {
+    for glyph_transform in [
+        font_transform,
+        canvas_transform,
+        Affine::scale_non_uniform(-1.0, 1.0),
+        Affine::scale_non_uniform(1.0, -1.0),
+        Affine::new([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]),
+    ] {
         let expected = render(true, glyph_transform, Color::WHITE.into());
         assert!(
             expected
@@ -82,6 +88,17 @@ fn glyph_transform_is_y_down_and_applied_before_placement() {
         assert!(
             render(false, glyph_transform, Color::WHITE.into()) == expected,
             "glyph placement or shape differed for {glyph_transform:?}"
+        );
+    }
+
+    for glyph_transform in [
+        Affine::scale_non_uniform(0.0, 1.0),
+        Affine::skew(f64::NAN, 0.0),
+    ] {
+        let actual = render(false, glyph_transform, Color::WHITE.into());
+        assert!(
+            actual.as_chunks::<4>().0.iter().all(|pixel| pixel[0] == 0),
+            "invalid transform {glyph_transform:?} drew ink"
         );
     }
 

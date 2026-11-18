@@ -688,9 +688,13 @@ impl PaintScene for SkiaScenePainter<'_> {
         glyphs: impl Iterator<Item = anyrender::Glyph>,
         anti_aliasing: AntiAliasing,
     ) {
+        self.set_matrix(transform);
+        if glyph_transform.is_some_and(|g| !g.is_finite() || g.determinant() == 0.0) {
+            return;
+        }
+
         let brush: anyrender::PaintRef<'a> = brush.into();
         self.record_pattern(&brush);
-        self.set_matrix(transform);
 
         self.reset_paint();
         self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
@@ -715,18 +719,11 @@ impl PaintScene for SkiaScenePainter<'_> {
         let mut offset = kurbo::Vec2::ZERO;
         if let Some(glyph_transform) = glyph_transform {
             let [a, b, c, d, x, y] = glyph_transform.as_coeffs();
-            // Skia applies size, then horizontal scale and y-down shear.
-            let size = (f64::from(font.size()) * d) as f32;
-            let scale_x = (a / d) as f32;
-            let skew_x = (c / d) as f32;
-            if b == 0.0
-                && d > 0.0
-                && size > 0.0
-                && size.is_finite()
-                && scale_x != 0.0
-                && scale_x.is_finite()
-                && skew_x.is_finite()
-            {
+            if b == 0.0 && d > 0.0 {
+                // Skia applies size, then horizontal scale and y-down shear.
+                let size = (f64::from(font.size()) * d) as f32;
+                let scale_x = (a / d) as f32;
+                let skew_x = (c / d) as f32;
                 font.set_size(size).set_scale_x(scale_x).set_skew_x(skew_x);
                 offset = kurbo::Vec2::new(x, y);
             } else {
