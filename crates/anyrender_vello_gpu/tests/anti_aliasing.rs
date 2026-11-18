@@ -46,7 +46,7 @@ fn disabled_anti_aliasing_has_binary_coverage() {
         )),
         0,
     );
-    for kind in ["fill", "stroke", "glyphs"] {
+    for kind in ["fill", "stroke", "glyphs", "pattern"] {
         for aa in [AntiAliasing::Disabled, AntiAliasing::Enabled] {
             let mut scene = Scene::new(64, 64);
             let mut painter = VelloGpuScenePainter::new(
@@ -63,6 +63,35 @@ fn disabled_anti_aliasing_has_binary_coverage() {
             .with_glyph_caching(true);
             let circle = Circle::new((30.3, 30.7), 18.2);
             match kind {
+                "pattern" => {
+                    let mut tile = anyrender::Scene::new();
+                    tile.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        Color::WHITE,
+                        None,
+                        &kurbo::Rect::new(0.0, 0.0, 64.0, 64.0),
+                        AntiAliasing::Enabled,
+                    );
+                    let pattern =
+                        anyrender::Pattern::new(tile, kurbo::Rect::new(0.0, 0.0, 64.0, 64.0));
+                    painter.fill(
+                        Fill::NonZero,
+                        Affine::IDENTITY,
+                        &pattern,
+                        None,
+                        &Circle::new((15.3, 30.7), 10.2),
+                        aa,
+                    );
+                    painter.stroke(
+                        &Stroke::new(3.2),
+                        Affine::IDENTITY,
+                        &pattern,
+                        None,
+                        &Circle::new((45.3, 30.7), 10.2),
+                        aa,
+                    );
+                }
                 "fill" => painter.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
