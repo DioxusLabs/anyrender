@@ -14,6 +14,26 @@ const WIDTH: u32 = 256;
 const HEIGHT: u32 = 160;
 
 fn draw_glyph(painter: &mut impl PaintScene, font: &FontData, glyph_transform: Affine) {
+    draw_positioned_glyph(
+        painter,
+        font,
+        Glyph {
+            id: 45, // 'I' in Roboto
+            x: 50.0,
+            y: 95.0,
+        },
+        Affine::translate((30.0, 20.0)),
+        Some(glyph_transform),
+    );
+}
+
+fn draw_positioned_glyph(
+    painter: &mut impl PaintScene,
+    font: &FontData,
+    glyph: Glyph,
+    transform: Affine,
+    glyph_transform: Option<Affine>,
+) {
     painter.draw_glyphs(
         font,
         80.0,
@@ -23,13 +43,9 @@ fn draw_glyph(painter: &mut impl PaintScene, font: &FontData, glyph_transform: A
         Fill::NonZero,
         Color::WHITE,
         1.0,
-        Affine::translate((30.0, 20.0)),
-        Some(glyph_transform),
-        std::iter::once(Glyph {
-            id: 45, // 'I' in Roboto
-            x: 50.0,
-            y: 95.0,
-        }),
+        transform,
+        glyph_transform,
+        std::iter::once(glyph),
         AntiAliasing::Enabled,
     );
 }
@@ -136,5 +152,56 @@ fn glyph_transforms_use_y_down_glyph_local_space() {
                 );
             }
         }
+    }
+
+    let color_fonts: [(&str, &[u8], u32); 2] = [
+        (
+            "CBDT",
+            include_bytes!("../../../assets/fonts/noto_color_emoji/NotoColorEmoji-CBTF-Subset.ttf"),
+            1,
+        ),
+        (
+            "COLR",
+            include_bytes!("../../../assets/fonts/noto_color_emoji/NotoColorEmoji-Subset.ttf"),
+            4,
+        ),
+    ];
+    let transform = Affine::translate((15.0, 12.0));
+    let position = Affine::translate((50.0, 75.0));
+    let glyph_transform = Affine::translate((20.0, 10.0)) * Affine::skew(-0.5, 0.0);
+    for (format, data, id) in color_fonts {
+        let font = FontData::new(Blob::new(Arc::new(data)), 0);
+        scene.reset();
+        draw_positioned_glyph(
+            &mut VelloScenePainter::new(&mut scene),
+            &font,
+            Glyph {
+                id,
+                x: 50.0,
+                y: 75.0,
+            },
+            transform,
+            Some(glyph_transform),
+        );
+        render_vello(&scene, &mut actual);
+        scene.reset();
+        draw_positioned_glyph(
+            &mut VelloScenePainter::new(&mut scene),
+            &font,
+            Glyph { id, x: 0.0, y: 0.0 },
+            transform * position * glyph_transform,
+            None,
+        );
+        render_vello(&scene, &mut expected_cpu);
+        assert!(expected_cpu.chunks_exact(4).filter(|p| p[3] > 128).count() > 200);
+        let differing_pixels = actual
+            .chunks_exact(4)
+            .zip(expected_cpu.chunks_exact(4))
+            .filter(|(a, b)| a.iter().zip(*b).any(|(a, b)| a.abs_diff(*b) > 8))
+            .count();
+        assert!(
+            differing_pixels <= 4,
+            "{format}: {differing_pixels} differing pixels"
+        );
     }
 }

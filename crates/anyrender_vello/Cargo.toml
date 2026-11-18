@@ -19,6 +19,7 @@ debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
 vello = { workspace = true }
+skrifa = { workspace = true }
 wgpu = { workspace = true }
 rustc-hash = { workspace = true }
 futures-channel = { workspace = true }

@@ -9,6 +9,7 @@ use peniko::{
     BlendMode, BrushRef, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef,
 };
 use rustc_hash::FxHashMap;
+use skrifa::{FontRef, GlyphId, MetadataProvider, instance::Size, raw::TableProvider};
 use vello::Renderer as VelloRenderer;
 use wgpu::Texture;
 use wgpu_context::DeviceHandle;
@@ -267,28 +268,66 @@ impl PaintScene for VelloScenePainter<'_, '_> {
             return;
         }
         let brush_ref: BrushRef<'_> = paint.into();
-        self.inner
-            .draw_glyphs(font)
-            .font_size(font_size)
-            .hint(hint)
-            .normalized_coords(normalized_coords)
-            .font_embolden(vello::FontEmbolden::new(kurbo::Diagonal2::new(
-                embolden.x, embolden.y,
-            )))
-            .brush(brush_ref)
-            .brush_alpha(brush_alpha)
-            .transform(transform)
-            .glyph_transform(
-                glyph_transform.map(|transform| Affine::FLIP_Y * transform * Affine::FLIP_Y),
-            )
-            .draw(
-                style,
-                glyphs.map(|g: anyrender::Glyph| vello::Glyph {
+        let style: StyleRef<'a> = style.into();
+        let glyph_transform = glyph_transform.filter(|&t| t != Affine::IDENTITY);
+        let outline_transform = glyph_transform.map(|t| Affine::FLIP_Y * t * Affine::FLIP_Y);
+        let color_and_bitmap_glyphs = glyph_transform
+            .and_then(|_| FontRef::from_index(font.data.data(), font.index).ok())
+            .and_then(|font| {
+                let bitmaps = font.bitmap_strikes();
+                (font.colr().is_ok() && font.cpal().is_ok() || !bitmaps.is_empty())
+                    .then(|| (font.color_glyphs(), bitmaps))
+            });
+        let is_color_or_bitmap = |glyph: &anyrender::Glyph| {
+            color_and_bitmap_glyphs
+                .as_ref()
+                .is_some_and(|(colr, bitmaps)| {
+                    let id = GlyphId::new(glyph.id);
+                    colr.get(id).is_some()
+                        || bitmaps.glyph_for_size(Size::new(font_size), id).is_some()
+                })
+        };
+        let mut glyphs = glyphs.peekable();
+        while let Some(mut first) = glyphs.next() {
+            let (run_transform, local_transform, single_glyph) = if let Some(g) = glyph_transform
+                && is_color_or_bitmap(&first)
+            {
+                // Vello applies its per-glyph transform in font units for COLR and in bitmap
+                // pixels for bitmap glyphs. Apply it at the sized glyph's origin instead.
+                let position = Affine::translate((f64::from(first.x), f64::from(first.y)));
+                first.x = 0.0;
+                first.y = 0.0;
+                (transform * position * g, None, true)
+            } else {
+                (transform, outline_transform, false)
+            };
+            let run = std::iter::once(first)
+                .chain(std::iter::from_fn(|| {
+                    if single_glyph {
+                        None
+                    } else {
+                        glyphs.next_if(|glyph| !is_color_or_bitmap(glyph))
+                    }
+                }))
+                .map(|g| vello::Glyph {
                     id: g.id,
                     x: g.x,
                     y: g.y,
-                }),
-            );
+                });
+            self.inner
+                .draw_glyphs(font)
+                .font_size(font_size)
+                .hint(hint)
+                .normalized_coords(normalized_coords)
+                .font_embolden(vello::FontEmbolden::new(kurbo::Diagonal2::new(
+                    embolden.x, embolden.y,
+                )))
+                .brush(brush_ref)
+                .brush_alpha(brush_alpha)
+                .transform(run_transform)
+                .glyph_transform(local_transform)
+                .draw(style, run);
+        }
     }
 
     fn draw_box_shadow(
