@@ -261,9 +261,9 @@ fn cache_and_render_outline(
 
 /// Store a bitmap glyph in the raster cache and render it from there, or hand the glyph back
 /// if it has to be drawn uncached.
-#[expect(
+#[allow(
     clippy::result_large_err,
-    reason = "the glyph is handed back by value so its pixmap is not copied"
+    reason = "the glyph is handed back by value so its pixmap is not copied; not large on 32-bit targets"
 )]
 fn cache_and_render_bitmap(
     renderer: &mut impl GlyphRenderer,
