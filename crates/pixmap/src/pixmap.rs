@@ -3,9 +3,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::{
-    BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, as_pixels, as_pixels_mut,
-    byte_len, composite_color_rgba8, fill_slice, multiply_alpha_rgba8, premultiply_rgba8,
-    row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
+    BYTES_PER_PIXEL, BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, as_pixels,
+    as_pixels_mut, byte_len, composite_color_rgba8, fill_slice, multiply_alpha_rgba8,
+    premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -33,6 +33,23 @@ impl Pixmap {
             width,
             height,
             data: vec![0; byte_len(width, height)],
+        }
+    }
+
+    /// Creates an empty (`0x0`) pixmap with backing storage pre-allocated for at least
+    /// `pixel_capacity` pixels.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pixel_capacity * 4` overflows `usize` or exceeds the allocator's capacity limit.
+    pub fn with_capacity(pixel_capacity: usize) -> Self {
+        let byte_capacity = pixel_capacity
+            .checked_mul(BYTES_PER_PIXEL)
+            .expect("pixel capacity overflows usize");
+        Self {
+            width: 0,
+            height: 0,
+            data: Vec::with_capacity(byte_capacity),
         }
     }
 
@@ -451,6 +468,46 @@ impl Pixmap {
     pub fn byte_len(&self) -> usize {
         self.data.len()
     }
+
+    /// The number of pixels the backing allocation can hold without reallocating.
+    ///
+    /// Calling [`resize_buffer`](Self::resize_buffer) or [`reset`](Self::reset) with
+    /// `width as usize * height as usize <= self.capacity()` reuses the existing allocation.
+    pub fn capacity(&self) -> usize {
+        self.data.capacity() / BYTES_PER_PIXEL
+    }
+
+    /// Shrinks the capacity of the backing buffer as much as possible to fit the current
+    /// dimensions.
+    pub fn shrink_to_fit(&mut self) {
+        self.data.shrink_to_fit();
+    }
+
+    /// Changes the pixmap's dimensions without resampling the image, reusing the backing
+    /// allocation whenever `width as usize * height as usize <= self.capacity()`.
+    ///
+    /// If the new pixel count is larger than the current one, newly added pixels are initialized
+    /// to transparent black (`[0, 0, 0, 0]`); if smaller, the buffer is truncated while keeping
+    /// its reserved capacity. Existing bytes are not re-laid out for the new width, so callers
+    /// that want a clean transparent surface should use [`reset`](Self::reset).
+    pub fn resize_buffer(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+        self.data.resize(byte_len(width, height), 0);
+    }
+
+    /// Changes the pixmap's dimensions and clears every pixel to transparent black
+    /// (`[0, 0, 0, 0]`), reusing the backing allocation whenever
+    /// `width as usize * height as usize <= self.capacity()`.
+    ///
+    /// If the backing buffer must grow beyond its current capacity, stale pixel data is
+    /// discarded before reallocating so it is not copied into the new allocation.
+    pub fn reset(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+        self.data.clear();
+        self.data.resize(byte_len(width, height), 0);
+    }
 }
 
 impl fmt::Debug for Pixmap {
@@ -503,5 +560,81 @@ mod tests {
         assert!(empty.pixels().is_empty());
         assert!(empty.row_pixels(0).is_empty());
         assert_eq!(empty.get_pixel(0, 0), None);
+    }
+
+    #[test]
+    fn with_capacity_reuses_allocation_for_resize_buffer_and_reset() {
+        let mut pixmap = Pixmap::with_capacity(16);
+        assert_eq!((pixmap.width(), pixmap.height()), (0, 0));
+        assert!(pixmap.is_empty());
+        assert!(pixmap.capacity() >= 16);
+
+        let initial_ptr = pixmap.data().as_ptr();
+        pixmap.reset(4, 4);
+        assert_eq!((pixmap.width(), pixmap.height()), (4, 4));
+        assert_eq!(pixmap.byte_len(), 64);
+        assert_eq!(pixmap.data().as_ptr(), initial_ptr);
+        assert!(pixmap.data().iter().all(|&b| b == 0));
+
+        pixmap.fill([10, 20, 30, 255]);
+
+        // Shrinking truncates `len` without reallocating or dropping capacity.
+        pixmap.resize_buffer(2, 2);
+        assert_eq!((pixmap.width(), pixmap.height()), (2, 2));
+        assert_eq!(pixmap.byte_len(), 16);
+        assert!(pixmap.capacity() >= 16);
+        assert_eq!(pixmap.data().as_ptr(), initial_ptr);
+        assert_eq!(pixmap.pixel(0, 0), [10, 20, 30, 255]);
+
+        // Growing back within capacity reuses the allocation and zeroes newly added pixels.
+        pixmap.resize_buffer(3, 4);
+        assert_eq!((pixmap.width(), pixmap.height()), (3, 4));
+        assert_eq!(pixmap.byte_len(), 48);
+        assert_eq!(pixmap.data().as_ptr(), initial_ptr);
+        assert_eq!(&pixmap.data()[..16], &[10, 20, 30, 255].repeat(4)[..]);
+        assert!(pixmap.data()[16..].iter().all(|&b| b == 0));
+
+        // `reset` within capacity clears all pixels without reallocating.
+        pixmap.reset(4, 3);
+        assert_eq!((pixmap.width(), pixmap.height()), (4, 3));
+        assert_eq!(pixmap.data().as_ptr(), initial_ptr);
+        assert!(pixmap.data().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn grow_beyond_capacity_and_shrink_to_fit() {
+        let mut pixmap = Pixmap::new(2, 2);
+        pixmap.fill([1, 2, 3, 255]);
+
+        pixmap.reset(10, 10);
+        assert_eq!((pixmap.width(), pixmap.height()), (10, 10));
+        assert_eq!(pixmap.byte_len(), 400);
+        assert!(pixmap.capacity() >= 100);
+        assert!(pixmap.data().iter().all(|&b| b == 0));
+
+        pixmap.fill([9, 8, 7, 255]);
+        pixmap.resize_buffer(1, 2);
+        assert_eq!(pixmap.byte_len(), 8);
+        assert!(pixmap.capacity() >= 100);
+
+        pixmap.shrink_to_fit();
+        assert!(pixmap.capacity() >= 2);
+        assert!(pixmap.capacity() < 100);
+        assert_eq!(pixmap.pixel(0, 0), [9, 8, 7, 255]);
+        assert_eq!(pixmap.pixel(0, 1), [9, 8, 7, 255]);
+
+        // Unaligned capacity from `from_parts` reports whole pixels that fit.
+        let mut raw = Vec::with_capacity(11);
+        raw.extend_from_slice(&[0; 8]);
+        let pixmap = Pixmap::from_parts(raw, 2, 1);
+        assert!(pixmap.capacity() >= 2);
+        assert_eq!(pixmap.capacity(), pixmap.data.capacity() / BYTES_PER_PIXEL);
+
+        // Resetting to empty dimensions works cleanly.
+        let mut empty = Pixmap::new(3, 3);
+        empty.reset(0, 5);
+        assert_eq!((empty.width(), empty.height()), (0, 5));
+        assert!(empty.data().is_empty());
+        assert!(empty.capacity() >= 9);
     }
 }
