@@ -2413,6 +2413,9 @@ mod tests {
         cached_draws: usize,
         /// Number of times the renderer state was saved.
         saves: usize,
+        transform: Affine,
+        /// Where the last glyph drawn from the cache was drawn, in device space.
+        cached_draw_area: Option<Rect>,
     }
 
     /// A raster cache that stores no pixels, but counts what it is asked to do.
@@ -2434,7 +2437,9 @@ mod tests {
     }
 
     impl DrawSink for TestRenderer {
-        fn set_transform(&mut self, _t: Affine) {}
+        fn set_transform(&mut self, t: Affine) {
+            self.transform = t;
+        }
 
         fn set_paint(&mut self, _paint: GlyphPaint) {}
 
@@ -2492,11 +2497,12 @@ mod tests {
         fn draw_cached_glyph(
             &mut self,
             _glyph: &(),
-            _area: &Rect,
+            area: &Rect,
             _quality: ImageQuality,
             _tint: Option<AlphaColor<Srgb>>,
         ) {
             self.cached_draws += 1;
+            self.cached_draw_area = Some(self.transform.transform_rect_bbox(*area));
         }
     }
 
@@ -2801,6 +2807,23 @@ mod tests {
     #[test]
     fn colr_glyph_is_cached_when_cache_is_enabled() {
         ensure_cache(TestGlyphKind::Colr, Style::Fill);
+    }
+
+    /// A cached COLR glyph's image is not resampled, so it has to be drawn on whole pixels.
+    #[test]
+    fn cached_colr_glyph_is_drawn_on_the_pixel_grid() {
+        let font = test_font(TestGlyphKind::Colr);
+        let glyph = test_glyph(&font, TestGlyphKind::Colr);
+        let mut resources = TestResources::default();
+
+        // Once to fill the cache and once from the cache.
+        for _ in 0..2 {
+            let transform = Affine::translate((10.3, 20.6));
+            draw_test_glyph_with(&font, glyph, true, Style::Fill, transform, &mut resources);
+            let area = resources.renderer.cached_draw_area.take().unwrap();
+            assert_eq!((area.x0.fract(), area.y0.fract()), (0.0, 0.0), "{area:?}");
+        }
+        assert_eq!(resources.renderer.cached_draws, 2);
     }
 
     #[test]
