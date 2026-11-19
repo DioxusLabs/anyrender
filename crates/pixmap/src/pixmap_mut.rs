@@ -5,9 +5,10 @@ use core::slice::ChunksExactMut;
 
 use crate::blit::clip_blit;
 use crate::{
-    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, Rows, byte_len, composite_color_rgba8,
-    composite_rgba8, fill_slice, is_contiguous, multiply_alpha_rgba8, premultiply_rgba8, row_bytes,
-    subregion_byte_range, swap_rb_rgba8, unpremultiply_rgba8, validate_strided_parts,
+    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, byte_len,
+    composite_color_rgba8, composite_rgba8, fill_slice, is_contiguous, multiply_alpha_rgba8,
+    premultiply_rgba8, row_bytes, subregion_byte_range, swap_rb_rgba8, unpremultiply_rgba8,
+    validate_strided_parts,
 };
 
 /// A mutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -364,6 +365,21 @@ impl<'a> PixmapMut<'a> {
     /// Panics if the resulting width or height overflows `u16`.
     pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
         self.as_ref().padded_clamped(top, right, bottom, left)
+    }
+
+    /// Resamples the pixmap view to `width × height` using `filter`, returning a new tightly
+    /// packed [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
+        self.as_ref().resize(width, height, filter)
+    }
+
+    /// Resamples the pixmap view into `dst` using `filter`, leaving any inter-row stride padding
+    /// on `dst` untouched.
+    pub fn resize_into(&self, dst: PixmapMut<'_>, filter: ResampleFilter) {
+        self.as_ref().resize_into(dst, filter);
     }
 
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.

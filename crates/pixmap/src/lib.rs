@@ -20,6 +20,7 @@ mod blit;
 mod pixmap;
 mod pixmap_mut;
 mod pixmap_ref;
+mod resample;
 mod transform;
 
 pub use alpha::{multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8, unpremultiply_rgba8};
@@ -27,6 +28,7 @@ pub use blend::{BlendMode, Compose, Mix, composite_color_rgba8, composite_rgba8}
 pub use pixmap::Pixmap;
 pub use pixmap_mut::{PixmapMut, RowsMut};
 pub use pixmap_ref::{PixmapRef, Rows};
+pub use resample::ResampleFilter;
 
 /// The number of bytes one pixel occupies.
 pub const BYTES_PER_PIXEL: usize = 4;
