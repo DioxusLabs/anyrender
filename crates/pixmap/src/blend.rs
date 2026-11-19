@@ -177,10 +177,16 @@ impl BlendMode {
     #[inline]
     #[must_use]
     pub fn blend_pixel(self, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+        match self.compose {
+            Compose::Clear => return [0, 0, 0, 0],
+            Compose::Dest => return dst,
+            _ => {}
+        }
         if self.mix == Mix::Normal {
             compose_pixel_u8(self.compose, src, dst)
         } else {
-            blend_and_compose_pixel_f32(self.mix, self.compose, src, dst)
+            let ms = mix_src_pixel(self.mix, src, dst);
+            compose_pixel_u8(self.compose, ms, dst)
         }
     }
 }
@@ -237,21 +243,28 @@ pub fn composite_rgba8(dst: &mut [u8], src: &[u8], blend_mode: BlendMode, opacit
 
     if blend_mode.mix == Mix::Normal {
         if opacity == 255 {
-            composite_slice_normal(blend_mode.compose, dst_pixels, src_pixels, |s| s);
+            composite_slice_normal_opaque(blend_mode.compose, dst_pixels, src_pixels);
         } else {
             composite_slice_normal(blend_mode.compose, dst_pixels, src_pixels, |s| {
                 scale_pixel(s, opacity)
             });
         }
     } else if opacity == 255 {
-        for (d, &s) in dst_pixels.iter_mut().zip(src_pixels) {
-            *d = blend_and_compose_pixel_f32(blend_mode.mix, blend_mode.compose, s, *d);
-        }
+        composite_slice_mixed(
+            blend_mode.mix,
+            blend_mode.compose,
+            dst_pixels,
+            src_pixels,
+            |s| s,
+        );
     } else {
-        for (d, &s) in dst_pixels.iter_mut().zip(src_pixels) {
-            let s = scale_pixel(s, opacity);
-            *d = blend_and_compose_pixel_f32(blend_mode.mix, blend_mode.compose, s, *d);
-        }
+        composite_slice_mixed(
+            blend_mode.mix,
+            blend_mode.compose,
+            dst_pixels,
+            src_pixels,
+            |s| scale_pixel(s, opacity),
+        );
     }
 }
 
@@ -274,7 +287,10 @@ pub fn composite_color_rgba8(dst: &mut [u8], color: [u8; 4], blend_mode: BlendMo
         dst.fill(0);
         return;
     }
-    if color == [0, 0, 0, 0] && !blend_mode.is_destructive() {
+    if color == [0, 0, 0, 0] {
+        if blend_mode.is_destructive() {
+            dst.fill(0);
+        }
         return;
     }
     if blend_mode.mix == Mix::Normal && blend_mode.compose == Compose::Copy {
@@ -286,11 +302,25 @@ pub fn composite_color_rgba8(dst: &mut [u8], color: [u8; 4], blend_mode: BlendMo
     if blend_mode.mix == Mix::Normal {
         composite_color_normal(blend_mode.compose, dst_pixels, color);
     } else {
-        for d in dst_pixels {
-            *d = blend_and_compose_pixel_f32(blend_mode.mix, blend_mode.compose, color, *d);
-        }
+        composite_color_mixed(blend_mode.mix, blend_mode.compose, dst_pixels, color);
     }
 }
+
+/// Stack-allocated tile size for combining non-`Normal` [`Mix`] with non-`SrcOver` [`Compose`]
+/// in two hoisted, branch-free passes without monomorphizing all `Mix × Compose` pairs.
+const MIX_TILE_LEN: usize = 64;
+
+/// Reciprocal lookup table `1.0 / a` for `a in 1..=255` (`0.0` for `a == 0`), avoiding per-pixel
+/// floating-point division when unpremultiplying channels in `f32` blend modes.
+const RECIP_ALPHA_F32: [f32; 256] = {
+    let mut table = [0.0f32; 256];
+    let mut a = 1usize;
+    while a < 256 {
+        table[a] = 1.0 / (a as f32);
+        a += 1;
+    }
+    table
+};
 
 #[inline]
 fn scale_pixel(px: [u8; 4], opacity: u8) -> [u8; 4] {
@@ -302,22 +332,33 @@ fn scale_pixel(px: [u8; 4], opacity: u8) -> [u8; 4] {
     ]
 }
 
-/// Exact rounded `v / 255` clamped to `255` for sums of products `a * b + c * d`.
+/// Exact rounded `v / 255` clamped to `255` for `u16` sums of channel products.
 #[inline]
-pub(crate) fn div_255_round(v: u32) -> u8 {
+pub(crate) fn div_255_round_u16(v: u16) -> u8 {
     let v = v.min(255 * 255) + 128;
     ((v + (v >> 8)) >> 8) as u8
 }
 
 #[inline]
 fn combine_u8(src: [u8; 4], dst: [u8; 4], fa: u8, fb: u8) -> [u8; 4] {
-    let fa = u32::from(fa);
-    let fb = u32::from(fb);
+    let fa = u16::from(fa);
+    let fb = u16::from(fb);
     [
-        div_255_round(u32::from(src[0]) * fa + u32::from(dst[0]) * fb),
-        div_255_round(u32::from(src[1]) * fa + u32::from(dst[1]) * fb),
-        div_255_round(u32::from(src[2]) * fa + u32::from(dst[2]) * fb),
-        div_255_round(u32::from(src[3]) * fa + u32::from(dst[3]) * fb),
+        div_255_round_u16((u16::from(src[0]) * fa).saturating_add(u16::from(dst[0]) * fb)),
+        div_255_round_u16((u16::from(src[1]) * fa).saturating_add(u16::from(dst[1]) * fb)),
+        div_255_round_u16((u16::from(src[2]) * fa).saturating_add(u16::from(dst[2]) * fb)),
+        div_255_round_u16((u16::from(src[3]) * fa).saturating_add(u16::from(dst[3]) * fb)),
+    ]
+}
+
+#[inline]
+fn compose_src_over_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let inv_sa = 255 - src[3];
+    [
+        src[0].saturating_add(mul_div_255(dst[0], inv_sa)),
+        src[1].saturating_add(mul_div_255(dst[1], inv_sa)),
+        src[2].saturating_add(mul_div_255(dst[2], inv_sa)),
+        src[3].saturating_add(mul_div_255(dst[3], inv_sa)),
     ]
 }
 
@@ -327,15 +368,7 @@ fn compose_pixel_u8(compose: Compose, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
         Compose::Clear => [0, 0, 0, 0],
         Compose::Copy => src,
         Compose::Dest => dst,
-        Compose::SrcOver => {
-            let inv_sa = 255 - src[3];
-            [
-                src[0].saturating_add(mul_div_255(dst[0], inv_sa)),
-                src[1].saturating_add(mul_div_255(dst[1], inv_sa)),
-                src[2].saturating_add(mul_div_255(dst[2], inv_sa)),
-                src[3].saturating_add(mul_div_255(dst[3], inv_sa)),
-            ]
-        }
+        Compose::SrcOver => compose_src_over_u8(src, dst),
         Compose::DestOver => {
             let inv_da = 255 - dst[3];
             [
@@ -359,6 +392,11 @@ fn compose_pixel_u8(compose: Compose, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
             src[3].saturating_add(dst[3]),
         ],
     }
+}
+
+#[inline(never)]
+fn composite_slice_normal_opaque(compose: Compose, dst: &mut [[u8; 4]], src: &[[u8; 4]]) {
+    composite_slice_normal(compose, dst, src, |s| s);
 }
 
 fn composite_slice_normal(
@@ -403,6 +441,28 @@ fn composite_color_normal(compose: Compose, dst: &mut [[u8; 4]], color: [u8; 4])
             }
         };
     }
+    if color[3] == 255 {
+        match compose {
+            Compose::SrcOver => {
+                dst.fill(color);
+                return;
+            }
+            Compose::DestIn => return,
+            Compose::DestOut => {
+                dst.fill([0, 0, 0, 0]);
+                return;
+            }
+            Compose::SrcAtop => {
+                apply_color!(Compose::SrcIn);
+                return;
+            }
+            Compose::Xor => {
+                apply_color!(Compose::SrcOut);
+                return;
+            }
+            _ => {}
+        }
+    }
     match compose {
         Compose::Clear => dst.fill([0, 0, 0, 0]),
         Compose::Copy => dst.fill(color),
@@ -420,111 +480,396 @@ fn composite_color_normal(compose: Compose, dst: &mut [[u8; 4]], color: [u8; 4])
     }
 }
 
+// --- Direct premultiplied `u16` modified-source formulas for separable `Mix` modes ---
+//
+// Each function computes the W3C modified premultiplied source
+// `ms = (1 - ab) * cs + as * ab * B(Cb, Cs)` directly in `u16` without unpremultiplying or
+// floating-point math.
+
 #[inline]
-fn to_u8_unit(v: f32) -> u8 {
-    (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+fn mix_multiply_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let inv_da = 255 - dst[3];
+    [
+        mul_div_255(src[0], inv_da.saturating_add(dst[0])),
+        mul_div_255(src[1], inv_da.saturating_add(dst[1])),
+        mul_div_255(src[2], inv_da.saturating_add(dst[2])),
+        src[3],
+    ]
 }
 
-/// Square root on `[0.0, 1.0]` without `std`/`libm`, accurate to full `f32` precision.
+#[inline]
+fn mix_screen_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let sa = src[3];
+    [
+        src[0].saturating_add(mul_div_255(sa.saturating_sub(src[0]), dst[0])),
+        src[1].saturating_add(mul_div_255(sa.saturating_sub(src[1]), dst[1])),
+        src[2].saturating_add(mul_div_255(sa.saturating_sub(src[2]), dst[2])),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_darken_ch(cs: u8, sa: u8, cb: u8, da: u8) -> u8 {
+    let inv_da = u16::from(255 - da);
+    let lhs = u16::from(sa) * u16::from(cb);
+    let rhs = u16::from(da) * u16::from(cs);
+    div_255_round_u16(inv_da * u16::from(cs) + lhs.min(rhs))
+}
+
+#[inline]
+fn mix_darken_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let (sa, da) = (src[3], dst[3]);
+    [
+        mix_darken_ch(src[0], sa, dst[0], da),
+        mix_darken_ch(src[1], sa, dst[1], da),
+        mix_darken_ch(src[2], sa, dst[2], da),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_lighten_ch(cs: u8, sa: u8, cb: u8, da: u8) -> u8 {
+    let inv_da = u16::from(255 - da);
+    let lhs = u16::from(sa) * u16::from(cb);
+    let rhs = u16::from(da) * u16::from(cs);
+    div_255_round_u16((inv_da * u16::from(cs)).saturating_add(lhs.max(rhs)))
+}
+
+#[inline]
+fn mix_lighten_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let (sa, da) = (src[3], dst[3]);
+    [
+        mix_lighten_ch(src[0], sa, dst[0], da),
+        mix_lighten_ch(src[1], sa, dst[1], da),
+        mix_lighten_ch(src[2], sa, dst[2], da),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_difference_ch(cs: u8, sa: u8, cb: u8, da: u8) -> u8 {
+    let inv_da = u16::from(255 - da);
+    let lhs = u16::from(sa) * u16::from(cb);
+    let rhs = u16::from(da) * u16::from(cs);
+    div_255_round_u16((inv_da * u16::from(cs)).saturating_add(lhs.abs_diff(rhs)))
+}
+
+#[inline]
+fn mix_difference_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let (sa, da) = (src[3], dst[3]);
+    [
+        mix_difference_ch(src[0], sa, dst[0], da),
+        mix_difference_ch(src[1], sa, dst[1], da),
+        mix_difference_ch(src[2], sa, dst[2], da),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_exclusion_ch(cs: u8, sa: u8, cb: u8) -> u8 {
+    let term1 = u16::from(cs) * u16::from(255 - cb);
+    let term2 = u16::from(sa.saturating_sub(cs)) * u16::from(cb);
+    div_255_round_u16(term1.saturating_add(term2))
+}
+
+#[inline]
+fn mix_exclusion_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let sa = src[3];
+    [
+        mix_exclusion_ch(src[0], sa, dst[0]),
+        mix_exclusion_ch(src[1], sa, dst[1]),
+        mix_exclusion_ch(src[2], sa, dst[2]),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_hard_light_ch(cs: u8, sa: u8, cb: u8, da: u8) -> u8 {
+    let cs16 = u16::from(cs);
+    let sa16 = u16::from(sa);
+    let cb16 = u16::from(cb);
+    let da16 = u16::from(da);
+    let inv_da_cs = u16::from(255 - da) * cs16;
+    let blended = if cs16 * 2 <= sa16 {
+        (2 * cs16).saturating_mul(cb16)
+    } else {
+        let inv_s = u16::from(sa.saturating_sub(cs));
+        let inv_b = u16::from(da.saturating_sub(cb));
+        (sa16 * da16).saturating_sub((2 * inv_s).saturating_mul(inv_b))
+    };
+    div_255_round_u16(inv_da_cs.saturating_add(blended))
+}
+
+#[inline]
+fn mix_hard_light_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let (sa, da) = (src[3], dst[3]);
+    [
+        mix_hard_light_ch(src[0], sa, dst[0], da),
+        mix_hard_light_ch(src[1], sa, dst[1], da),
+        mix_hard_light_ch(src[2], sa, dst[2], da),
+        sa,
+    ]
+}
+
+#[inline]
+fn mix_overlay_ch(cs: u8, sa: u8, cb: u8, da: u8) -> u8 {
+    let cs16 = u16::from(cs);
+    let sa16 = u16::from(sa);
+    let cb16 = u16::from(cb);
+    let da16 = u16::from(da);
+    let inv_da_cs = u16::from(255 - da) * cs16;
+    let blended = if cb16 * 2 <= da16 {
+        (2 * cb16).saturating_mul(cs16)
+    } else {
+        let inv_s = u16::from(sa.saturating_sub(cs));
+        let inv_b = u16::from(da.saturating_sub(cb));
+        (sa16 * da16).saturating_sub((2 * inv_s).saturating_mul(inv_b))
+    };
+    div_255_round_u16(inv_da_cs.saturating_add(blended))
+}
+
+#[inline]
+fn mix_overlay_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    let (sa, da) = (src[3], dst[3]);
+    [
+        mix_overlay_ch(src[0], sa, dst[0], da),
+        mix_overlay_ch(src[1], sa, dst[1], da),
+        mix_overlay_ch(src[2], sa, dst[2], da),
+        sa,
+    ]
+}
+
+/// Square root on `[0.0, 1.0]` without `std`/`libm`, accurate to `< 1e-6` across `[0.0, 1.0]`.
 #[inline]
 pub(crate) fn sqrt_unit(x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;
     }
-    let mut y = f32::from_bits((x.to_bits() >> 1) + (0x3f80_0000 >> 1));
-    y = 0.5 * (y + x / y);
+    // Minimax bit-level initial guess + two Newton-Raphson iterations (< 4e-7 max error).
+    let mut y = f32::from_bits((x.to_bits() >> 1) + 0x1fbd_1df5);
     y = 0.5 * (y + x / y);
     y = 0.5 * (y + x / y);
     y
 }
 
 #[inline]
-fn blend_and_compose_pixel_f32(mix: Mix, compose: Compose, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
-    match compose {
-        Compose::Clear => return [0, 0, 0, 0],
-        Compose::Dest => return dst,
-        _ => {}
-    }
-    // When either pixel is fully transparent, W3C blending reduces to `Mix::Normal`
-    // (`(1 - ba) * cs + ba * B(cb, cs)` with `ba == 0` is `cs`, and `sa == 0` yields `src = 0`).
+fn mix_src_f32(
+    src: [u8; 4],
+    dst: [u8; 4],
+    mix_fn: impl FnOnce([f32; 3], [f32; 3]) -> [f32; 3],
+) -> [u8; 4] {
+    // When either pixel is transparent, W3C blending reduces to `Mix::Normal` (`ms == src`).
     if src[3] == 0 || dst[3] == 0 {
-        return compose_pixel_u8(compose, src, dst);
+        return src;
     }
 
-    const INV_255: f32 = 1.0 / 255.0;
-    let sa = f32::from(src[3]) * INV_255;
-    let ba = f32::from(dst[3]) * INV_255;
-
-    let sr = f32::from(src[0]) * INV_255;
-    let sg = f32::from(src[1]) * INV_255;
-    let sb = f32::from(src[2]) * INV_255;
-
-    let br = f32::from(dst[0]) * INV_255;
-    let bg = f32::from(dst[1]) * INV_255;
-    let bb = f32::from(dst[2]) * INV_255;
-
-    let inv_sa = 1.0 / sa;
-    let inv_ba = 1.0 / ba;
+    let inv_sa = RECIP_ALPHA_F32[usize::from(src[3])];
+    let inv_ba = RECIP_ALPHA_F32[usize::from(dst[3])];
 
     let cs = [
-        (sr * inv_sa).clamp(0.0, 1.0),
-        (sg * inv_sa).clamp(0.0, 1.0),
-        (sb * inv_sa).clamp(0.0, 1.0),
+        (f32::from(src[0]) * inv_sa).min(1.0),
+        (f32::from(src[1]) * inv_sa).min(1.0),
+        (f32::from(src[2]) * inv_sa).min(1.0),
     ];
     let cb = [
-        (br * inv_ba).clamp(0.0, 1.0),
-        (bg * inv_ba).clamp(0.0, 1.0),
-        (bb * inv_ba).clamp(0.0, 1.0),
+        (f32::from(dst[0]) * inv_ba).min(1.0),
+        (f32::from(dst[1]) * inv_ba).min(1.0),
+        (f32::from(dst[2]) * inv_ba).min(1.0),
     ];
 
-    let blended = mix_rgb(mix, cs, cb);
+    let blended = mix_fn(cs, cb);
 
     // W3C Compositing and Blending Level 1:
-    // Cs_out = (1 - ab) * Cs + ab * B(Cb, Cs), premultiplied by as.
+    // Cs_out = (1 - ab) * Cs + ab * B(Cb, Cs), premultiplied directly by `sa` in `0..=255`.
+    const INV_255: f32 = 1.0 / 255.0;
+    let ba = f32::from(dst[3]) * INV_255;
     let inv_ba_1 = 1.0 - ba;
-    let ms = [
-        ((inv_ba_1 * cs[0] + ba * blended[0]) * sa).clamp(0.0, 1.0),
-        ((inv_ba_1 * cs[1] + ba * blended[1]) * sa).clamp(0.0, 1.0),
-        ((inv_ba_1 * cs[2] + ba * blended[2]) * sa).clamp(0.0, 1.0),
-        sa,
-    ];
-    let md = [br, bg, bb, ba];
-
-    let (fa, fb) = match compose {
-        Compose::Clear => (0.0, 0.0),
-        Compose::Copy => (1.0, 0.0),
-        Compose::Dest => (0.0, 1.0),
-        Compose::SrcOver => (1.0, 1.0 - sa),
-        Compose::DestOver => (1.0 - ba, 1.0),
-        Compose::SrcIn => (ba, 0.0),
-        Compose::DestIn => (0.0, sa),
-        Compose::SrcOut => (1.0 - ba, 0.0),
-        Compose::DestOut => (0.0, 1.0 - sa),
-        Compose::SrcAtop => (ba, 1.0 - sa),
-        Compose::DestAtop => (1.0 - ba, sa),
-        Compose::Xor => (1.0 - ba, 1.0 - sa),
-        Compose::Plus | Compose::PlusLighter => (1.0, 1.0),
-    };
-
+    let sa = f32::from(src[3]);
     [
-        to_u8_unit(fa * ms[0] + fb * md[0]),
-        to_u8_unit(fa * ms[1] + fb * md[1]),
-        to_u8_unit(fa * ms[2] + fb * md[2]),
-        to_u8_unit(fa * ms[3] + fb * md[3]),
+        ((inv_ba_1 * cs[0] + ba * blended[0]).clamp(0.0, 1.0) * sa + 0.5) as u8,
+        ((inv_ba_1 * cs[1] + ba * blended[1]).clamp(0.0, 1.0) * sa + 0.5) as u8,
+        ((inv_ba_1 * cs[2] + ba * blended[2]).clamp(0.0, 1.0) * sa + 0.5) as u8,
+        src[3],
     ]
 }
 
 #[inline]
-fn screen_ch(cs: f32, cb: f32) -> f32 {
-    cb + cs - cs * cb
+fn mix_color_dodge_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| {
+        [
+            color_dodge_ch(cs[0], cb[0]),
+            color_dodge_ch(cs[1], cb[1]),
+            color_dodge_ch(cs[2], cb[2]),
+        ]
+    })
 }
 
 #[inline]
-fn hard_light_ch(cs: f32, cb: f32) -> f32 {
-    if cs <= 0.5 {
-        cb * (2.0 * cs)
+fn mix_color_burn_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| {
+        [
+            color_burn_ch(cs[0], cb[0]),
+            color_burn_ch(cs[1], cb[1]),
+            color_burn_ch(cs[2], cb[2]),
+        ]
+    })
+}
+
+#[inline]
+fn mix_soft_light_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| {
+        [
+            soft_light_ch(cs[0], cb[0]),
+            soft_light_ch(cs[1], cb[1]),
+            soft_light_ch(cs[2], cb[2]),
+        ]
+    })
+}
+
+#[inline]
+fn mix_hue_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| set_lum(set_sat(cs, sat(cb)), lum(cb)))
+}
+
+#[inline]
+fn mix_saturation_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| set_lum(set_sat(cb, sat(cs)), lum(cb)))
+}
+
+#[inline]
+fn mix_color_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| set_lum(cs, lum(cb)))
+}
+
+#[inline]
+fn mix_luminosity_u8(src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    mix_src_f32(src, dst, |cs, cb| set_lum(cb, lum(cs)))
+}
+
+#[inline]
+fn mix_src_pixel(mix: Mix, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
+    match mix {
+        Mix::Normal => src,
+        Mix::Multiply => mix_multiply_u8(src, dst),
+        Mix::Screen => mix_screen_u8(src, dst),
+        Mix::Overlay => mix_overlay_u8(src, dst),
+        Mix::Darken => mix_darken_u8(src, dst),
+        Mix::Lighten => mix_lighten_u8(src, dst),
+        Mix::ColorDodge => mix_color_dodge_u8(src, dst),
+        Mix::ColorBurn => mix_color_burn_u8(src, dst),
+        Mix::HardLight => mix_hard_light_u8(src, dst),
+        Mix::SoftLight => mix_soft_light_u8(src, dst),
+        Mix::Difference => mix_difference_u8(src, dst),
+        Mix::Exclusion => mix_exclusion_u8(src, dst),
+        Mix::Hue => mix_hue_u8(src, dst),
+        Mix::Saturation => mix_saturation_u8(src, dst),
+        Mix::Color => mix_color_u8(src, dst),
+        Mix::Luminosity => mix_luminosity_u8(src, dst),
+    }
+}
+
+fn composite_slice_mixed_with(
+    compose: Compose,
+    dst: &mut [[u8; 4]],
+    src: &[[u8; 4]],
+    map_src: impl Fn([u8; 4]) -> [u8; 4],
+    mix_fn: impl Fn([u8; 4], [u8; 4]) -> [u8; 4],
+) {
+    if compose == Compose::SrcOver {
+        for (d, &s) in dst.iter_mut().zip(src) {
+            let ms = mix_fn(map_src(s), *d);
+            *d = compose_src_over_u8(ms, *d);
+        }
     } else {
-        screen_ch(2.0 * cs - 1.0, cb)
+        let mut ms_buf = [[0u8; 4]; MIX_TILE_LEN];
+        for (dst_chunk, src_chunk) in dst.chunks_mut(MIX_TILE_LEN).zip(src.chunks(MIX_TILE_LEN)) {
+            let len = dst_chunk.len();
+            for ((ms, &s), &d) in ms_buf[..len].iter_mut().zip(src_chunk).zip(&*dst_chunk) {
+                *ms = mix_fn(map_src(s), d);
+            }
+            composite_slice_normal_opaque(compose, dst_chunk, &ms_buf[..len]);
+        }
+    }
+}
+
+fn composite_slice_mixed(
+    mix: Mix,
+    compose: Compose,
+    dst: &mut [[u8; 4]],
+    src: &[[u8; 4]],
+    map_src: impl Fn([u8; 4]) -> [u8; 4],
+) {
+    macro_rules! dispatch {
+        ($f:ident) => {
+            composite_slice_mixed_with(compose, dst, src, map_src, $f)
+        };
+    }
+    match mix {
+        Mix::Normal => composite_slice_normal(compose, dst, src, map_src),
+        Mix::Multiply => dispatch!(mix_multiply_u8),
+        Mix::Screen => dispatch!(mix_screen_u8),
+        Mix::Overlay => dispatch!(mix_overlay_u8),
+        Mix::Darken => dispatch!(mix_darken_u8),
+        Mix::Lighten => dispatch!(mix_lighten_u8),
+        Mix::ColorDodge => dispatch!(mix_color_dodge_u8),
+        Mix::ColorBurn => dispatch!(mix_color_burn_u8),
+        Mix::HardLight => dispatch!(mix_hard_light_u8),
+        Mix::SoftLight => dispatch!(mix_soft_light_u8),
+        Mix::Difference => dispatch!(mix_difference_u8),
+        Mix::Exclusion => dispatch!(mix_exclusion_u8),
+        Mix::Hue => dispatch!(mix_hue_u8),
+        Mix::Saturation => dispatch!(mix_saturation_u8),
+        Mix::Color => dispatch!(mix_color_u8),
+        Mix::Luminosity => dispatch!(mix_luminosity_u8),
+    }
+}
+
+fn composite_color_mixed_with(
+    compose: Compose,
+    dst: &mut [[u8; 4]],
+    color: [u8; 4],
+    mix_fn: impl Fn([u8; 4], [u8; 4]) -> [u8; 4],
+) {
+    if compose == Compose::SrcOver {
+        for d in dst {
+            let ms = mix_fn(color, *d);
+            *d = compose_src_over_u8(ms, *d);
+        }
+    } else {
+        let mut ms_buf = [[0u8; 4]; MIX_TILE_LEN];
+        for dst_chunk in dst.chunks_mut(MIX_TILE_LEN) {
+            let len = dst_chunk.len();
+            for (ms, &d) in ms_buf[..len].iter_mut().zip(&*dst_chunk) {
+                *ms = mix_fn(color, d);
+            }
+            composite_slice_normal_opaque(compose, dst_chunk, &ms_buf[..len]);
+        }
+    }
+}
+
+fn composite_color_mixed(mix: Mix, compose: Compose, dst: &mut [[u8; 4]], color: [u8; 4]) {
+    macro_rules! dispatch {
+        ($f:ident) => {
+            composite_color_mixed_with(compose, dst, color, $f)
+        };
+    }
+    match mix {
+        Mix::Normal => composite_color_normal(compose, dst, color),
+        Mix::Multiply => dispatch!(mix_multiply_u8),
+        Mix::Screen => dispatch!(mix_screen_u8),
+        Mix::Overlay => dispatch!(mix_overlay_u8),
+        Mix::Darken => dispatch!(mix_darken_u8),
+        Mix::Lighten => dispatch!(mix_lighten_u8),
+        Mix::ColorDodge => dispatch!(mix_color_dodge_u8),
+        Mix::ColorBurn => dispatch!(mix_color_burn_u8),
+        Mix::HardLight => dispatch!(mix_hard_light_u8),
+        Mix::SoftLight => dispatch!(mix_soft_light_u8),
+        Mix::Difference => dispatch!(mix_difference_u8),
+        Mix::Exclusion => dispatch!(mix_exclusion_u8),
+        Mix::Hue => dispatch!(mix_hue_u8),
+        Mix::Saturation => dispatch!(mix_saturation_u8),
+        Mix::Color => dispatch!(mix_color_u8),
+        Mix::Luminosity => dispatch!(mix_luminosity_u8),
     }
 }
 
@@ -617,60 +962,6 @@ fn set_sat(c: [f32; 3], s: f32) -> [f32; 3] {
     }
 }
 
-#[inline]
-fn mix_rgb(mix: Mix, cs: [f32; 3], cb: [f32; 3]) -> [f32; 3] {
-    match mix {
-        Mix::Normal => cs,
-        Mix::Multiply => [cs[0] * cb[0], cs[1] * cb[1], cs[2] * cb[2]],
-        Mix::Screen => [
-            screen_ch(cs[0], cb[0]),
-            screen_ch(cs[1], cb[1]),
-            screen_ch(cs[2], cb[2]),
-        ],
-        Mix::Overlay => [
-            hard_light_ch(cb[0], cs[0]),
-            hard_light_ch(cb[1], cs[1]),
-            hard_light_ch(cb[2], cs[2]),
-        ],
-        Mix::Darken => [cs[0].min(cb[0]), cs[1].min(cb[1]), cs[2].min(cb[2])],
-        Mix::Lighten => [cs[0].max(cb[0]), cs[1].max(cb[1]), cs[2].max(cb[2])],
-        Mix::ColorDodge => [
-            color_dodge_ch(cs[0], cb[0]),
-            color_dodge_ch(cs[1], cb[1]),
-            color_dodge_ch(cs[2], cb[2]),
-        ],
-        Mix::ColorBurn => [
-            color_burn_ch(cs[0], cb[0]),
-            color_burn_ch(cs[1], cb[1]),
-            color_burn_ch(cs[2], cb[2]),
-        ],
-        Mix::HardLight => [
-            hard_light_ch(cs[0], cb[0]),
-            hard_light_ch(cs[1], cb[1]),
-            hard_light_ch(cs[2], cb[2]),
-        ],
-        Mix::SoftLight => [
-            soft_light_ch(cs[0], cb[0]),
-            soft_light_ch(cs[1], cb[1]),
-            soft_light_ch(cs[2], cb[2]),
-        ],
-        Mix::Difference => [
-            (cb[0] - cs[0]).abs(),
-            (cb[1] - cs[1]).abs(),
-            (cb[2] - cs[2]).abs(),
-        ],
-        Mix::Exclusion => [
-            cb[0] + cs[0] - 2.0 * cb[0] * cs[0],
-            cb[1] + cs[1] - 2.0 * cb[1] * cs[1],
-            cb[2] + cs[2] - 2.0 * cb[2] * cs[2],
-        ],
-        Mix::Hue => set_lum(set_sat(cs, sat(cb)), lum(cb)),
-        Mix::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),
-        Mix::Color => set_lum(cs, lum(cb)),
-        Mix::Luminosity => set_lum(cb, lum(cs)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -688,13 +979,14 @@ mod tests {
     }
 
     #[test]
-    fn div_255_round_is_exact_for_all_valid_products_and_clamps() {
-        for v in 0..=(255u32 * 255) {
-            let expected = ((v + 127) / 255) as u8;
-            assert_eq!(div_255_round(v), expected, "mismatch at v={v}");
+    fn div_255_round_u16_is_exact_for_all_valid_products_and_clamps() {
+        for v in 0..=(255u16 * 255) {
+            let expected = ((u32::from(v) + 127) / 255) as u8;
+            assert_eq!(div_255_round_u16(v), expected, "mismatch at v={v}");
         }
-        assert_eq!(div_255_round(255 * 255 + 1), 255);
-        assert_eq!(div_255_round(u32::MAX), 255);
+        for v in (255u16 * 255 + 1)..=u16::MAX {
+            assert_eq!(div_255_round_u16(v), 255, "clamp mismatch at v={v}");
+        }
     }
 
     #[test]
@@ -1078,5 +1370,233 @@ mod tests {
     fn composite_color_rgba8_panics_on_non_multiple_of_four() {
         let mut dst = [0u8; 3];
         composite_color_rgba8(&mut dst, [0; 4], BlendMode::DEST);
+    }
+
+    fn reference_w3c_blend_pixel(
+        mix: Mix,
+        compose: Compose,
+        src: [u8; 4],
+        dst: [u8; 4],
+    ) -> [u8; 4] {
+        let sa = f32::from(src[3]) / 255.0;
+        let ba = f32::from(dst[3]) / 255.0;
+        let sr = f32::from(src[0]) / 255.0;
+        let sg = f32::from(src[1]) / 255.0;
+        let sb = f32::from(src[2]) / 255.0;
+        let br = f32::from(dst[0]) / 255.0;
+        let bg = f32::from(dst[1]) / 255.0;
+        let bb = f32::from(dst[2]) / 255.0;
+
+        let cs = if sa == 0.0 {
+            [0.0; 3]
+        } else {
+            [(sr / sa).min(1.0), (sg / sa).min(1.0), (sb / sa).min(1.0)]
+        };
+        let cb = if ba == 0.0 {
+            [0.0; 3]
+        } else {
+            [(br / ba).min(1.0), (bg / ba).min(1.0), (bb / ba).min(1.0)]
+        };
+
+        let screen = |s: f32, b: f32| b + s - s * b;
+        let hard_light = |s: f32, b: f32| {
+            if s <= 0.5 {
+                b * (2.0 * s)
+            } else {
+                screen(2.0 * s - 1.0, b)
+            }
+        };
+        let b_rgb = match mix {
+            Mix::Normal => cs,
+            Mix::Multiply => [cs[0] * cb[0], cs[1] * cb[1], cs[2] * cb[2]],
+            Mix::Screen => [
+                screen(cs[0], cb[0]),
+                screen(cs[1], cb[1]),
+                screen(cs[2], cb[2]),
+            ],
+            Mix::Overlay => [
+                hard_light(cb[0], cs[0]),
+                hard_light(cb[1], cs[1]),
+                hard_light(cb[2], cs[2]),
+            ],
+            Mix::Darken => [cs[0].min(cb[0]), cs[1].min(cb[1]), cs[2].min(cb[2])],
+            Mix::Lighten => [cs[0].max(cb[0]), cs[1].max(cb[1]), cs[2].max(cb[2])],
+            Mix::ColorDodge => [
+                color_dodge_ch(cs[0], cb[0]),
+                color_dodge_ch(cs[1], cb[1]),
+                color_dodge_ch(cs[2], cb[2]),
+            ],
+            Mix::ColorBurn => [
+                color_burn_ch(cs[0], cb[0]),
+                color_burn_ch(cs[1], cb[1]),
+                color_burn_ch(cs[2], cb[2]),
+            ],
+            Mix::HardLight => [
+                hard_light(cs[0], cb[0]),
+                hard_light(cs[1], cb[1]),
+                hard_light(cs[2], cb[2]),
+            ],
+            Mix::SoftLight => [
+                soft_light_ch(cs[0], cb[0]),
+                soft_light_ch(cs[1], cb[1]),
+                soft_light_ch(cs[2], cb[2]),
+            ],
+            Mix::Difference => [
+                (cb[0] - cs[0]).abs(),
+                (cb[1] - cs[1]).abs(),
+                (cb[2] - cs[2]).abs(),
+            ],
+            Mix::Exclusion => [
+                cb[0] + cs[0] - 2.0 * cb[0] * cs[0],
+                cb[1] + cs[1] - 2.0 * cb[1] * cs[1],
+                cb[2] + cs[2] - 2.0 * cb[2] * cs[2],
+            ],
+            Mix::Hue => set_lum(set_sat(cs, sat(cb)), lum(cb)),
+            Mix::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),
+            Mix::Color => set_lum(cs, lum(cb)),
+            Mix::Luminosity => set_lum(cb, lum(cs)),
+        };
+
+        let ms = if sa == 0.0 || ba == 0.0 {
+            [sr, sg, sb, sa]
+        } else {
+            let inv_ba = 1.0 - ba;
+            [
+                ((inv_ba * cs[0] + ba * b_rgb[0]) * sa).clamp(0.0, 1.0),
+                ((inv_ba * cs[1] + ba * b_rgb[1]) * sa).clamp(0.0, 1.0),
+                ((inv_ba * cs[2] + ba * b_rgb[2]) * sa).clamp(0.0, 1.0),
+                sa,
+            ]
+        };
+        let md = [br, bg, bb, ba];
+        let (fa, fb) = match compose {
+            Compose::Clear => (0.0, 0.0),
+            Compose::Copy => (1.0, 0.0),
+            Compose::Dest => (0.0, 1.0),
+            Compose::SrcOver => (1.0, 1.0 - sa),
+            Compose::DestOver => (1.0 - ba, 1.0),
+            Compose::SrcIn => (ba, 0.0),
+            Compose::DestIn => (0.0, sa),
+            Compose::SrcOut => (1.0 - ba, 0.0),
+            Compose::DestOut => (0.0, 1.0 - sa),
+            Compose::SrcAtop => (ba, 1.0 - sa),
+            Compose::DestAtop => (1.0 - ba, sa),
+            Compose::Xor => (1.0 - ba, 1.0 - sa),
+            Compose::Plus | Compose::PlusLighter => (1.0, 1.0),
+        };
+        let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        [
+            to_u8(fa * ms[0] + fb * md[0]),
+            to_u8(fa * ms[1] + fb * md[1]),
+            to_u8(fa * ms[2] + fb * md[2]),
+            to_u8(fa * ms[3] + fb * md[3]),
+        ]
+    }
+
+    #[test]
+    fn all_mix_and_compose_paths_match_w3c_reference_across_tiles() {
+        let all_mix = [
+            Mix::Normal,
+            Mix::Multiply,
+            Mix::Screen,
+            Mix::Overlay,
+            Mix::Darken,
+            Mix::Lighten,
+            Mix::ColorDodge,
+            Mix::ColorBurn,
+            Mix::HardLight,
+            Mix::SoftLight,
+            Mix::Difference,
+            Mix::Exclusion,
+            Mix::Hue,
+            Mix::Saturation,
+            Mix::Color,
+            Mix::Luminosity,
+        ];
+        let all_compose = [
+            Compose::Clear,
+            Compose::Copy,
+            Compose::Dest,
+            Compose::SrcOver,
+            Compose::DestOver,
+            Compose::SrcIn,
+            Compose::DestIn,
+            Compose::SrcOut,
+            Compose::DestOut,
+            Compose::SrcAtop,
+            Compose::DestAtop,
+            Compose::Xor,
+            Compose::Plus,
+            Compose::PlusLighter,
+        ];
+        let samples: &[[u8; 4]] = &[
+            [0, 0, 0, 0],
+            [0, 0, 0, 255],
+            [255, 255, 255, 255],
+            [200, 100, 50, 255],
+            [40, 180, 240, 255],
+            [128, 64, 32, 128],
+            [10, 90, 150, 180],
+            [200, 20, 180, 200],
+            [1, 0, 1, 1],
+        ];
+        // Build an 81-pixel buffer (> MIX_TILE_LEN = 64) covering every (src, dst) pair.
+        let mut src_bytes = vec![0u8; samples.len() * samples.len() * 4];
+        let mut dst_init = vec![0u8; samples.len() * samples.len() * 4];
+        for (i, &s) in samples.iter().enumerate() {
+            for (j, &d) in samples.iter().enumerate() {
+                let off = (i * samples.len() + j) * 4;
+                src_bytes[off..off + 4].copy_from_slice(&s);
+                dst_init[off..off + 4].copy_from_slice(&d);
+            }
+        }
+
+        for mix in all_mix {
+            for compose in all_compose {
+                let mode = BlendMode::new(mix, compose);
+                let mut dst_buf = dst_init.clone();
+                composite_rgba8(&mut dst_buf, &src_bytes, mode, 255);
+
+                for (idx, (d_out, (&s, &d_in))) in dst_buf
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(
+                        src_bytes
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .zip(dst_init.as_chunks::<4>().0),
+                    )
+                    .enumerate()
+                {
+                    let px_out = mode.blend_pixel(s, d_in);
+                    assert_eq!(
+                        *d_out, px_out,
+                        "slice vs pixel mismatch for {mode:?} at {idx}"
+                    );
+                    let expected = reference_w3c_blend_pixel(mix, compose, s, d_in);
+                    assert_pixel_near(*d_out, expected, 1);
+                }
+
+                // Also verify `composite_color_rgba8` (both opaque and semitransparent colors).
+                for &color in &[[0, 0, 0, 0], [200, 100, 50, 255], [128, 64, 32, 128]] {
+                    let mut color_buf = dst_init.clone();
+                    composite_color_rgba8(&mut color_buf, color, mode);
+                    for (d_out, &d_in) in color_buf
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(dst_init.as_chunks::<4>().0)
+                    {
+                        assert_eq!(
+                            *d_out,
+                            mode.blend_pixel(color, d_in),
+                            "composite_color mismatch for {mode:?} color={color:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
