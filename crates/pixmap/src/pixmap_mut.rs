@@ -3,8 +3,9 @@ use core::fmt;
 use core::iter::FusedIterator;
 use core::slice::ChunksExactMut;
 
+use crate::blit::clip_blit;
 use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, clip_blit, fill_slice, is_contiguous,
+    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous,
     multiply_alpha_rgba8, premultiply_rgba8, row_bytes, subregion_byte_range, swap_rb_rgba8,
     unpremultiply_rgba8, validate_strided_parts,
 };
