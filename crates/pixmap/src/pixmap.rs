@@ -2,7 +2,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::{PixmapMut, PixmapRef, Rows, RowsMut, byte_len, row_bytes};
+use crate::{
+    PixmapMut, PixmapRef, Rows, RowsMut, byte_len, fill_slice, row_bytes, slice_is_opaque,
+};
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
 ///
@@ -68,6 +70,57 @@ impl Pixmap {
     /// Returns `true` if either dimension is zero.
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
+    }
+
+    /// Returns `true` if every pixel has alpha `255` (vacuously `true` when empty).
+    pub fn is_opaque(&self) -> bool {
+        slice_is_opaque(&self.data)
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x >= self.width()` or `y >= self.height()`.
+    pub fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
+        self.as_ref().pixel(x, y)
+    }
+
+    /// Sets the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x >= self.width()` or `y >= self.height()`.
+    pub fn set_pixel(&mut self, x: u16, y: u16, color: [u8; 4]) {
+        self.as_mut().set_pixel(x, y, color);
+    }
+
+    /// Sets every pixel to transparent black (`[0, 0, 0, 0]`).
+    pub fn clear(&mut self) {
+        self.data.fill(0);
+    }
+
+    /// Sets every pixel in a rectangular region to transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x + width > self.width()` or `y + height > self.height()`.
+    pub fn clear_rect(&mut self, x: u16, y: u16, width: u16, height: u16) {
+        self.subregion_mut(x, y, width, height).clear();
+    }
+
+    /// Sets every pixel to the given premultiplied `[r, g, b, a]` colour.
+    pub fn fill(&mut self, color: [u8; 4]) {
+        fill_slice(&mut self.data, color);
+    }
+
+    /// Sets every pixel in a rectangular region to the given premultiplied `[r, g, b, a]` colour.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x + width > self.width()` or `y + height > self.height()`.
+    pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: [u8; 4]) {
+        self.subregion_mut(x, y, width, height).fill(color);
     }
 
     /// The pixel bytes.

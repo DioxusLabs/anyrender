@@ -37,6 +37,22 @@ pub(crate) fn is_contiguous(width: u16, height: u16, stride: usize) -> bool {
     width == 0 || height <= 1 || stride == row_bytes(width)
 }
 
+pub(crate) fn fill_slice(data: &mut [u8], color: [u8; 4]) {
+    if color[0] == color[1] && color[1] == color[2] && color[2] == color[3] {
+        data.fill(color[0]);
+    } else {
+        let (pixels, remainder) = data.as_chunks_mut::<BYTES_PER_PIXEL>();
+        debug_assert!(remainder.is_empty());
+        pixels.fill(color);
+    }
+}
+
+pub(crate) fn slice_is_opaque(data: &[u8]) -> bool {
+    let (pixels, remainder) = data.as_chunks::<BYTES_PER_PIXEL>();
+    debug_assert!(remainder.is_empty());
+    pixels.iter().all(|px| px[3] == 255)
+}
+
 pub(crate) fn validate_strided_parts(data_len: usize, width: u16, height: u16, stride: usize) {
     let min_row_bytes = row_bytes(width);
     assert!(
@@ -344,5 +360,134 @@ mod tests {
 
         view_b.row_mut(1)[0] = 9;
         assert_ne!(view_a, view_b);
+    }
+
+    #[test]
+    fn pixel_and_set_pixel_work_on_owned_and_strided_views() {
+        let mut pixmap = numbered_pixmap(4, 3);
+        assert_eq!(pixmap.pixel(2, 1), [2, 1, 3, 255]);
+        assert_eq!(pixmap.as_ref().pixel(3, 2), [3, 2, 5, 255]);
+
+        pixmap.set_pixel(2, 1, [10, 20, 30, 40]);
+        assert_eq!(pixmap.pixel(2, 1), [10, 20, 30, 40]);
+
+        let mut sub = pixmap.subregion_mut(1, 1, 2, 2);
+        assert_eq!(sub.pixel(1, 0), [10, 20, 30, 40]);
+        sub.set_pixel(0, 1, [50, 60, 70, 80]);
+        assert_eq!(sub.pixel(0, 1), [50, 60, 70, 80]);
+        assert_eq!(pixmap.pixel(1, 2), [50, 60, 70, 80]);
+        // Neighbouring pixel outside the subregion is untouched.
+        assert_eq!(pixmap.pixel(0, 2), [0, 2, 2, 255]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn pixel_rejects_out_of_bounds_x() {
+        let pixmap = Pixmap::new(2, 2);
+        let _ = pixmap.pixel(2, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn set_pixel_rejects_out_of_bounds_y() {
+        let mut pixmap = Pixmap::new(2, 2);
+        pixmap.set_pixel(0, 2, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn fill_and_clear_preserve_stride_padding() {
+        // 2x2 strided buffer with 16-byte stride (8 active + 8 padding) and 4 trailing bytes.
+        let mut buf = vec![0xAA_u8; 16 + 8 + 4];
+        let mut view = PixmapMut::from_parts_with_stride(&mut buf, 2, 2, 16);
+
+        view.fill([1, 2, 3, 4]);
+        assert_eq!(view.row(0), &[1, 2, 3, 4, 1, 2, 3, 4]);
+        assert_eq!(view.row(1), &[1, 2, 3, 4, 1, 2, 3, 4]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+        assert_eq!(&view.raw_data()[24..28], &[0xAA; 4]);
+
+        // Uniform-byte fast path.
+        view.fill([0x55; 4]);
+        assert_eq!(view.row(0), &[0x55; 8]);
+        assert_eq!(view.row(1), &[0x55; 8]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+
+        view.clear();
+        assert_eq!(view.row(0), &[0; 8]);
+        assert_eq!(view.row(1), &[0; 8]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+        assert_eq!(&view.raw_data()[24..28], &[0xAA; 4]);
+
+        // Single-row contiguous strided view also preserves trailing bytes.
+        let mut row_buf = [0xBB_u8; 12];
+        let mut single = PixmapMut::from_parts_with_stride(&mut row_buf, 2, 1, 12);
+        single.fill([9, 8, 7, 6]);
+        assert_eq!(&row_buf[..8], &[9, 8, 7, 6, 9, 8, 7, 6]);
+        assert_eq!(&row_buf[8..], &[0xBB; 4]);
+    }
+
+    #[test]
+    fn fill_rect_and_clear_rect_modify_only_target_region() {
+        let mut pixmap = Pixmap::new(4, 4);
+        pixmap.fill([10, 20, 30, 255]);
+        pixmap.fill_rect(1, 1, 2, 2, [1, 2, 3, 4]);
+
+        for y in 0..4 {
+            for x in 0..4 {
+                let expected = if (1..3).contains(&x) && (1..3).contains(&y) {
+                    [1, 2, 3, 4]
+                } else {
+                    [10, 20, 30, 255]
+                };
+                assert_eq!(pixmap.pixel(x, y), expected, "at ({x}, {y})");
+            }
+        }
+
+        // Zero-sized rects are no-ops, including at edges.
+        pixmap.fill_rect(4, 4, 0, 0, [99, 99, 99, 99]);
+        pixmap.clear_rect(0, 0, 0, 4);
+        assert_eq!(pixmap.pixel(0, 0), [10, 20, 30, 255]);
+
+        pixmap.as_mut().clear_rect(1, 2, 2, 1);
+        assert_eq!(pixmap.pixel(1, 1), [1, 2, 3, 4]);
+        assert_eq!(pixmap.pixel(1, 2), [0, 0, 0, 0]);
+        assert_eq!(pixmap.pixel(2, 2), [0, 0, 0, 0]);
+        assert_eq!(pixmap.pixel(3, 2), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn fill_rect_rejects_out_of_bounds() {
+        let mut pixmap = Pixmap::new(4, 4);
+        pixmap.fill_rect(3, 0, 2, 1, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn is_opaque_checks_active_pixels_and_ignores_padding() {
+        assert!(Pixmap::new(0, 0).is_opaque());
+        assert!(Pixmap::new(0, 3).is_opaque());
+        assert!(Pixmap::new(3, 0).is_opaque());
+        assert!(!Pixmap::new(2, 2).is_opaque());
+
+        let mut pixmap = Pixmap::new(3, 2);
+        pixmap.fill([10, 20, 30, 255]);
+        assert!(pixmap.is_opaque());
+        assert!(pixmap.as_ref().is_opaque());
+        assert!(pixmap.as_mut().is_opaque());
+
+        pixmap.set_pixel(2, 1, [10, 20, 30, 254]);
+        assert!(!pixmap.is_opaque());
+        assert!(pixmap.subregion(0, 0, 2, 2).is_opaque());
+
+        // Strided buffer with zeroed padding bytes is still opaque if active pixels have alpha 255.
+        let mut buf = vec![0_u8; 16 + 8];
+        let mut view = PixmapMut::from_parts_with_stride(&mut buf, 2, 2, 16);
+        view.fill([1, 2, 3, 255]);
+        assert_eq!(&view.raw_data()[8..16], &[0; 8]);
+        assert!(view.is_opaque());
+        assert!(view.as_ref().is_opaque());
+
+        view.set_pixel(1, 1, [1, 2, 3, 0]);
+        assert!(!view.is_opaque());
     }
 }
