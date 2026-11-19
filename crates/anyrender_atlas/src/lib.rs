@@ -41,8 +41,11 @@
 //! assert_eq!((rect.width, rect.height), (8, 8));
 //! ```
 
-use std::collections::HashMap;
 use std::hash::Hash;
+
+// hashbrown's default hasher is much cheaper than std's SipHash, and lookups happen once or
+// more per drawn item.
+use hashbrown::HashMap;
 
 use etagere::{AllocId, AtlasAllocator, size2};
 use pixmap::{BYTES_PER_PIXEL, Pixmap};
