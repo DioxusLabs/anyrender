@@ -186,6 +186,11 @@ impl<'a> PixmapRef<'a> {
         }
         Pixmap::from_raw_parts(data, self.width, self.height)
     }
+
+    /// Copies the active pixels into a tightly packed straight-alpha RGBA8 buffer.
+    pub fn to_unpremultiplied(&self) -> Vec<u8> {
+        self.to_owned().into_unpremultiplied()
+    }
 }
 
 /// An iterator over the rows of a pixmap, from top to bottom.

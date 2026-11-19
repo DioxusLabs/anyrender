@@ -3,7 +3,8 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::{
-    PixmapMut, PixmapRef, Rows, RowsMut, byte_len, fill_slice, row_bytes, slice_is_opaque,
+    PixmapMut, PixmapRef, Rows, RowsMut, byte_len, fill_slice, multiply_alpha_rgba8,
+    premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -45,6 +46,26 @@ impl Pixmap {
             byte_len(width, height),
             "pixel data length must match the pixmap's dimensions"
         );
+        Self {
+            width,
+            height,
+            data,
+        }
+    }
+
+    /// Creates a premultiplied pixmap from straight-alpha RGBA8 pixel data, premultiplying in
+    /// place without copying.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `data.len()` is not `width * height * 4`.
+    pub fn from_unpremultiplied(mut data: Vec<u8>, width: u16, height: u16) -> Self {
+        assert_eq!(
+            data.len(),
+            byte_len(width, height),
+            "pixel data length must match the pixmap's dimensions"
+        );
+        premultiply_rgba8(&mut data);
         Self {
             width,
             height,
@@ -121,6 +142,33 @@ impl Pixmap {
     /// Panics if `x + width > self.width()` or `y + height > self.height()`.
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: [u8; 4]) {
         self.subregion_mut(x, y, width, height).fill(color);
+    }
+
+    /// Premultiplies the colour channels by alpha in place.
+    ///
+    /// [`Pixmap`] normally stores premultiplied pixels; this is useful after writing
+    /// straight-alpha RGBA8 bytes directly into [`data_mut`](Self::data_mut).
+    pub fn premultiply(&mut self) {
+        premultiply_rgba8(&mut self.data);
+    }
+
+    /// Unpremultiplies the colour channels to straight alpha in place.
+    ///
+    /// Pixels with alpha `0` become `[0, 0, 0, 0]`, and any colour channel exceeding alpha is
+    /// clamped to `255`.
+    pub fn unpremultiply(&mut self) {
+        unpremultiply_rgba8(&mut self.data);
+    }
+
+    /// Multiplies every channel of every pixel by `alpha / 255` in place, using nearest-integer
+    /// rounding.
+    pub fn multiply_alpha(&mut self, alpha: u8) {
+        multiply_alpha_rgba8(&mut self.data, alpha);
+    }
+
+    /// Swaps the red and blue channels of every pixel in place (RGBA <-> BGRA).
+    pub fn swap_rb(&mut self) {
+        swap_rb_rgba8(&mut self.data);
     }
 
     /// The pixel bytes.
@@ -206,6 +254,18 @@ impl Pixmap {
     /// Consumes the pixmap and returns its pixel bytes without copying them.
     pub fn into_data(self) -> Vec<u8> {
         self.data
+    }
+
+    /// Consumes the pixmap, unpremultiplying its pixels to straight-alpha RGBA8 in place without
+    /// allocating.
+    pub fn into_unpremultiplied(mut self) -> Vec<u8> {
+        unpremultiply_rgba8(&mut self.data);
+        self.data
+    }
+
+    /// Copies the pixels into a tightly packed straight-alpha RGBA8 buffer.
+    pub fn to_unpremultiplied(&self) -> Vec<u8> {
+        self.as_ref().to_unpremultiplied()
     }
 
     /// The number of bytes of pixel data (`width * height * 4`).
