@@ -5,10 +5,10 @@ use core::slice::ChunksExactMut;
 
 use crate::blit::clip_blit;
 use crate::{
-    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, byte_len,
-    composite_color_rgba8, composite_rgba8, fill_slice, is_contiguous, multiply_alpha_rgba8,
-    premultiply_rgba8, row_bytes, subregion_byte_range, swap_rb_rgba8, unpremultiply_rgba8,
-    validate_strided_parts,
+    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, as_pixels, as_pixels_mut,
+    byte_len, composite_color_rgba8, composite_rgba8, fill_slice, is_contiguous,
+    is_valid_strided_parts, multiply_alpha_rgba8, premultiply_rgba8, row_bytes,
+    subregion_byte_range, swap_rb_rgba8, unpremultiply_rgba8, validate_strided_parts,
 };
 
 /// A mutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -58,6 +58,20 @@ impl<'a> PixmapMut<'a> {
         }
     }
 
+    /// Creates a tightly packed mutable view borrowing existing pixel data, returning `None` if
+    /// `data.len()` is not `width * height * 4`.
+    pub fn try_from_parts(data: &'a mut [u8], width: u16, height: u16) -> Option<Self> {
+        if data.len() != byte_len(width, height) {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            stride: row_bytes(width),
+            data,
+        })
+    }
+
     /// Creates a strided mutable view borrowing existing pixel data.
     ///
     /// `stride` is the distance in bytes between the start of consecutive rows. The last row
@@ -80,6 +94,26 @@ impl<'a> PixmapMut<'a> {
             stride,
             data,
         }
+    }
+
+    /// Creates a strided mutable view borrowing existing pixel data, returning `None` if
+    /// `stride < width * 4`, if the required byte length overflows `usize`, or if `data` is
+    /// shorter than `(height - 1) * stride + width * 4` (or `0` when `height == 0`).
+    pub fn try_from_parts_with_stride(
+        data: &'a mut [u8],
+        width: u16,
+        height: u16,
+        stride: usize,
+    ) -> Option<Self> {
+        if !is_valid_strided_parts(data.len(), width, height, stride) {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            stride,
+            data,
+        })
     }
 
     /// The width in pixels.
@@ -115,6 +149,11 @@ impl<'a> PixmapMut<'a> {
     /// Panics if `x >= self.width()` or `y >= self.height()`.
     pub fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
         self.as_ref().pixel(x, y)
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`, or `None` if out of bounds.
+    pub fn get_pixel(&self, x: u16, y: u16) -> Option<[u8; 4]> {
+        self.as_ref().get_pixel(x, y)
     }
 
     /// Sets the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
@@ -405,6 +444,22 @@ impl<'a> PixmapMut<'a> {
         self.is_contiguous().then(|| &mut self.data[..len])
     }
 
+    /// Returns the pixels as a single contiguous slice of premultiplied `[r, g, b, a]` values
+    /// (length `width * height`) if [`is_contiguous`](Self::is_contiguous) is `true`, or `None`
+    /// if rows have inter-row gaps.
+    #[inline]
+    pub fn pixels(&self) -> Option<&[[u8; 4]]> {
+        self.data().map(as_pixels)
+    }
+
+    /// Returns the pixels mutably as a single contiguous slice of premultiplied `[r, g, b, a]`
+    /// values (length `width * height`) if [`is_contiguous`](Self::is_contiguous) is `true`, or
+    /// `None` if rows have inter-row gaps.
+    #[inline]
+    pub fn pixels_mut(&mut self) -> Option<&mut [[u8; 4]]> {
+        self.data_mut().map(as_pixels_mut)
+    }
+
     /// Returns the underlying borrowed slice, which may include inter-row stride padding or
     /// trailing bytes beyond the active pixels.
     pub fn raw_data(&self) -> &[u8] {
@@ -448,6 +503,26 @@ impl<'a> PixmapMut<'a> {
         );
         let start = y as usize * self.stride;
         &mut self.data[start..start + row_bytes(self.width)]
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixels of row `y` (length `width`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= self.height()`.
+    #[inline]
+    pub fn row_pixels(&self, y: u16) -> &[[u8; 4]] {
+        as_pixels(self.row(y))
+    }
+
+    /// Returns the mutable premultiplied `[r, g, b, a]` pixels of row `y` (length `width`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= self.height()`.
+    #[inline]
+    pub fn row_pixels_mut(&mut self, y: u16) -> &mut [[u8; 4]] {
+        as_pixels_mut(self.row_mut(y))
     }
 
     /// Iterates over the rows of pixels from top to bottom.
@@ -802,5 +877,45 @@ impl fmt::Debug for PixmapMut<'_> {
             .field("height", &self.height)
             .field("stride", &self.stride)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn try_from_parts_pixels_mut_and_get_pixel() {
+        let mut data = [0_u8; 8];
+        {
+            let mut view = PixmapMut::try_from_parts(&mut data, 2, 1).unwrap();
+            view.pixels_mut().unwrap()[1] = [10, 20, 30, 255];
+            assert_eq!(view.pixels(), Some(&[[0, 0, 0, 0], [10, 20, 30, 255]][..]));
+            assert_eq!(view.get_pixel(1, 0), Some([10, 20, 30, 255]));
+            assert_eq!(view.get_pixel(2, 0), None);
+        }
+        assert_eq!(data, [0, 0, 0, 0, 10, 20, 30, 255]);
+
+        assert!(PixmapMut::try_from_parts(&mut data[..7], 2, 1).is_none());
+        assert!(PixmapMut::try_from_parts(&mut [], 0, 2).is_some());
+
+        // Strided mutable view preserves inter-row padding when mutating via `row_pixels_mut`.
+        let mut buf = vec![0xAA_u8; 24];
+        {
+            let mut strided = PixmapMut::try_from_parts_with_stride(&mut buf, 2, 2, 16).unwrap();
+            assert_eq!(strided.pixels(), None);
+            assert_eq!(strided.pixels_mut(), None);
+            strided.row_pixels_mut(0)[0] = [1, 2, 3, 4];
+            strided.row_pixels_mut(1)[1] = [5, 6, 7, 8];
+            assert_eq!(strided.row_pixels(0)[0], [1, 2, 3, 4]);
+            assert_eq!(strided.get_pixel(1, 1), Some([5, 6, 7, 8]));
+            assert_eq!(strided.get_pixel(0, 2), None);
+        }
+        assert_eq!(&buf[8..16], &[0xAA; 8]);
+
+        assert!(PixmapMut::try_from_parts_with_stride(&mut buf, 2, 2, 4).is_none());
+        assert!(PixmapMut::try_from_parts_with_stride(&mut buf[..23], 2, 2, 16).is_none());
+        assert!(PixmapMut::try_from_parts_with_stride(&mut buf, 1, 2, usize::MAX).is_none());
     }
 }
