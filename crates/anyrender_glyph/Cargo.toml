@@ -10,18 +10,17 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-std = ["foldhash/std", "vello_common/std", "skrifa/std"]
-libm = ["skrifa/libm", "vello_common/libm", "dep:core_maths"]
-png = ["std", "dep:png", "vello_common/png"]
+std = ["skrifa/std"]
+libm = ["skrifa/libm", "dep:core_maths"]
+png = ["std", "dep:png"]
 
 [dependencies]
 bytemuck = { version = "1.25", features = ["derive"] }
-foldhash = { version = "0.2", default-features = false }
 core_maths = { version = "0.1.1", optional = true }
 hashbrown = { version = "0.17.1", default-features = false, features = ["default-hasher", "raw-entry"] }
 log = "0.4.29"
 peniko = { workspace = true }
 skrifa = { workspace = true, features = ["autohint_shaping"] }
 smallvec = "1.15.1"
-vello_common = { workspace = true }
+pixmap = { workspace = true }
 png = { version = "0.18.1", optional = true }
