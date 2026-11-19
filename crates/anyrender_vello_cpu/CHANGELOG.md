@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- Glyphs are drawn with `anyrender_glyph` in place of Vello's `text` feature and `glifo`, which `vello_cpu` is now built without.
+- Rasterized glyphs are cached by default, one image per glyph, within a 16 MiB budget. `set_glyph_caching(false)` turns the cache off for debugging.
+
 ## [0.19.0] - 2026-11-16
 
 ### Added
