@@ -2395,7 +2395,7 @@ mod tests {
                         (metrics.width, metrics.height)
                     );
                 }
-                GlyphRaster::Commands(commands) => {
+                GlyphRaster::Commands(mut commands) => {
                     self.rasterizing = true;
                     commands.draw(self);
                     self.rasterizing = false;

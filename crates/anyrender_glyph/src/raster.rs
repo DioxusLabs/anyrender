@@ -98,10 +98,13 @@ impl Debug for GlyphCommands<'_> {
 
 impl GlyphCommands<'_> {
     /// Draw the glyph into `sink`, with the top-left corner of its image at the origin.
-    pub fn draw(self, sink: &mut dyn DrawSink) {
-        match self.0 {
+    ///
+    /// This can be called more than once, so a renderer can rasterize the glyph and still hand
+    /// the commands back if it then has nowhere to store the result.
+    pub fn draw(&mut self, sink: &mut dyn DrawSink) {
+        match &mut self.0 {
             GlyphCommandsInner::Outline { path, transform } => {
-                sink.set_transform(transform);
+                sink.set_transform(*transform);
                 sink.set_paint(BLACK.into());
                 sink.fill_path(path);
             }
@@ -119,7 +122,7 @@ impl GlyphCommands<'_> {
                     sink.push_clip_rect(&glyph.area);
                 }
 
-                outline_cache.paint_colr(glyph, context_color, sink);
+                outline_cache.paint_colr(glyph, *context_color, sink);
 
                 if glyph.has_non_default_blend {
                     sink.pop_layer();
