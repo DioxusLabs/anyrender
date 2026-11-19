@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
 
+## Unreleased
+
+### Changed
+
+- Off Apple platforms, text baselines are rounded to the nearest whole device pixel when the transform has no rotation or skew, as Skia does. They were not snapped vertically before.
+
 ## [0.12.0] - 2026-11-16
 
 ### Added
