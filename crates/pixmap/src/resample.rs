@@ -23,96 +23,129 @@ const RING_BUDGET_BYTES: usize = 512 * 1024;
 
 /// Resampling filter used when scaling a pixmap.
 ///
-/// All convolution filters (`Box`, `Bilinear`, `CatmullRom`, `Mitchell`, and `Lanczos3`) run
-/// through the same separable 2-pass fixed-point engine with precomputed per-axis tap tables,
-/// scaling the kernel support automatically when downscaling to avoid aliasing. Negative-lobe
-/// filters clamp output RGB channels to `0..=alpha` to preserve valid premultiplied RGBA8 pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum ResampleFilter {
-    /// Nearest-neighbor sampling (1-tap, no interpolation). Fastest; preserves hard pixel edges.
+/// Use one of the built-in presets ([`NEAREST`](Self::NEAREST), [`BOX`](Self::BOX),
+/// [`BILINEAR`](Self::BILINEAR), [`CATMULL_ROM`](Self::CATMULL_ROM),
+/// [`MITCHELL`](Self::MITCHELL), [`LANCZOS3`](Self::LANCZOS3)), or construct a custom
+/// separable filter with [`ResampleFilter::custom`].
+///
+/// All convolution filters run through the same separable 2-pass fixed-point engine with
+/// precomputed per-axis tap tables, scaling kernel support automatically when downscaling to
+/// avoid aliasing. Filters that produce negative tap weights automatically clamp output RGB
+/// channels to `0..=alpha` to preserve valid premultiplied RGBA8 pixels.
+#[derive(Debug, Clone, Copy)]
+pub struct ResampleFilter {
+    kind: FilterKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FilterKind {
     Nearest,
-    /// Exact pixel-area (box) average. Clean downscaling with no ringing; reduces to nearest
-    /// pixel coverage when upscaling at integer factors.
     Box,
-    /// Linear (triangle) filter, with support scaled when downscaling to prevent aliasing.
-    #[default]
-    Bilinear,
-    /// Catmull-Rom bicubic filter (`B = 0, C = 0.5`). Sharp with slight overshoot on high-contrast
-    /// edges.
-    CatmullRom,
-    /// Mitchell-Netravali bicubic filter (`B = 1/3, C = 1/3`). Smoother bicubic with less ringing
-    /// than [`ResampleFilter::CatmullRom`].
-    Mitchell,
-    /// 3-lobe Lanczos windowed sinc filter. Sharpest downscaling for photographic content, with
-    /// stronger ringing near sharp edges.
-    Lanczos3,
+    Kernel { radius: f64, eval: fn(f64) -> f64 },
+}
+
+impl Default for ResampleFilter {
+    #[inline]
+    fn default() -> Self {
+        Self::BILINEAR
+    }
 }
 
 impl ResampleFilter {
-    #[inline]
-    const fn has_negative_lobes(self) -> bool {
-        matches!(self, Self::CatmullRom | Self::Mitchell | Self::Lanczos3)
-    }
+    /// Nearest-neighbor sampling (1-tap, no interpolation). Fastest; preserves hard pixel edges.
+    pub const NEAREST: Self = Self {
+        kind: FilterKind::Nearest,
+    };
+
+    /// Exact pixel-area (box) average. Clean downscaling with no ringing; reduces to nearest
+    /// pixel coverage when upscaling at integer factors.
+    pub const BOX: Self = Self {
+        kind: FilterKind::Box,
+    };
+
+    /// Linear (triangle) filter, with support scaled when downscaling to prevent aliasing.
+    pub const BILINEAR: Self = Self::from_kernel(1.0, bilinear_kernel);
+
+    /// Catmull-Rom bicubic filter (`B = 0, C = 0.5`). Sharp with slight overshoot on high-contrast
+    /// edges.
+    pub const CATMULL_ROM: Self = Self::from_kernel(2.0, catmull_rom_kernel);
+
+    /// Mitchell-Netravali bicubic filter (`B = 1/3, C = 1/3`). Smoother bicubic with less ringing
+    /// than [`ResampleFilter::CATMULL_ROM`].
+    pub const MITCHELL: Self = Self::from_kernel(2.0, mitchell_kernel);
+
+    /// 3-lobe Lanczos windowed sinc filter. Sharpest downscaling for photographic content, with
+    /// stronger ringing near sharp edges.
+    pub const LANCZOS3: Self = Self::from_kernel(3.0, lanczos3_kernel);
 
     #[inline]
-    const fn base_radius(self) -> f64 {
-        match self {
-            Self::Nearest => 0.0,
-            Self::Box => 0.5,
-            Self::Bilinear => 1.0,
-            Self::CatmullRom | Self::Mitchell => 2.0,
-            Self::Lanczos3 => 3.0,
+    const fn from_kernel(radius: f64, eval: fn(f64) -> f64) -> Self {
+        Self {
+            kind: FilterKind::Kernel { radius, eval },
         }
     }
 
-    #[inline]
-    fn eval_kernel(self, x: f64) -> f64 {
-        let ax = if x < 0.0 { -x } else { x };
-        match self {
-            Self::Nearest => 0.0,
-            Self::Box => {
-                if ax < 0.5 {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            Self::Bilinear => {
-                if ax < 1.0 {
-                    1.0 - ax
-                } else {
-                    0.0
-                }
-            }
-            Self::CatmullRom => {
-                if ax < 1.0 {
-                    (1.5 * ax - 2.5) * ax * ax + 1.0
-                } else if ax < 2.0 {
-                    ((-0.5 * ax + 2.5) * ax - 4.0) * ax + 2.0
-                } else {
-                    0.0
-                }
-            }
-            Self::Mitchell => {
-                // Mitchell-Netravali with B = 1/3, C = 1/3.
-                if ax < 1.0 {
-                    ((7.0 * ax - 12.0) * ax * ax + 16.0 / 3.0) * (1.0 / 6.0)
-                } else if ax < 2.0 {
-                    (((-(7.0 / 3.0) * ax + 12.0) * ax - 20.0) * ax + 32.0 / 3.0) * (1.0 / 6.0)
-                } else {
-                    0.0
-                }
-            }
-            Self::Lanczos3 => {
-                if ax < 1e-9 {
-                    1.0
-                } else if ax < 3.0 {
-                    sinc_pi(ax) * sinc_pi(ax * (1.0 / 3.0))
-                } else {
-                    0.0
-                }
-            }
-        }
+    /// Creates a custom separable resampling filter from a 1D convolution kernel function.
+    ///
+    /// - `radius` is the positive support radius in source pixels (scaled by `src / dst` when
+    ///   downscaling).
+    /// - `eval` evaluates the kernel at distance `x` in `[-radius, radius]`. Tap weights are
+    ///   normalized to sum to 1 per output pixel, and premultiplied RGB clamping is enabled
+    ///   automatically whenever any tap weight is negative.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `radius` is not finite or not strictly positive.
+    pub const fn custom(radius: f64, eval: fn(f64) -> f64) -> Self {
+        assert!(
+            radius > 0.0 && radius < f64::INFINITY,
+            "resample filter radius must be finite and positive"
+        );
+        Self::from_kernel(radius, eval)
+    }
+}
+
+#[inline]
+fn abs_f64(x: f64) -> f64 {
+    if x < 0.0 { -x } else { x }
+}
+
+fn bilinear_kernel(x: f64) -> f64 {
+    let ax = abs_f64(x);
+    if ax < 1.0 { 1.0 - ax } else { 0.0 }
+}
+
+fn catmull_rom_kernel(x: f64) -> f64 {
+    let ax = abs_f64(x);
+    if ax < 1.0 {
+        (1.5 * ax - 2.5) * ax * ax + 1.0
+    } else if ax < 2.0 {
+        ((-0.5 * ax + 2.5) * ax - 4.0) * ax + 2.0
+    } else {
+        0.0
+    }
+}
+
+fn mitchell_kernel(x: f64) -> f64 {
+    // Mitchell-Netravali with B = 1/3, C = 1/3.
+    let ax = abs_f64(x);
+    if ax < 1.0 {
+        ((7.0 * ax - 12.0) * ax * ax + 16.0 / 3.0) * (1.0 / 6.0)
+    } else if ax < 2.0 {
+        (((-(7.0 / 3.0) * ax + 12.0) * ax - 20.0) * ax + 32.0 / 3.0) * (1.0 / 6.0)
+    } else {
+        0.0
+    }
+}
+
+fn lanczos3_kernel(x: f64) -> f64 {
+    let ax = abs_f64(x);
+    if ax < 1e-9 {
+        1.0
+    } else if ax < 3.0 {
+        sinc_pi(ax) * sinc_pi(ax * (1.0 / 3.0))
+    } else {
+        0.0
     }
 }
 
@@ -189,18 +222,74 @@ struct TapTable {
     spans: Vec<TapSpan>,
     weights: Vec<i16>,
     max_taps: usize,
+    has_negative: bool,
 }
 
 impl TapTable {
     fn build(src_len: u16, dst_len: u16, filter: ResampleFilter) -> Self {
-        debug_assert!(src_len > 0 && dst_len > 0);
-        debug_assert!(!matches!(filter, ResampleFilter::Nearest));
+        match filter.kind {
+            FilterKind::Nearest => unreachable!("nearest filter uses the direct fast path"),
+            FilterKind::Box => Self::build_box(src_len, dst_len),
+            FilterKind::Kernel { radius, eval } => {
+                Self::build_kernel(src_len, dst_len, radius, eval)
+            }
+        }
+    }
 
+    fn build_box(src_len: u16, dst_len: u16) -> Self {
+        debug_assert!(src_len > 0 && dst_len > 0);
+        let src_n = src_len as usize;
+        let dst_n = dst_len as usize;
+        let ratio = src_n as f64 / dst_n as f64;
+        let est_taps = ceil_f64(ratio) as usize + 2;
+
+        let mut spans = Vec::with_capacity(dst_n);
+        let mut weights = Vec::with_capacity(dst_n.saturating_mul(est_taps));
+        let mut raw = Vec::with_capacity(est_taps);
+        let mut max_taps = 1usize;
+        let mut has_negative = false;
+
+        for d in 0..dst_n {
+            raw.clear();
+            // Exact pixel-area overlap between output pixel [left, right] and source pixels.
+            let left = d as f64 * ratio;
+            let right = (d + 1) as f64 * ratio;
+            let lo = floor_f64(left).clamp(0, (src_n - 1) as i64) as usize;
+            let hi = (ceil_f64(right) - 1).clamp(lo as i64, (src_n - 1) as i64) as usize;
+            for s in lo..=hi {
+                let s0 = s as f64;
+                let s1 = (s + 1) as f64;
+                let overlap = (right.min(s1) - left.max(s0)).max(0.0);
+                raw.push(overlap);
+            }
+            quantize_and_push_taps(
+                d,
+                src_n,
+                dst_n,
+                lo,
+                &raw,
+                &mut spans,
+                &mut weights,
+                &mut max_taps,
+                &mut has_negative,
+            );
+        }
+
+        Self {
+            spans,
+            weights,
+            max_taps,
+            has_negative,
+        }
+    }
+
+    fn build_kernel(src_len: u16, dst_len: u16, radius: f64, eval: fn(f64) -> f64) -> Self {
+        debug_assert!(src_len > 0 && dst_len > 0);
         let src_n = src_len as usize;
         let dst_n = dst_len as usize;
         let ratio = src_n as f64 / dst_n as f64;
         let scale = if ratio > 1.0 { ratio } else { 1.0 };
-        let support = filter.base_radius() * scale;
+        let support = radius * scale;
         let inv_scale = 1.0 / scale;
 
         let est_taps = ceil_f64(2.0 * support) as usize + 2;
@@ -208,117 +297,143 @@ impl TapTable {
         let mut weights = Vec::with_capacity(dst_n.saturating_mul(est_taps));
         let mut raw = Vec::with_capacity(est_taps);
         let mut max_taps = 1usize;
+        let mut has_negative = false;
 
         for d in 0..dst_n {
             raw.clear();
-            let (first, last) = if matches!(filter, ResampleFilter::Box) {
-                // Exact pixel-area overlap between output pixel [left, right] and source pixels.
-                let left = d as f64 * ratio;
-                let right = (d + 1) as f64 * ratio;
-                let lo = floor_f64(left).clamp(0, (src_n - 1) as i64) as usize;
-                let hi = (ceil_f64(right) - 1).clamp(lo as i64, (src_n - 1) as i64) as usize;
+            let center = (d as f64 + 0.5) * ratio - 0.5;
+            let lo = ceil_f64(center - support).clamp(0, (src_n - 1) as i64) as usize;
+            let hi = floor_f64(center + support).clamp(0, (src_n - 1) as i64) as usize;
+            let first = if lo <= hi {
                 for s in lo..=hi {
-                    let s0 = s as f64;
-                    let s1 = (s + 1) as f64;
-                    let overlap = (right.min(s1) - left.max(s0)).max(0.0);
-                    raw.push(overlap);
+                    let dist = (s as f64 - center) * inv_scale;
+                    raw.push(eval(dist));
                 }
-                (lo, hi)
+                lo
             } else {
-                let center = (d as f64 + 0.5) * ratio - 0.5;
-                let lo = ceil_f64(center - support).clamp(0, (src_n - 1) as i64) as usize;
-                let hi = floor_f64(center + support).clamp(0, (src_n - 1) as i64) as usize;
-                if lo <= hi {
-                    for s in lo..=hi {
-                        let dist = (s as f64 - center) * inv_scale;
-                        raw.push(filter.eval_kernel(dist));
-                    }
-                    (lo, hi)
-                } else {
-                    let fallback = nearest_index(d, src_n, dst_n);
-                    raw.push(1.0);
-                    (fallback, fallback)
-                }
-            };
-
-            let mut sum = 0.0f64;
-            for &w in &raw {
-                sum += w;
-            }
-
-            let offset = weights.len() as u32;
-            if (-1e-12..=1e-12).contains(&sum) {
                 let fallback = nearest_index(d, src_n, dst_n);
-                weights.push(WEIGHT_ONE as i16);
-                spans.push(TapSpan {
-                    start: fallback as u16,
-                    len: 1,
-                    offset,
-                });
-                continue;
-            }
-
-            let norm = (WEIGHT_ONE as f64) / sum;
-            let mut err = 0.0f64;
-            let mut q_sum = 0i32;
-            let mut best_rel = 0usize;
-            let mut best_val = i32::MIN;
-            let tap_count = last - first + 1;
-            for (i, &w) in raw.iter().enumerate() {
-                // Distribute quantization error across taps so heavy downscales stay uniform
-                // and `|WEIGHT_ONE - q_sum| <= 1`.
-                let scaled = w * norm + err;
-                let q = round_i32(scaled);
-                err = scaled - (q as f64);
-                q_sum += q;
-                if q > best_val {
-                    best_val = q;
-                    best_rel = i;
-                }
-                weights.push(q as i16);
-            }
-
-            // Adjust the dominant tap so quantized weights sum to WEIGHT_ONE exactly, preserving
-            // constant-color inputs without rounding drift.
-            let diff = WEIGHT_ONE - q_sum;
-            let base = offset as usize;
-            weights[base + best_rel] = (i32::from(weights[base + best_rel]) + diff) as i16;
-
-            // Trim zero-weight edge taps to avoid unnecessary MACs.
-            let mut trim_start = 0usize;
-            let mut trim_end = tap_count;
-            while trim_end - trim_start > 1 && weights[base + trim_start] == 0 {
-                trim_start += 1;
-            }
-            while trim_end - trim_start > 1 && weights[base + trim_end - 1] == 0 {
-                trim_end -= 1;
-            }
-
-            if trim_start > 0 {
-                let keep = trim_end - trim_start;
-                weights.copy_within(base + trim_start..base + trim_end, base);
-                weights.truncate(base + keep);
-            } else if trim_end < tap_count {
-                weights.truncate(base + trim_end);
-            }
-
-            let kept = trim_end - trim_start;
-            if kept > max_taps {
-                max_taps = kept;
-            }
-            spans.push(TapSpan {
-                start: (first + trim_start) as u16,
-                len: kept as u16,
-                offset,
-            });
+                raw.push(1.0);
+                fallback
+            };
+            quantize_and_push_taps(
+                d,
+                src_n,
+                dst_n,
+                first,
+                &raw,
+                &mut spans,
+                &mut weights,
+                &mut max_taps,
+                &mut has_negative,
+            );
         }
 
         Self {
             spans,
             weights,
             max_taps,
+            has_negative,
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn quantize_and_push_taps(
+    d: usize,
+    src_n: usize,
+    dst_n: usize,
+    first: usize,
+    raw: &[f64],
+    spans: &mut Vec<TapSpan>,
+    weights: &mut Vec<i16>,
+    max_taps: &mut usize,
+    has_negative: &mut bool,
+) {
+    let mut sum = 0.0f64;
+    let mut max_abs = 0.0f64;
+    for &w in raw {
+        sum += w;
+        let aw = abs_f64(w);
+        if aw > max_abs {
+            max_abs = aw;
+        }
+    }
+
+    let offset = weights.len() as u32;
+    let abs_sum = abs_f64(sum);
+    let max_safe_weight = (i16::MAX - 1) as f64;
+    if !(abs_sum > 1e-12 && sum.is_finite() && max_abs.is_finite())
+        || max_abs * (WEIGHT_ONE as f64) > max_safe_weight * abs_sum
+    {
+        let fallback = nearest_index(d, src_n, dst_n);
+        weights.push(WEIGHT_ONE as i16);
+        spans.push(TapSpan {
+            start: fallback as u16,
+            len: 1,
+            offset,
+        });
+        return;
+    }
+
+    let norm = (WEIGHT_ONE as f64) / sum;
+    let mut err = 0.0f64;
+    let mut q_sum = 0i32;
+    let mut best_rel = 0usize;
+    let mut best_val = i32::MIN;
+    let tap_count = raw.len();
+    for (i, &w) in raw.iter().enumerate() {
+        // Distribute quantization error across taps so heavy downscales stay uniform
+        // and `|WEIGHT_ONE - q_sum| <= 1`.
+        let scaled = w * norm + err;
+        let q = round_i32(scaled);
+        err = scaled - (q as f64);
+        q_sum += q;
+        if q > best_val {
+            best_val = q;
+            best_rel = i;
+        }
+        weights.push(q as i16);
+    }
+
+    // Adjust the dominant tap so quantized weights sum to WEIGHT_ONE exactly, preserving
+    // constant-color inputs without rounding drift.
+    let diff = WEIGHT_ONE - q_sum;
+    let base = offset as usize;
+    weights[base + best_rel] = (i32::from(weights[base + best_rel]) + diff) as i16;
+
+    // Trim zero-weight edge taps to avoid unnecessary MACs.
+    let mut trim_start = 0usize;
+    let mut trim_end = tap_count;
+    while trim_end - trim_start > 1 && weights[base + trim_start] == 0 {
+        trim_start += 1;
+    }
+    while trim_end - trim_start > 1 && weights[base + trim_end - 1] == 0 {
+        trim_end -= 1;
+    }
+
+    if trim_start > 0 {
+        let keep = trim_end - trim_start;
+        weights.copy_within(base + trim_start..base + trim_end, base);
+        weights.truncate(base + keep);
+    } else if trim_end < tap_count {
+        weights.truncate(base + trim_end);
+    }
+
+    let kept = trim_end - trim_start;
+    for &q in &weights[base..base + kept] {
+        if q < 0 {
+            *has_negative = true;
+            break;
+        }
+    }
+    if kept > *max_taps {
+        *max_taps = kept;
+    }
+    spans.push(TapSpan {
+        start: (first + trim_start) as u16,
+        len: kept as u16,
+        offset,
+    });
 }
 
 #[inline(always)]
@@ -544,15 +659,14 @@ pub(crate) fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: R
         return;
     }
 
-    if matches!(filter, ResampleFilter::Nearest) {
+    if matches!(filter.kind, FilterKind::Nearest) {
         resample_nearest(src, dst);
         return;
     }
 
-    let clamp = filter.has_negative_lobes();
     if src_w == dst_w {
         let v_table = TapTable::build(src_h, dst_h, filter);
-        if clamp {
+        if v_table.has_negative {
             resample_v_only::<true>(src, dst, &v_table);
         } else {
             resample_v_only::<false>(src, dst, &v_table);
@@ -562,7 +676,7 @@ pub(crate) fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: R
 
     if src_h == dst_h {
         let h_table = TapTable::build(src_w, dst_w, filter);
-        if clamp {
+        if h_table.has_negative {
             resample_h_only::<true>(src, dst, &h_table);
         } else {
             resample_h_only::<false>(src, dst, &h_table);
@@ -572,7 +686,7 @@ pub(crate) fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: R
 
     let h_table = TapTable::build(src_w, dst_w, filter);
     let v_table = TapTable::build(src_h, dst_h, filter);
-    if clamp {
+    if h_table.has_negative || v_table.has_negative {
         resample_2d::<true>(src, dst, &h_table, &v_table);
     } else {
         resample_2d::<false>(src, dst, &h_table, &v_table);
@@ -598,12 +712,12 @@ mod tests {
     use alloc::vec::Vec;
 
     const ALL_FILTERS: [ResampleFilter; 6] = [
-        ResampleFilter::Nearest,
-        ResampleFilter::Box,
-        ResampleFilter::Bilinear,
-        ResampleFilter::CatmullRom,
-        ResampleFilter::Mitchell,
-        ResampleFilter::Lanczos3,
+        ResampleFilter::NEAREST,
+        ResampleFilter::BOX,
+        ResampleFilter::BILINEAR,
+        ResampleFilter::CATMULL_ROM,
+        ResampleFilter::MITCHELL,
+        ResampleFilter::LANCZOS3,
     ];
 
     #[test]
@@ -662,7 +776,7 @@ mod tests {
             2,
         );
 
-        let up = src.resize(4, 4, ResampleFilter::Nearest);
+        let up = src.resize(4, 4, ResampleFilter::NEAREST);
         for y in 0..4 {
             for x in 0..4 {
                 assert_eq!(up.pixel(x, y), src.pixel(x / 2, y / 2));
@@ -670,7 +784,7 @@ mod tests {
         }
 
         // 1D vertical-only nearest path (same width).
-        let up_v = src.resize(2, 4, ResampleFilter::Nearest);
+        let up_v = src.resize(2, 4, ResampleFilter::NEAREST);
         for y in 0..4 {
             for x in 0..2 {
                 assert_eq!(up_v.pixel(x, y), src.pixel(x, y / 2));
@@ -678,7 +792,7 @@ mod tests {
         }
 
         // Downscale 4x4 back to 2x2.
-        let down = up.resize(2, 2, ResampleFilter::Nearest);
+        let down = up.resize(2, 2, ResampleFilter::NEAREST);
         assert_eq!(down, src);
     }
 
@@ -697,13 +811,13 @@ mod tests {
         src.set_pixel(2, 1, [200, 60, 80, 200]);
         src.set_pixel(3, 1, [200, 60, 80, 200]);
 
-        let down = src.resize(2, 1, ResampleFilter::Box);
+        let down = src.resize(2, 1, ResampleFilter::BOX);
         assert_eq!(down.pixel(0, 0), [60, 0, 0, 255]);
         assert_eq!(down.pixel(1, 0), [150, 40, 60, 200]);
 
         // Non-integer downscale 3x1 -> 2x1: left gets 2/3*0 + 1/3*90 = 30; right gets 1/3*90 + 2/3*180 = 150.
         let src3 = Pixmap::from_parts(vec![0, 0, 0, 255, 90, 0, 0, 255, 180, 0, 0, 255], 3, 1);
-        let down3 = src3.resize(2, 1, ResampleFilter::Box);
+        let down3 = src3.resize(2, 1, ResampleFilter::BOX);
         assert_eq!(down3.pixel(0, 0), [30, 0, 0, 255]);
         assert_eq!(down3.pixel(1, 0), [150, 0, 0, 255]);
 
@@ -714,7 +828,7 @@ mod tests {
             let v = if x < 250 { 0 } else { 200 };
             wide.set_pixel(x, 0, [v, 0, 0, 255]);
         }
-        let collapsed = wide.resize(1, 1, ResampleFilter::Box);
+        let collapsed = wide.resize(1, 1, ResampleFilter::BOX);
         assert_eq!(collapsed.pixel(0, 0), [100, 0, 0, 255]);
     }
 
@@ -722,7 +836,7 @@ mod tests {
     fn bilinear_interpolates_linear_ramp_accurately() {
         // 2x1: [0, 0, 0, 255] and [200, 100, 40, 255] -> 4x1 centers at -0.25, 0.25, 0.75, 1.25.
         let src = Pixmap::from_parts(vec![0, 0, 0, 255, 200, 100, 40, 255], 2, 1);
-        let up = src.resize(4, 1, ResampleFilter::Bilinear);
+        let up = src.resize(4, 1, ResampleFilter::BILINEAR);
         assert_eq!(up.pixel(0, 0), [0, 0, 0, 255]);
         assert_eq!(up.pixel(1, 0), [50, 25, 10, 255]);
         assert_eq!(up.pixel(2, 0), [150, 75, 30, 255]);
@@ -734,7 +848,7 @@ mod tests {
         src2.set_pixel(1, 0, [200, 0, 0, 255]);
         src2.set_pixel(0, 1, [0, 200, 0, 255]);
         src2.set_pixel(1, 1, [200, 200, 0, 255]);
-        let up2 = src2.resize(4, 4, ResampleFilter::Bilinear);
+        let up2 = src2.resize(4, 4, ResampleFilter::BILINEAR);
         assert_eq!(up2.pixel(0, 0), [0, 0, 0, 255]);
         assert_eq!(up2.pixel(3, 3), [200, 200, 0, 255]);
         assert_eq!(up2.pixel(1, 1), [50, 50, 0, 255]);
@@ -780,9 +894,9 @@ mod tests {
 
         // Verify CatmullRom, Mitchell, and Lanczos3 closely match an f64 reference on 2D resize.
         for filter in [
-            ResampleFilter::CatmullRom,
-            ResampleFilter::Mitchell,
-            ResampleFilter::Lanczos3,
+            ResampleFilter::CATMULL_ROM,
+            ResampleFilter::MITCHELL,
+            ResampleFilter::LANCZOS3,
         ] {
             let got = src.resize(9, 7, filter);
             let expected = reference_resize_f64(src.as_ref(), 9, 7, filter);
@@ -807,6 +921,9 @@ mod tests {
         dst_h: u16,
         filter: ResampleFilter,
     ) -> Pixmap {
+        let FilterKind::Kernel { radius, eval } = filter.kind else {
+            unreachable!("reference_resize_f64 is only for kernel filters");
+        };
         let sw = src.width() as usize;
         let sh = src.height() as usize;
         let dw = dst_w as usize;
@@ -815,14 +932,14 @@ mod tests {
         let build_f64 = |src_n: usize, dst_n: usize| -> Vec<Vec<(usize, f64)>> {
             let ratio = src_n as f64 / dst_n as f64;
             let scale = if ratio > 1.0 { ratio } else { 1.0 };
-            let support = filter.base_radius() * scale;
+            let support = radius * scale;
             (0..dst_n)
                 .map(|d| {
                     let center = (d as f64 + 0.5) * ratio - 0.5;
                     let lo = ceil_f64(center - support).clamp(0, (src_n - 1) as i64) as usize;
                     let hi = floor_f64(center + support).clamp(0, (src_n - 1) as i64) as usize;
                     let mut taps: Vec<(usize, f64)> = (lo..=hi)
-                        .map(|s| (s, filter.eval_kernel((s as f64 - center) / scale)))
+                        .map(|s| (s, eval((s as f64 - center) / scale)))
                         .collect();
                     let sum: f64 = taps.iter().map(|&(_, w)| w).sum();
                     for (_, w) in &mut taps {
@@ -881,12 +998,12 @@ mod tests {
         let mut buf = vec![0xAAu8; 3 * 28 + 16];
         let mut dst = PixmapMut::from_parts_with_stride(&mut buf, 4, 4, 28);
         src.subregion(1, 1, 6, 4)
-            .resize_into(dst.reborrow(), ResampleFilter::Lanczos3);
+            .resize_into(dst.reborrow(), ResampleFilter::LANCZOS3);
 
         let expected = src
             .subregion(1, 1, 6, 4)
             .to_owned()
-            .resize(4, 4, ResampleFilter::Lanczos3);
+            .resize(4, 4, ResampleFilter::LANCZOS3);
         assert_eq!(dst.as_ref(), expected.as_ref());
         // Stride padding bytes between rows must remain untouched.
         assert_eq!(&dst.raw_data()[16..28], &[0xAA; 12]);
@@ -910,5 +1027,76 @@ mod tests {
             Pixmap::new(0, 4).resize_into(dst.as_mut(), filter);
             assert_eq!(dst, Pixmap::new(3, 2));
         }
+    }
+
+    #[test]
+    fn custom_filter_supports_arbitrary_kernels_and_detects_negative_lobes() {
+        // Hermite (smoothstep cubic) filter: positive-only, radius 1.0.
+        fn hermite(x: f64) -> f64 {
+            let ax = if x < 0.0 { -x } else { x };
+            if ax < 1.0 {
+                (2.0 * ax - 3.0) * ax * ax + 1.0
+            } else {
+                0.0
+            }
+        }
+
+        // Lanczos2 filter: negative lobes, radius 2.0.
+        fn lanczos2(x: f64) -> f64 {
+            let ax = if x < 0.0 { -x } else { x };
+            if ax < 1e-9 {
+                1.0
+            } else if ax < 2.0 {
+                sinc_pi(ax) * sinc_pi(ax * 0.5)
+            } else {
+                0.0
+            }
+        }
+
+        let mut src = Pixmap::new(8, 6);
+        for y in 0..6 {
+            for x in 0..8 {
+                let px = if x < 4 {
+                    [255, 255, 255, 255]
+                } else {
+                    [0, 0, 0, 0]
+                };
+                src.set_pixel(x, y, px);
+            }
+        }
+
+        let f_hermite = ResampleFilter::custom(1.0, hermite);
+        let f_lanczos2 = ResampleFilter::custom(2.0, lanczos2);
+
+        // Positive-only custom kernel matches f64 reference and skips negative clamping.
+        assert!(!TapTable::build(8, 13, f_hermite).has_negative);
+        assert!(TapTable::build(8, 13, f_lanczos2).has_negative);
+
+        for filter in [f_hermite, f_lanczos2] {
+            let got = src.resize(13, 9, filter);
+            let expected = reference_resize_f64(src.as_ref(), 13, 9, filter);
+            for y in 0..9 {
+                for x in 0..13 {
+                    let g = got.pixel(x, y);
+                    let e = expected.pixel(x, y);
+                    assert!(g[0] <= g[3] && g[1] <= g[3] && g[2] <= g[3]);
+                    for c in 0..4 {
+                        assert!(g[c].abs_diff(e[c]) <= 1);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "radius must be finite and positive")]
+    fn custom_filter_rejects_non_positive_radius() {
+        let _ = ResampleFilter::custom(0.0, bilinear_kernel);
+    }
+
+    #[test]
+    #[should_panic(expected = "radius must be finite and positive")]
+    fn custom_filter_rejects_nan_radius() {
+        let _ = ResampleFilter::custom(f64::NAN, bilinear_kernel);
     }
 }
