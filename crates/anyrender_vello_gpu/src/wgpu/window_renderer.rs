@@ -17,7 +17,7 @@ use wgpu::{
 };
 use wgpu_context::{DeviceHandle, SurfaceRenderer, SurfaceRendererConfiguration, WGPUContext};
 
-use super::scene::{ExternalTextures, ImageManager, VelloGpuScenePainter};
+use super::scene::{ExternalTextures, GlyphAtlas, ImageManager, VelloGpuScenePainter};
 use crate::common::{ImageCache, VelloGpuRendererOptions};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
@@ -67,6 +67,7 @@ pub struct VelloGpuWindowRenderer {
     scene: VelloGpuScene,
     config: VelloGpuRendererOptions,
     cached_images: ImageCache,
+    glyphs: GlyphAtlas,
 }
 impl VelloGpuWindowRenderer {
     #[allow(clippy::new_without_default)]
@@ -85,6 +86,7 @@ impl VelloGpuWindowRenderer {
             window_handle: None,
             scene: VelloGpuScene::new_with(0, 0, render_settings.level()),
             cached_images: ImageCache::default(),
+            glyphs: GlyphAtlas::new(),
         }
     }
 
@@ -344,6 +346,7 @@ impl WindowRenderer for VelloGpuWindowRenderer {
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
                     self.cached_images.clear();
+                    self.glyphs.clear();
                     let max = active
                         .render_surface
                         .device()
@@ -364,6 +367,7 @@ impl WindowRenderer for VelloGpuWindowRenderer {
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
         self.cached_images.clear();
+        self.glyphs.clear();
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
@@ -401,11 +405,11 @@ impl WindowRenderer for VelloGpuWindowRenderer {
                 });
 
         let image_manager = ImageManager {
-            resources: &mut state.resources,
             device: render_surface.device(),
             queue: render_surface.queue(),
             cache: &mut self.cached_images,
             texture_bindings: &mut state.texture_bindings,
+            glyphs: &mut self.glyphs,
         };
 
         let mut scene_painter = VelloGpuScenePainter {
@@ -439,11 +443,11 @@ impl WindowRenderer for VelloGpuWindowRenderer {
             render_surface.clear_surface_texture();
             self.scene.reset();
             ImageManager::new(
-                &mut state.resources,
                 render_surface.device(),
                 render_surface.queue(),
                 &mut self.cached_images,
                 &mut state.texture_bindings,
+                &mut self.glyphs,
             )
             .finish_frame();
             render_surface.queue().submit([encoder.finish()]);
@@ -465,11 +469,11 @@ impl WindowRenderer for VelloGpuWindowRenderer {
             )
             .expect("failed to render to texture");
         ImageManager::new(
-            &mut state.resources,
             render_surface.device(),
             render_surface.queue(),
             &mut self.cached_images,
             &mut state.texture_bindings,
+            &mut self.glyphs,
         )
         .finish_frame();
         render_surface.queue().submit([encoder.finish()]);

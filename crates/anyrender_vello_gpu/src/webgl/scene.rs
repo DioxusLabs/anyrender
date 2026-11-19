@@ -4,12 +4,11 @@ use anyrender::{
     AntiAliasing, Filter, Glyph, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene,
     RenderContext,
 };
-use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 use vello_common::paint::PaintType;
 
-use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
+use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind};
 use anyrender::ResourceId;
 use peniko::ImageBrush;
 use vello_common::TextureId;
@@ -21,26 +20,107 @@ use web_sys::WebGl2RenderingContext;
 
 use std::sync::Arc;
 
+/// The glyph caches of a WebGL renderer, with rasterized glyphs packed into one texture.
+///
+/// Call `clear` when the WebGL context it was used with is lost or replaced.
+pub type WebGlGlyphAtlas = crate::common::GlyphAtlas<web_sys::WebGlTexture>;
+
 pub struct WebGlImageManager<'a> {
     pub(crate) renderer: &'a mut vello_gpu::WebGlRenderer,
-    pub(crate) resources: &'a mut vello_gpu::Resources,
     pub(crate) cache: &'a mut ImageCache,
     pub(crate) texture_bindings: &'a mut WebGlTextureBindings,
+    pub(crate) glyphs: &'a mut WebGlGlyphAtlas,
 }
 
 impl<'a> WebGlImageManager<'a> {
     pub fn new(
         renderer: &'a mut vello_gpu::WebGlRenderer,
-        resources: &'a mut vello_gpu::Resources,
         cache: &'a mut ImageCache,
         texture_bindings: &'a mut WebGlTextureBindings,
+        glyphs: &'a mut WebGlGlyphAtlas,
     ) -> Self {
         Self {
             renderer,
-            resources,
             cache,
             texture_bindings,
+            glyphs,
         }
+    }
+
+    /// Write the glyphs rasterized since the last call to the glyph atlas texture, creating
+    /// and binding the texture first if there is none.
+    fn upload_glyphs(&mut self) -> Result<(), WebGlError> {
+        if !self.glyphs.has_uploads() {
+            return Ok(());
+        }
+        let upload_error = |e: wasm_bindgen::JsValue| WebGlError::OperationFailed {
+            operation: WebGlOperation::DataTransfer(WebGlDataTransferOperation::TextureUpload),
+            message: e.as_string(),
+        };
+        let gl = self.renderer.gl_context();
+        gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+        // The glyph pixels are already premultiplied.
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+        gl.pixel_storei(WebGl2RenderingContext::UNPACK_FLIP_Y_WEBGL, 0);
+        if self.glyphs.texture().is_none() {
+            let (width, height) = self.glyphs.texture_size();
+            let texture = gl.create_texture().ok_or(WebGlError::OperationFailed {
+                operation: WebGlOperation::ResourceCreation(WebGlResourceKind::Texture),
+                message: None,
+            })?;
+            gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
+            gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+                WebGl2RenderingContext::TEXTURE_2D,
+                0,
+                WebGl2RenderingContext::RGBA8 as i32,
+                i32::from(width),
+                i32::from(height),
+                0,
+                WebGl2RenderingContext::RGBA,
+                WebGl2RenderingContext::UNSIGNED_BYTE,
+                None,
+            )
+            .map_err(upload_error)?;
+            for (parameter, value) in [
+                (
+                    WebGl2RenderingContext::TEXTURE_MIN_FILTER,
+                    WebGl2RenderingContext::LINEAR,
+                ),
+                (
+                    WebGl2RenderingContext::TEXTURE_MAG_FILTER,
+                    WebGl2RenderingContext::LINEAR,
+                ),
+                (
+                    WebGl2RenderingContext::TEXTURE_WRAP_S,
+                    WebGl2RenderingContext::CLAMP_TO_EDGE,
+                ),
+                (
+                    WebGl2RenderingContext::TEXTURE_WRAP_T,
+                    WebGl2RenderingContext::CLAMP_TO_EDGE,
+                ),
+            ] {
+                gl.tex_parameteri(WebGl2RenderingContext::TEXTURE_2D, parameter, value as i32);
+            }
+            self.texture_bindings
+                .insert(self.glyphs.texture_id(), texture.clone(), width, height);
+            self.glyphs.set_texture(texture);
+        }
+        gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, self.glyphs.texture());
+        for upload in self.glyphs.take_uploads() {
+            gl.tex_sub_image_2d_with_i32_and_i32_and_u32_and_type_and_opt_u8_array(
+                WebGl2RenderingContext::TEXTURE_2D,
+                0,
+                i32::from(upload.rect.x),
+                i32::from(upload.rect.y),
+                i32::from(upload.rect.width),
+                i32::from(upload.rect.height),
+                WebGl2RenderingContext::RGBA,
+                WebGl2RenderingContext::UNSIGNED_BYTE,
+                Some(&upload.data),
+            )
+            .map_err(upload_error)?;
+        }
+        Ok(())
     }
 
     /// Upload `image` to its own texture and bind it for rendering, returning
@@ -129,6 +209,7 @@ impl<'a> WebGlImageManager<'a> {
                 self.renderer.gl_context().delete_texture(Some(&texture));
             }
         }
+        self.glyphs.finish_frame();
         Ok(())
     }
 }
@@ -155,15 +236,14 @@ impl<'s> WebGlScenePainter<'s> {
             scene,
             layer_stack: Vec::with_capacity(16),
             image_manager,
-            glyph_caching: false,
+            glyph_caching: true,
         }
     }
 
-    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    /// Enable or disable caching of rasterized glyphs in the glyph atlas.
     ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
+    /// Defaults to `true`. Turning it off is meant for debugging and tests: every outline and
+    /// COLR glyph is then drawn as paths. Bitmap glyphs are drawn from the atlas either way.
     pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
         self.glyph_caching = enabled;
         self
@@ -430,50 +510,28 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
-        self.scene.set_transform(transform);
-
-        self.scene
-            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
-        let glyph_caching = anti_aliasing.is_enabled()
-            && self.glyph_caching
-            && supports_glyph_caching(transform, glyph_transform);
-        let style: StyleRef<'a> = style.into();
-        match style {
-            StyleRef::Fill(fill) => {
-                self.scene.set_fill_rule(fill);
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: g.x,
-                        y: g.y,
-                    }));
-            }
-            StyleRef::Stroke(stroke) => {
-                self.scene.set_stroke(stroke.clone());
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: g.x,
-                        y: g.y,
-                    }));
-            }
+        self.image_manager.glyphs.draw_glyphs(
+            self.scene,
+            self.glyph_caching,
+            font,
+            font_size,
+            hint,
+            normalized_coords,
+            embolden,
+            style.into(),
+            transform,
+            glyph_transform,
+            glyphs.map(|g| anyrender_glyph::Glyph {
+                id: g.id,
+                x: g.x,
+                y: g.y,
+            }),
+            anti_aliasing,
+        );
+        if let Err(error) = self.image_manager.upload_glyphs() {
+            // The glyphs' atlas regions stay transparent.
+            web_sys::console::warn_1(&format!("failed to upload glyphs: {error:?}").into());
         }
-        self.scene.set_aliasing_threshold(None);
     }
 
     fn draw_box_shadow(
