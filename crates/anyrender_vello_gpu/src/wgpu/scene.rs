@@ -14,9 +14,10 @@ use vello_common::{
 };
 use vello_gpu::TextureBindings;
 use wgpu::{
-    Device, Extent3d, Origin3d, Queue, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
-    TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor,
+    BufferDescriptor, BufferUsages, COPY_BYTES_PER_ROW_ALIGNMENT, CommandEncoderDescriptor, Device,
+    Extent3d, Origin3d, Queue, TexelCopyBufferInfo, TexelCopyBufferLayout, TexelCopyTextureInfo,
+    Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+    TextureView, TextureViewDescriptor,
 };
 use wgpu_context::DeviceHandle;
 
@@ -204,6 +205,12 @@ pub struct ImageManager<'a> {
     pub(crate) glyphs: &'a mut GlyphAtlas,
 }
 
+impl Drop for ImageManager<'_> {
+    fn drop(&mut self) {
+        self.flush_glyph_uploads();
+    }
+}
+
 impl<'a> ImageManager<'a> {
     pub fn new(
         device: &'a Device,
@@ -221,64 +228,129 @@ impl<'a> ImageManager<'a> {
         }
     }
 
-    /// Write the glyphs rasterized since the last call to the glyph atlas texture, creating
-    /// and binding the texture first if there is none.
-    fn upload_glyphs(&mut self) {
-        if !self.glyphs.has_uploads() {
+    /// Create and bind the glyph atlas texture, if glyphs are waiting to be written to it.
+    fn ensure_glyph_texture(&mut self) {
+        if !self.glyphs.has_uploads() || self.glyphs.texture().is_some() {
             return;
         }
-        if self.glyphs.texture().is_none() {
-            let (width, height) = self.glyphs.texture_size();
-            let texture = self.device.create_texture(&TextureDescriptor {
-                label: Some("AnyRender glyph atlas"),
-                size: Extent3d {
-                    width: u32::from(width),
-                    height: u32::from(height),
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            self.texture_bindings.bindings.insert(
-                self.glyphs.texture_id(),
-                texture.create_view(&TextureViewDescriptor::default()),
-            );
-            self.glyphs.set_texture(texture);
-        }
+        let (width, height) = self.glyphs.texture_size();
+        let texture = self.device.create_texture(&TextureDescriptor {
+            label: Some("AnyRender glyph atlas"),
+            size: Extent3d {
+                width: u32::from(width),
+                height: u32::from(height),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.texture_bindings.bindings.insert(
+            self.glyphs.texture_id(),
+            texture.create_view(&TextureViewDescriptor::default()),
+        );
+        self.glyphs.set_texture(texture);
+    }
+
+    /// Write the glyphs rasterized since the last call to the glyph atlas texture.
+    ///
+    /// This has to happen before the scene is rendered. It runs when the `ImageManager` is
+    /// dropped, so that all new glyphs of a frame are uploaded together.
+    pub fn flush_glyph_uploads(&mut self) {
+        self.ensure_glyph_texture();
         let uploads = self.glyphs.take_uploads();
         let Some(texture) = self.glyphs.texture() else {
             return;
         };
-        for upload in uploads {
-            let size = Extent3d {
-                width: u32::from(upload.rect.width),
-                height: u32::from(upload.rect.height),
-                depth_or_array_layers: 1,
-            };
+        let destination = |upload: &crate::common::AtlasUpload| TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: Origin3d {
+                x: u32::from(upload.rect.x),
+                y: u32::from(upload.rect.y),
+                z: 0,
+            },
+            aspect: TextureAspect::All,
+        };
+        let size = |upload: &crate::common::AtlasUpload| Extent3d {
+            width: u32::from(upload.rect.width),
+            height: u32::from(upload.rect.height),
+            depth_or_array_layers: 1,
+        };
+
+        if let [upload] = uploads.as_slice() {
             self.queue.write_texture(
-                TexelCopyTextureInfo {
-                    texture,
-                    mip_level: 0,
-                    origin: Origin3d {
-                        x: u32::from(upload.rect.x),
-                        y: u32::from(upload.rect.y),
-                        z: 0,
-                    },
-                    aspect: TextureAspect::All,
-                },
+                destination(upload),
                 &upload.data,
                 TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(4 * size.width),
-                    rows_per_image: Some(size.height),
+                    bytes_per_row: Some(4 * u32::from(upload.rect.width)),
+                    rows_per_image: Some(u32::from(upload.rect.height)),
                 },
-                size,
+                size(upload),
             );
+            return;
         }
+        if uploads.is_empty() {
+            return;
+        }
+
+        // `Queue::write_texture` allocates a staging buffer per call, which costs more than
+        // rasterizing a glyph. All glyphs go into one buffer and are copied from there. Rows
+        // in a buffer have to be aligned, so each glyph's rows are padded.
+        let row_bytes = |upload: &crate::common::AtlasUpload| {
+            (4 * u32::from(upload.rect.width)).next_multiple_of(COPY_BYTES_PER_ROW_ALIGNMENT)
+        };
+        let buffer_size: u64 = uploads
+            .iter()
+            .map(|upload| u64::from(row_bytes(upload)) * u64::from(upload.rect.height))
+            .sum();
+        let buffer = self.device.create_buffer(&BufferDescriptor {
+            label: Some("AnyRender glyph atlas upload"),
+            size: buffer_size,
+            usage: BufferUsages::COPY_SRC,
+            mapped_at_creation: true,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("AnyRender glyph atlas upload"),
+            });
+        {
+            let mut mapped = buffer
+                .slice(..)
+                .get_mapped_range_mut()
+                .expect("the buffer was created mapped");
+            let mut offset = 0_usize;
+            for upload in &uploads {
+                let source_row = 4 * usize::from(upload.rect.width);
+                let row = row_bytes(upload) as usize;
+                for (y, pixels) in upload.data.chunks_exact(source_row).enumerate() {
+                    let start = offset + y * row;
+                    mapped
+                        .slice(start..start + source_row)
+                        .copy_from_slice(pixels);
+                }
+                encoder.copy_buffer_to_texture(
+                    TexelCopyBufferInfo {
+                        buffer: &buffer,
+                        layout: TexelCopyBufferLayout {
+                            offset: offset as u64,
+                            bytes_per_row: Some(row as u32),
+                            rows_per_image: Some(u32::from(upload.rect.height)),
+                        },
+                    },
+                    destination(upload),
+                    size(upload),
+                );
+                offset += row * usize::from(upload.rect.height);
+            }
+        }
+        buffer.unmap();
+        self.queue.submit([encoder.finish()]);
     }
 
     /// Upload `image` to its own texture and bind it for rendering, returning
@@ -720,7 +792,7 @@ impl PaintScene for VelloGpuScenePainter<'_> {
             }),
             anti_aliasing,
         );
-        self.image_manager.upload_glyphs();
+        self.image_manager.ensure_glyph_texture();
     }
     fn draw_box_shadow(
         &mut self,
