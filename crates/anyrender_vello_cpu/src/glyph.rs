@@ -30,8 +30,6 @@ pub(crate) struct GlyphCaches {
 /// Rasterized glyphs, and what is needed to rasterize more.
 pub(crate) struct RasterCache {
     images: GlyphRasterCache<Arc<Pixmap>>,
-    /// The glyph rasterized last, if the cache had no room for it.
-    unstored: Option<(GlyphCacheKey, Arc<Pixmap>)>,
     /// The context glyphs are rasterized in, kept to reuse its allocations.
     scratch: Option<(RenderContext, Resources)>,
 }
@@ -42,7 +40,6 @@ impl GlyphCaches {
             prep: GlyphPrepCache::default(),
             rasters: RasterCache {
                 images: GlyphRasterCache::default(),
-                unstored: None,
                 scratch: None,
             },
         }
@@ -53,7 +50,6 @@ impl GlyphCaches {
         self.prep.maintain();
         self.rasters.images.evict_idle(MAX_IDLE_FRAMES);
         self.rasters.images.begin_frame();
-        self.rasters.unstored = None;
     }
 }
 
@@ -291,6 +287,7 @@ impl DrawSink for GlyphSink<'_> {
 
 impl GlyphRenderer for GlyphSink<'_> {
     type SavedState = RenderState;
+    type CachedGlyph = Arc<Pixmap>;
 
     fn save_state(&mut self) -> Self::SavedState {
         self.ctx.0.save_current_state()
@@ -324,9 +321,9 @@ impl GlyphRenderer for GlyphSink<'_> {
         self.rasters.as_ref().map(|_| GlyphCacheConfig::default())
     }
 
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<RasterMetrics> {
-        let (_, metrics) = self.rasters.as_mut()?.images.get(key)?;
-        Some(metrics)
+    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, Arc<Pixmap>)> {
+        let (image, metrics) = self.rasters.as_mut()?.images.get(key)?;
+        Some((metrics, image.clone()))
     }
 
     fn cache_glyph<'a>(
@@ -334,7 +331,7 @@ impl GlyphRenderer for GlyphSink<'_> {
         key: &GlyphCacheKey,
         metrics: RasterMetrics,
         raster: GlyphRaster<'a>,
-    ) -> Result<(), GlyphRaster<'a>> {
+    ) -> Result<Arc<Pixmap>, GlyphRaster<'a>> {
         let Some(rasters) = self.rasters.as_mut() else {
             return Err(raster);
         };
@@ -343,35 +340,25 @@ impl GlyphRenderer for GlyphSink<'_> {
             return Err(raster);
         }
         let image = Arc::new(rasters.rasterize(metrics, raster));
-        // The image fits the budget, so this only fails if everything else in the cache was
-        // used this frame. Keep the image for the draw that follows.
-        rasters.unstored = rasters
+        // The image fits the budget, so storing it only fails if everything else in the cache
+        // was used this frame. It is drawn either way.
+        let _ = rasters
             .images
-            .insert(key.clone(), image, metrics, bytes)
-            .err()
-            .map(|image| (key.clone(), image));
-        Ok(())
+            .insert(key.clone(), image.clone(), metrics, bytes);
+        Ok(image)
     }
 
     fn draw_cached_glyph(
         &mut self,
-        key: &GlyphCacheKey,
+        image: &Arc<Pixmap>,
         area: &Rect,
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        let Some(rasters) = self.rasters.as_mut() else {
-            return;
-        };
-        let image = match (rasters.images.get(key), &rasters.unstored) {
-            (Some((image, _)), _) => image.clone(),
-            (None, Some((unstored_key, image))) if unstored_key == key => image.clone(),
-            _ => return,
-        };
         self.ctx.0.set_tint(tint.map(|color| Tint {
             color,
             mode: TintMode::AlphaMask,
         }));
-        draw_image(self.ctx.0, image, quality, area);
+        draw_image(self.ctx.0, image.clone(), quality, area);
     }
 }
