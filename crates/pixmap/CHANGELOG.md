@@ -9,4 +9,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial release: `Pixmap`, an owned premultiplied RGBA8 pixel buffer, and `PixmapMut`, its mutably borrowed counterpart.
+- Initial release: `Pixmap`, an owned premultiplied RGBA8 pixel buffer, and `PixmapRef`/`PixmapMut`, its borrowed counterparts with row-stride and subregion support.
