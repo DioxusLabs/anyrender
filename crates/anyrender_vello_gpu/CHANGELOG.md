@@ -12,6 +12,7 @@ Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
 ### Changed
 
 - wgpu: new glyphs are written to the atlas texture once per frame from a single buffer, when the `ImageManager` is dropped or `ImageManager::flush_glyph_uploads` is called, not with one `Queue::write_texture` per glyph. An `ImageManager` now has to be dropped (or flushed) before the scene is rendered.
+- wgpu: the buffer that new glyphs are copied to the atlas texture from is kept between frames, and is not zero-filled before it is written.
 - Glyphs are drawn with `anyrender_glyph` in place of Vello's `text` feature and `glifo`, which `vello_gpu` is now built without.
 - Rasterized glyphs are cached by default in one 2048x2048 atlas texture owned by this crate. Glyphs that miss the atlas are rasterized with `vello_cpu` and uploaded. `glyph_caching(false)` / `with_glyph_caching(false)` turn the cache off for debugging.
 - Breaking: `ImageManager::new` and `WebGlImageManager::new` take a `GlyphAtlas` / `WebGlGlyphAtlas` and no longer take Vello's `Resources`.

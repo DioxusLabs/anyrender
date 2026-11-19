@@ -107,6 +107,11 @@ impl<T> GlyphAtlas<T> {
         self.texture.as_ref()
     }
 
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn texture_mut(&mut self) -> Option<&mut T> {
+        self.texture.as_mut()
+    }
+
     pub(crate) fn set_texture(&mut self, texture: T) {
         self.texture = Some(texture);
     }
