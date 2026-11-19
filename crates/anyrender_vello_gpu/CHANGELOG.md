@@ -11,7 +11,14 @@ Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
 
 ### Changed
 
+- Glyphs are drawn with `anyrender_glyph` in place of Vello's `text` feature and `glifo`, which `vello_gpu` is now built without.
+- Rasterized glyphs are cached by default in one 2048x2048 atlas texture owned by this crate. Glyphs that miss the atlas are rasterized with `vello_cpu` and uploaded. `glyph_caching(false)` / `with_glyph_caching(false)` turn the cache off for debugging.
+- Breaking: `ImageManager::new` and `WebGlImageManager::new` take a `GlyphAtlas` / `WebGlGlyphAtlas` and no longer take Vello's `Resources`.
 - Off Apple platforms, text baselines are rounded to the nearest whole device pixel when the transform has no rotation or skew, as Skia does. They were not snapped vertically before.
+
+### Fixed
+
+- Bitmap (CBDT/sbix) glyphs are drawn from the glyph atlas. They used to panic with "pixmap image sources are not supported by Vello GPU".
 
 ## [0.12.1] - 2026-11-24
 

@@ -23,7 +23,11 @@ kurbo = { workspace = true }
 peniko = { workspace = true }
 vello_gpu = { workspace = true }
 vello_common = { workspace = true }
-glifo = { workspace = true }
+anyrender_glyph = { workspace = true, features = ["png"] }
+anyrender_atlas = { workspace = true }
+pixmap = { workspace = true }
+vello_cpu = { workspace = true }
+bytemuck = "1"
 wgpu = { workspace = true }
 rustc-hash = { workspace = true }
 wgpu_context = { workspace = true }
@@ -41,5 +45,9 @@ web-sys = { workspace = true, optional = true, features = [
   "Element",
   "HtmlCanvasElement",
   "WebGl2RenderingContext",
+  "WebGlTexture",
+  "console",
   "Window",
 ] }
+[dev-dependencies]
+skrifa = { workspace = true }
