@@ -2,8 +2,8 @@ use core::fmt;
 use core::iter::FusedIterator;
 
 use crate::{
-    Pixmap, PixmapRef, Rows, byte_len, is_contiguous, row_bytes, subregion_byte_range,
-    validate_strided_parts,
+    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous, row_bytes,
+    subregion_byte_range, validate_strided_parts,
 };
 
 /// A mutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -95,6 +95,80 @@ impl<'a> PixmapMut<'a> {
     /// Returns `true` if either dimension is zero.
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
+    }
+
+    /// Returns `true` if every active pixel has alpha `255` (vacuously `true` when empty),
+    /// ignoring any inter-row stride padding.
+    pub fn is_opaque(&self) -> bool {
+        self.as_ref().is_opaque()
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x >= self.width()` or `y >= self.height()`.
+    pub fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
+        self.as_ref().pixel(x, y)
+    }
+
+    /// Sets the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x >= self.width()` or `y >= self.height()`.
+    pub fn set_pixel(&mut self, x: u16, y: u16, color: [u8; 4]) {
+        assert!(
+            x < self.width && y < self.height,
+            "pixel ({x}, {y}) out of bounds for {}x{} pixmap",
+            self.width,
+            self.height
+        );
+        let start = y as usize * self.stride + row_bytes(x);
+        self.data[start..start + BYTES_PER_PIXEL].copy_from_slice(&color);
+    }
+
+    /// Sets every active pixel to transparent black (`[0, 0, 0, 0]`), leaving any inter-row
+    /// stride padding untouched.
+    pub fn clear(&mut self) {
+        if let Some(data) = self.data_mut() {
+            data.fill(0);
+        } else {
+            for row in self.rows_mut() {
+                row.fill(0);
+            }
+        }
+    }
+
+    /// Sets every active pixel in a rectangular region to transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x + width > self.width()` or `y + height > self.height()`.
+    pub fn clear_rect(&mut self, x: u16, y: u16, width: u16, height: u16) {
+        self.subregion_mut(x, y, width, height).clear();
+    }
+
+    /// Sets every active pixel to the given premultiplied `[r, g, b, a]` colour, leaving any
+    /// inter-row stride padding untouched.
+    pub fn fill(&mut self, color: [u8; 4]) {
+        if let Some(data) = self.data_mut() {
+            fill_slice(data, color);
+        } else {
+            for row in self.rows_mut() {
+                fill_slice(row, color);
+            }
+        }
+    }
+
+    /// Sets every active pixel in a rectangular region to the given premultiplied `[r, g, b, a]`
+    /// colour.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x + width > self.width()` or `y + height > self.height()`.
+    pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, color: [u8; 4]) {
+        self.subregion_mut(x, y, width, height).fill(color);
     }
 
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.

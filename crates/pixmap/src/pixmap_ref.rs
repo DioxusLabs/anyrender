@@ -3,8 +3,8 @@ use core::fmt;
 use core::iter::FusedIterator;
 
 use crate::{
-    Pixmap, PixmapMut, byte_len, is_contiguous, row_bytes, subregion_byte_range,
-    validate_strided_parts,
+    BYTES_PER_PIXEL, Pixmap, PixmapMut, byte_len, is_contiguous, row_bytes, slice_is_opaque,
+    subregion_byte_range, validate_strided_parts,
 };
 
 /// An immutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -86,6 +86,34 @@ impl<'a> PixmapRef<'a> {
     /// Returns `true` if either dimension is zero.
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
+    }
+
+    /// Returns `true` if every active pixel has alpha `255` (vacuously `true` when empty),
+    /// ignoring any inter-row stride padding.
+    pub fn is_opaque(&self) -> bool {
+        if let Some(data) = self.data() {
+            slice_is_opaque(data)
+        } else {
+            self.rows().all(slice_is_opaque)
+        }
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x >= self.width()` or `y >= self.height()`.
+    pub fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
+        assert!(
+            x < self.width && y < self.height,
+            "pixel ({x}, {y}) out of bounds for {}x{} pixmap",
+            self.width,
+            self.height
+        );
+        let start = y as usize * self.stride + row_bytes(x);
+        self.data[start..start + BYTES_PER_PIXEL]
+            .try_into()
+            .unwrap()
     }
 
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.
