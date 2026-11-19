@@ -4,6 +4,7 @@ members = [
   "crates/image_filters_types",
   "crates/pixmap",
   "crates/anyrender_atlas",
+  "crates/anyrender_glyph",
   "crates/anyrender_serialize",
   "crates/anyrender_skia",
   "crates/anyrender_vello",
@@ -34,6 +35,7 @@ anyrender = { version = "0.15.0", path = "./crates/anyrender" }
 image_filters_types = { version = "0.1.0", path = "./crates/image_filters_types" }
 pixmap = { version = "0.1.0", path = "./crates/pixmap" }
 anyrender_atlas = { version = "0.1.0", path = "./crates/anyrender_atlas" }
+anyrender_glyph = { version = "0.1.0", path = "./crates/anyrender_glyph" }
 anyrender_serialize = { version = "0.9.0", path = "./crates/anyrender_serialize" }
 anyrender_skia = { version = "0.13.0", path = "./crates/anyrender_skia" }
 anyrender_tiny_skia = { version = "0.1.0", path = "./crates/anyrender_tiny_skia" }
