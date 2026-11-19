@@ -1,7 +1,9 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use anyrender::{AntiAliasing, PaintScene};
-use anyrender_vello_gpu::{ExternalTextures, ImageCache, ImageManager, VelloGpuScenePainter};
+use anyrender_vello_gpu::{
+    ExternalTextures, GlyphAtlas, ImageCache, ImageManager, VelloGpuScenePainter,
+};
 use kurbo::{Affine, Circle, Stroke, Vec2};
 use peniko::{Blob, Color, Fill, FontData};
 use vello_gpu::{RenderOptions, RenderSize, RenderTarget, RenderTargetConfig, Renderer, Scene};
@@ -40,6 +42,7 @@ fn disabled_anti_aliasing_has_binary_coverage() {
     });
     let mut cache = ImageCache::default();
     let mut textures = ExternalTextures::default();
+    let mut glyphs = GlyphAtlas::new();
     let font = FontData::new(
         Blob::new(std::sync::Arc::new(
             include_bytes!("../../../assets/fonts/roboto/Roboto.ttf").to_vec(),
@@ -52,11 +55,11 @@ fn disabled_anti_aliasing_has_binary_coverage() {
             let mut painter = VelloGpuScenePainter::new(
                 &mut scene,
                 ImageManager::new(
-                    &mut resources,
                     &handle.device,
                     &handle.queue,
                     &mut cache,
                     &mut textures,
+                    &mut glyphs,
                 ),
                 &handle,
             )
