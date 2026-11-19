@@ -2519,6 +2519,29 @@ mod tests {
         }
     }
 
+    /// A glyph without an outline has no pixels to cache. Offering it to the cache would make a
+    /// renderer that can't store an empty image rasterize it again on every draw.
+    #[test]
+    fn empty_outline_glyph_draws_nothing() {
+        let font = test_font(TestGlyphKind::Outline);
+        let glyph = Glyph {
+            id: font.as_skrifa().charmap().map(' ').unwrap().to_u32(),
+            x: 0.0,
+            y: 0.0,
+        };
+        let mut resources = TestResources::default();
+
+        for style in [Style::Fill, Style::Stroke] {
+            for cache_enabled in [true, false] {
+                draw_test_glyph(&font, glyph, cache_enabled, style, &mut resources);
+            }
+        }
+        assert_eq!(resources.renderer.cache.len(), 0);
+        assert_eq!(resources.renderer.cache.stats().insertions, 0);
+        assert_eq!(resources.renderer.cached_draws, 0);
+        assert_eq!(resources.renderer.uncached_draws, 0);
+    }
+
     /// A glyph cached under an upright transform must not be reused for a transform that
     /// cannot be drawn from the cache.
     fn ensure_transform_bypasses_cache(kind: TestGlyphKind, transform: Affine) {
