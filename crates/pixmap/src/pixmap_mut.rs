@@ -1,10 +1,12 @@
+use alloc::vec::Vec;
 use core::fmt;
 use core::iter::FusedIterator;
 use core::slice::ChunksExactMut;
 
 use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous, row_bytes,
-    subregion_byte_range, validate_strided_parts,
+    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous,
+    multiply_alpha_rgba8, premultiply_rgba8, row_bytes, subregion_byte_range, swap_rb_rgba8,
+    unpremultiply_rgba8, validate_strided_parts,
 };
 
 /// A mutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -172,6 +174,64 @@ impl<'a> PixmapMut<'a> {
         self.subregion_mut(x, y, width, height).fill(color);
     }
 
+    /// Premultiplies the colour channels of every active pixel by alpha in place, leaving any
+    /// inter-row stride padding untouched.
+    pub fn premultiply(&mut self) {
+        if let Some(data) = self.data_mut() {
+            premultiply_rgba8(data);
+        } else {
+            for row in self.rows_mut() {
+                premultiply_rgba8(row);
+            }
+        }
+    }
+
+    /// Unpremultiplies the colour channels of every active pixel to straight alpha in place,
+    /// leaving any inter-row stride padding untouched.
+    ///
+    /// Pixels with alpha `0` become `[0, 0, 0, 0]`, and any colour channel exceeding alpha is
+    /// clamped to `255`.
+    pub fn unpremultiply(&mut self) {
+        if let Some(data) = self.data_mut() {
+            unpremultiply_rgba8(data);
+        } else {
+            for row in self.rows_mut() {
+                unpremultiply_rgba8(row);
+            }
+        }
+    }
+
+    /// Multiplies every channel of every active pixel by `alpha / 255` in place, using
+    /// nearest-integer rounding and leaving any inter-row stride padding untouched.
+    pub fn multiply_alpha(&mut self, alpha: u8) {
+        if alpha == 255 {
+            return;
+        }
+        if alpha == 0 {
+            self.clear();
+            return;
+        }
+        if let Some(data) = self.data_mut() {
+            multiply_alpha_rgba8(data, alpha);
+        } else {
+            for row in self.rows_mut() {
+                multiply_alpha_rgba8(row, alpha);
+            }
+        }
+    }
+
+    /// Swaps the red and blue channels of every active pixel in place (RGBA <-> BGRA), leaving
+    /// any inter-row stride padding untouched.
+    pub fn swap_rb(&mut self) {
+        if let Some(data) = self.data_mut() {
+            swap_rb_rgba8(data);
+        } else {
+            for row in self.rows_mut() {
+                swap_rb_rgba8(row);
+            }
+        }
+    }
+
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.
     pub fn byte_len(&self) -> usize {
         byte_len(self.width, self.height)
@@ -315,6 +375,11 @@ impl<'a> PixmapMut<'a> {
     /// Copies the pixels into a new tightly packed owned [`Pixmap`].
     pub fn to_owned(&self) -> Pixmap {
         self.as_ref().to_owned()
+    }
+
+    /// Copies the active pixels into a tightly packed straight-alpha RGBA8 buffer.
+    pub fn to_unpremultiplied(&self) -> Vec<u8> {
+        self.as_ref().to_unpremultiplied()
     }
 }
 
