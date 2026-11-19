@@ -2,7 +2,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::util::{as_pixels, as_pixels_mut, byte_len, fill_slice, row_bytes, slice_is_opaque};
+use crate::util::{
+    as_pixels, as_pixels_mut, byte_len, fill_slice, is_valid_packed_parts, row_bytes,
+    slice_is_opaque, validate_packed_parts,
+};
 use crate::{
     BYTES_PER_PIXEL, BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut,
     composite_color_rgba8, multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8,
@@ -29,6 +32,10 @@ impl Pixmap {
     }
 
     /// Creates a fully transparent pixmap.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height * 4` overflows `usize` or exceeds the allocator's capacity limit.
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             width,
@@ -58,13 +65,9 @@ impl Pixmap {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len()` is not `width * height * 4`.
+    /// Panics if `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn from_parts(data: Vec<u8>, width: u16, height: u16) -> Self {
-        assert_eq!(
-            data.len(),
-            byte_len(width, height),
-            "pixel data length must match the pixmap's dimensions"
-        );
+        validate_packed_parts(data.len(), width, height);
         Self {
             width,
             height,
@@ -73,9 +76,9 @@ impl Pixmap {
     }
 
     /// Creates a pixmap from existing pixel data, without copying it, returning `None` if
-    /// `data.len()` is not `width * height * 4`.
+    /// `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn try_from_parts(data: Vec<u8>, width: u16, height: u16) -> Option<Self> {
-        if data.len() != byte_len(width, height) {
+        if !is_valid_packed_parts(data.len(), width, height) {
             return None;
         }
         Some(Self {
@@ -90,13 +93,9 @@ impl Pixmap {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len()` is not `width * height * 4`.
+    /// Panics if `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn from_unpremultiplied(mut data: Vec<u8>, width: u16, height: u16) -> Self {
-        assert_eq!(
-            data.len(),
-            byte_len(width, height),
-            "pixel data length must match the pixmap's dimensions"
-        );
+        validate_packed_parts(data.len(), width, height);
         premultiply_rgba8(&mut data);
         Self {
             width,
@@ -106,9 +105,10 @@ impl Pixmap {
     }
 
     /// Creates a premultiplied pixmap from straight-alpha RGBA8 pixel data, premultiplying in
-    /// place without copying, or returning `None` if `data.len()` is not `width * height * 4`.
+    /// place without copying, or returning `None` if `width * height * 4` overflows `usize` or
+    /// `data.len()` does not match.
     pub fn try_from_unpremultiplied(mut data: Vec<u8>, width: u16, height: u16) -> Option<Self> {
-        if data.len() != byte_len(width, height) {
+        if !is_valid_packed_parts(data.len(), width, height) {
             return None;
         }
         premultiply_rgba8(&mut data);
@@ -491,10 +491,15 @@ impl Pixmap {
     /// to transparent black (`[0, 0, 0, 0]`); if smaller, the buffer is truncated while keeping
     /// its reserved capacity. Existing bytes are not re-laid out for the new width, so callers
     /// that want a clean transparent surface should use [`reset`](Self::reset).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height * 4` overflows `usize` or exceeds the allocator's capacity limit.
     pub fn resize_buffer(&mut self, width: u16, height: u16) {
+        let new_len = byte_len(width, height);
+        self.data.resize(new_len, 0);
         self.width = width;
         self.height = height;
-        self.data.resize(byte_len(width, height), 0);
     }
 
     /// Changes the pixmap's dimensions and clears every pixel to transparent black
@@ -503,11 +508,18 @@ impl Pixmap {
     ///
     /// If the backing buffer must grow beyond its current capacity, stale pixel data is
     /// discarded before reallocating so it is not copied into the new allocation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `width * height * 4` overflows `usize` or exceeds the allocator's capacity limit.
     pub fn reset(&mut self, width: u16, height: u16) {
+        let new_len = byte_len(width, height);
+        self.width = 0;
+        self.height = 0;
+        self.data.clear();
+        self.data.resize(new_len, 0);
         self.width = width;
         self.height = height;
-        self.data.clear();
-        self.data.resize(byte_len(width, height), 0);
     }
 }
 

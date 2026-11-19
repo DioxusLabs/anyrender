@@ -5,8 +5,9 @@ use core::slice::ChunksExactMut;
 
 use crate::blit::clip_blit;
 use crate::util::{
-    as_pixels, as_pixels_mut, byte_len, fill_slice, is_contiguous, is_valid_strided_parts,
-    row_bytes, subregion_byte_range, validate_strided_parts,
+    as_pixels, as_pixels_mut, byte_len, fill_slice, is_contiguous, is_valid_packed_parts,
+    is_valid_strided_parts, row_bytes, subregion_byte_range, validate_packed_parts,
+    validate_strided_parts,
 };
 use crate::{
     BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, composite_color_rgba8,
@@ -45,13 +46,9 @@ impl<'a> PixmapMut<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len()` is not `width * height * 4`.
+    /// Panics if `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn from_parts(data: &'a mut [u8], width: u16, height: u16) -> Self {
-        assert_eq!(
-            data.len(),
-            byte_len(width, height),
-            "pixel data length must match the pixmap's dimensions"
-        );
+        validate_packed_parts(data.len(), width, height);
         Self {
             width,
             height,
@@ -61,9 +58,9 @@ impl<'a> PixmapMut<'a> {
     }
 
     /// Creates a tightly packed mutable view borrowing existing pixel data, returning `None` if
-    /// `data.len()` is not `width * height * 4`.
+    /// `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn try_from_parts(data: &'a mut [u8], width: u16, height: u16) -> Option<Self> {
-        if data.len() != byte_len(width, height) {
+        if !is_valid_packed_parts(data.len(), width, height) {
             return None;
         }
         Some(Self {
