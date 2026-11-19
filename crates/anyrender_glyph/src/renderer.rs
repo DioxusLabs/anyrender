@@ -32,6 +32,11 @@ pub(crate) fn fill_glyph(
 
     match prepared_glyph.glyph_type {
         GlyphType::Outline(glyph) => {
+            // A glyph without an outline, such as a space, draws nothing.
+            if glyph.path.is_empty() {
+                return;
+            }
+
             if let Some(key) = cache_key
                 && cache_and_render_outline(renderer, &glyph, transform, &key)
             {
@@ -79,6 +84,10 @@ pub(crate) fn stroke_glyph(
 ) {
     match prepared_glyph.glyph_type {
         GlyphType::Outline(glyph) => {
+            if glyph.path.is_empty() {
+                return;
+            }
+
             stroke_uncached_outline_glyph(
                 renderer,
                 &glyph.path,
@@ -234,6 +243,10 @@ fn cache_and_render_outline(
 
     let bounds = glyph.bbox.scale_from_origin(glyph.scale);
     let metrics = calculate_raster_metrics(&bounds);
+    // A renderer can't store an image without pixels, and would be asked to on every draw.
+    if metrics.width == 0 || metrics.height == 0 {
+        return false;
+    }
     let subpixel_offset = subpixel_offset(key.subpixel_x);
 
     let transform =
