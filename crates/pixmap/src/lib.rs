@@ -61,6 +61,40 @@ pub(crate) fn slice_is_opaque(data: &[u8]) -> bool {
     pixels.iter().all(|px| px[3] == 255)
 }
 
+pub(crate) fn as_pixels(data: &[u8]) -> &[[u8; 4]] {
+    let (pixels, remainder) = data.as_chunks::<BYTES_PER_PIXEL>();
+    debug_assert!(remainder.is_empty());
+    pixels
+}
+
+pub(crate) fn as_pixels_mut(data: &mut [u8]) -> &mut [[u8; 4]] {
+    let (pixels, remainder) = data.as_chunks_mut::<BYTES_PER_PIXEL>();
+    debug_assert!(remainder.is_empty());
+    pixels
+}
+
+pub(crate) fn is_valid_strided_parts(
+    data_len: usize,
+    width: u16,
+    height: u16,
+    stride: usize,
+) -> bool {
+    let min_row_bytes = row_bytes(width);
+    if stride < min_row_bytes {
+        return false;
+    }
+    let Some(min_len) = (if height == 0 {
+        Some(0)
+    } else {
+        (height as usize - 1)
+            .checked_mul(stride)
+            .and_then(|n| n.checked_add(min_row_bytes))
+    }) else {
+        return false;
+    };
+    data_len >= min_len
+}
+
 pub(crate) fn validate_strided_parts(data_len: usize, width: u16, height: u16, stride: usize) {
     let min_row_bytes = row_bytes(width);
     assert!(

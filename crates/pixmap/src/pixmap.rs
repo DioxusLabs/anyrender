@@ -3,9 +3,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::{
-    BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, byte_len,
-    composite_color_rgba8, fill_slice, multiply_alpha_rgba8, premultiply_rgba8, row_bytes,
-    slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
+    BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, as_pixels, as_pixels_mut,
+    byte_len, composite_color_rgba8, fill_slice, multiply_alpha_rgba8, premultiply_rgba8,
+    row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -54,6 +54,19 @@ impl Pixmap {
         }
     }
 
+    /// Creates a pixmap from existing pixel data, without copying it, returning `None` if
+    /// `data.len()` is not `width * height * 4`.
+    pub fn try_from_parts(data: Vec<u8>, width: u16, height: u16) -> Option<Self> {
+        if data.len() != byte_len(width, height) {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            data,
+        })
+    }
+
     /// Creates a premultiplied pixmap from straight-alpha RGBA8 pixel data, premultiplying in
     /// place without copying.
     ///
@@ -72,6 +85,20 @@ impl Pixmap {
             height,
             data,
         }
+    }
+
+    /// Creates a premultiplied pixmap from straight-alpha RGBA8 pixel data, premultiplying in
+    /// place without copying, or returning `None` if `data.len()` is not `width * height * 4`.
+    pub fn try_from_unpremultiplied(mut data: Vec<u8>, width: u16, height: u16) -> Option<Self> {
+        if data.len() != byte_len(width, height) {
+            return None;
+        }
+        premultiply_rgba8(&mut data);
+        Some(Self {
+            width,
+            height,
+            data,
+        })
     }
 
     /// The width in pixels.
@@ -106,6 +133,11 @@ impl Pixmap {
     /// Panics if `x >= self.width()` or `y >= self.height()`.
     pub fn pixel(&self, x: u16, y: u16) -> [u8; 4] {
         self.as_ref().pixel(x, y)
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`, or `None` if out of bounds.
+    pub fn get_pixel(&self, x: u16, y: u16) -> Option<[u8; 4]> {
+        self.as_ref().get_pixel(x, y)
     }
 
     /// Sets the premultiplied `[r, g, b, a]` pixel at `(x, y)`.
@@ -296,6 +328,18 @@ impl Pixmap {
         &mut self.data
     }
 
+    /// The pixels as a tightly packed slice of premultiplied `[r, g, b, a]` values.
+    #[inline]
+    pub fn pixels(&self) -> &[[u8; 4]] {
+        as_pixels(&self.data)
+    }
+
+    /// The pixels as a mutable tightly packed slice of premultiplied `[r, g, b, a]` values.
+    #[inline]
+    pub fn pixels_mut(&mut self) -> &mut [[u8; 4]] {
+        as_pixels_mut(&mut self.data)
+    }
+
     /// Returns the pixel bytes of row `y` (length `width * 4`).
     ///
     /// # Panics
@@ -319,6 +363,26 @@ impl Pixmap {
         );
         let start = y as usize * stride;
         &mut self.data[start..start + stride]
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixels of row `y` (length `width`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= self.height()`.
+    #[inline]
+    pub fn row_pixels(&self, y: u16) -> &[[u8; 4]] {
+        as_pixels(self.row(y))
+    }
+
+    /// Returns the mutable premultiplied `[r, g, b, a]` pixels of row `y` (length `width`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= self.height()`.
+    #[inline]
+    pub fn row_pixels_mut(&mut self, y: u16) -> &mut [[u8; 4]] {
+        as_pixels_mut(self.row_mut(y))
     }
 
     /// Iterates over the rows of pixels from top to bottom.
@@ -395,5 +459,49 @@ impl fmt::Debug for Pixmap {
             .field("width", &self.width)
             .field("height", &self.height)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn try_from_parts_and_try_from_unpremultiplied() {
+        let data = vec![10, 20, 30, 255, 40, 50, 60, 255];
+        let ptr = data.as_ptr();
+        let pixmap = Pixmap::try_from_parts(data, 2, 1).unwrap();
+        assert_eq!(pixmap.data().as_ptr(), ptr);
+        assert_eq!(pixmap.pixels(), &[[10, 20, 30, 255], [40, 50, 60, 255]]);
+
+        assert!(Pixmap::try_from_parts(vec![0; 7], 2, 1).is_none());
+        assert!(Pixmap::try_from_parts(vec![0; 9], 2, 1).is_none());
+        assert!(Pixmap::try_from_parts(vec![], 0, 3).is_some());
+
+        let straight = vec![255, 128, 0, 128];
+        let premul = Pixmap::try_from_unpremultiplied(straight, 1, 1).unwrap();
+        assert_eq!(premul.pixel(0, 0), [128, 64, 0, 128]);
+        assert!(Pixmap::try_from_unpremultiplied(vec![0; 3], 1, 1).is_none());
+    }
+
+    #[test]
+    fn pixels_row_pixels_and_get_pixel() {
+        let mut pixmap = Pixmap::new(2, 2);
+        assert_eq!(pixmap.pixels().len(), 4);
+        pixmap.pixels_mut()[0] = [1, 2, 3, 255];
+        pixmap.row_pixels_mut(1)[1] = [4, 5, 6, 255];
+
+        assert_eq!(pixmap.row_pixels(0), &[[1, 2, 3, 255], [0, 0, 0, 0]]);
+        assert_eq!(pixmap.row_pixels(1), &[[0, 0, 0, 0], [4, 5, 6, 255]]);
+        assert_eq!(pixmap.get_pixel(0, 0), Some([1, 2, 3, 255]));
+        assert_eq!(pixmap.get_pixel(1, 1), Some([4, 5, 6, 255]));
+        assert_eq!(pixmap.get_pixel(2, 0), None);
+        assert_eq!(pixmap.get_pixel(0, 2), None);
+
+        let empty = Pixmap::new(0, 2);
+        assert!(empty.pixels().is_empty());
+        assert!(empty.row_pixels(0).is_empty());
+        assert_eq!(empty.get_pixel(0, 0), None);
     }
 }

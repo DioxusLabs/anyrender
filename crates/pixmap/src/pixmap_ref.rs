@@ -4,8 +4,9 @@ use core::iter::FusedIterator;
 use core::slice::ChunksExact;
 
 use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter, byte_len, is_contiguous, row_bytes,
-    slice_is_opaque, subregion_byte_range, validate_strided_parts,
+    BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter, as_pixels, byte_len, is_contiguous,
+    is_valid_strided_parts, row_bytes, slice_is_opaque, subregion_byte_range,
+    validate_strided_parts,
 };
 
 /// An immutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -50,6 +51,20 @@ impl<'a> PixmapRef<'a> {
         }
     }
 
+    /// Creates a tightly packed view borrowing existing pixel data, returning `None` if
+    /// `data.len()` is not `width * height * 4`.
+    pub fn try_from_parts(data: &'a [u8], width: u16, height: u16) -> Option<Self> {
+        if data.len() != byte_len(width, height) {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            stride: row_bytes(width),
+            data,
+        })
+    }
+
     /// Creates a strided view borrowing existing pixel data.
     ///
     /// `stride` is the distance in bytes between the start of consecutive rows. The last row
@@ -67,6 +82,26 @@ impl<'a> PixmapRef<'a> {
             stride,
             data,
         }
+    }
+
+    /// Creates a strided view borrowing existing pixel data, returning `None` if
+    /// `stride < width * 4`, if the required byte length overflows `usize`, or if `data` is
+    /// shorter than `(height - 1) * stride + width * 4` (or `0` when `height == 0`).
+    pub fn try_from_parts_with_stride(
+        data: &'a [u8],
+        width: u16,
+        height: u16,
+        stride: usize,
+    ) -> Option<Self> {
+        if !is_valid_strided_parts(data.len(), width, height, stride) {
+            return None;
+        }
+        Some(Self {
+            width,
+            height,
+            stride,
+            data,
+        })
     }
 
     /// The width in pixels.
@@ -117,6 +152,19 @@ impl<'a> PixmapRef<'a> {
             .unwrap()
     }
 
+    /// Returns the premultiplied `[r, g, b, a]` pixel at `(x, y)`, or `None` if out of bounds.
+    pub fn get_pixel(&self, x: u16, y: u16) -> Option<[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let start = y as usize * self.stride + row_bytes(x);
+        Some(
+            self.data[start..start + BYTES_PER_PIXEL]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.
     pub fn byte_len(&self) -> usize {
         byte_len(self.width, self.height)
@@ -131,6 +179,14 @@ impl<'a> PixmapRef<'a> {
     /// [`is_contiguous`](Self::is_contiguous) is `true`, or `None` if rows have inter-row gaps.
     pub fn data(&self) -> Option<&'a [u8]> {
         self.is_contiguous().then(|| &self.data[..self.byte_len()])
+    }
+
+    /// Returns the pixels as a single contiguous slice of premultiplied `[r, g, b, a]` values
+    /// (length `width * height`) if [`is_contiguous`](Self::is_contiguous) is `true`, or `None`
+    /// if rows have inter-row gaps.
+    #[inline]
+    pub fn pixels(&self) -> Option<&'a [[u8; 4]]> {
+        self.data().map(as_pixels)
     }
 
     /// Returns the underlying borrowed slice, which may include inter-row stride padding or
@@ -152,6 +208,16 @@ impl<'a> PixmapRef<'a> {
         );
         let start = y as usize * self.stride;
         &self.data[start..start + row_bytes(self.width)]
+    }
+
+    /// Returns the premultiplied `[r, g, b, a]` pixels of row `y` (length `width`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `y >= self.height()`.
+    #[inline]
+    pub fn row_pixels(&self, y: u16) -> &'a [[u8; 4]] {
+        as_pixels(self.row(y))
     }
 
     /// Iterates over the rows of pixels from top to bottom.
@@ -549,5 +615,48 @@ impl fmt::Debug for PixmapRef<'_> {
             .field("height", &self.height)
             .field("stride", &self.stride)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn try_from_parts_and_strided_validation() {
+        let data = [1, 2, 3, 255, 4, 5, 6, 255];
+        let view = PixmapRef::try_from_parts(&data, 2, 1).unwrap();
+        assert_eq!(view.pixels(), Some(&[[1, 2, 3, 255], [4, 5, 6, 255]][..]));
+        assert_eq!(view.get_pixel(1, 0), Some([4, 5, 6, 255]));
+        assert_eq!(view.get_pixel(2, 0), None);
+        assert_eq!(view.get_pixel(0, 1), None);
+
+        assert!(PixmapRef::try_from_parts(&data[..7], 2, 1).is_none());
+        assert!(PixmapRef::try_from_parts(&[], 0, 3).is_some());
+
+        // Strided 2x2 with stride 16 and trimmed last row (16 + 8 = 24 bytes).
+        let mut buf = vec![0xAA_u8; 24];
+        buf[0..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        buf[16..24].copy_from_slice(&[9, 10, 11, 12, 13, 14, 15, 16]);
+
+        let strided = PixmapRef::try_from_parts_with_stride(&buf, 2, 2, 16).unwrap();
+        assert_eq!(strided.pixels(), None);
+        assert_eq!(strided.row_pixels(0), &[[1, 2, 3, 4], [5, 6, 7, 8]]);
+        assert_eq!(strided.row_pixels(1), &[[9, 10, 11, 12], [13, 14, 15, 16]]);
+        assert_eq!(strided.get_pixel(1, 1), Some([13, 14, 15, 16]));
+        assert_eq!(strided.get_pixel(2, 1), None);
+
+        // Single-row strided view is contiguous, so `pixels()` succeeds without trailing bytes.
+        let single = PixmapRef::try_from_parts_with_stride(&buf, 2, 1, 16).unwrap();
+        assert_eq!(single.pixels(), Some(&[[1, 2, 3, 4], [5, 6, 7, 8]][..]));
+
+        // Error cases: stride < width*4, buffer too short, stride overflow.
+        assert!(PixmapRef::try_from_parts_with_stride(&buf, 2, 2, 4).is_none());
+        assert!(PixmapRef::try_from_parts_with_stride(&buf[..23], 2, 2, 16).is_none());
+        assert!(PixmapRef::try_from_parts_with_stride(&buf, 1, 2, usize::MAX).is_none());
+        // Zero height needs 0 bytes as long as stride >= width*4.
+        assert!(PixmapRef::try_from_parts_with_stride(&[], 2, 0, 8).is_some());
+        assert!(PixmapRef::try_from_parts_with_stride(&[], 2, 0, 4).is_none());
     }
 }
