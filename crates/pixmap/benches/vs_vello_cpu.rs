@@ -1,6 +1,7 @@
 //! Raw-kernel benchmark comparing `pixmap` imaging operations against `vello_cpu`'s
-//! low-level `U8Kernel` (`vello_cpu::fine`) and `vello_common::pixmap` SIMD routines,
-//! without render-context or tile-scheduling overhead.
+//! low-level `U8Kernel` (`vello_cpu::fine`) / `vello_common::pixmap` SIMD routines
+//! and `tiny-skia`'s `RasterPipeline` (compile-time SIMD), without scene/tile-scheduling
+//! overhead.
 //!
 //! Run on x86 or ARM/macOS with:
 //!
@@ -8,7 +9,8 @@
 //! cargo bench -p pixmap --bench vs_vello_cpu
 //! ```
 //!
-//! To compare `pixmap` auto-vectorization under host SIMD (e.g. AVX2 or NEON) as well:
+//! To compare `pixmap` auto-vectorization and `tiny-skia` compile-time SIMD under host
+//! ISA (e.g. AVX2 or NEON) as well:
 //!
 //! ```sh
 //! RUSTFLAGS="-C target-cpu=native" cargo bench -p pixmap --bench vs_vello_cpu
@@ -25,13 +27,16 @@
 //!   dedicated `U8Kernel::alpha_composite_buffer` / `alpha_composite_solid` fast paths and
 //!   all other modes through `U8Kernel::blend` (whose `blend::mix` and `ComposeExt::compose`
 //!   helpers are `#[inline(never)]` per 8-pixel chunk). `vello_cpu` maps `PlusLighter` to
-//!   `Plus`.
+//!   `Plus`. `tiny-skia` has no public per-stage API so its benchmarks call `PixmapMut::draw_pixmap`
+//!   / `fill_rect` (which compiles and runs its `RasterPipeline` directly over the rect;
+//!   `tiny-skia` has no `PlusLighter` variant).
 //! - **Resampling**: `pixmap` scales separable filter support when downscaling to avoid
-//!   aliasing, whereas `vello_cpu` always samples a fixed 2x2 (`Medium`) or 4x4 (`High`,
-//!   Mitchell-Netravali) grid. `vello_cpu_nopack` omits the tile-to-row-major `pack` step.
+//!   aliasing, whereas `vello_cpu` and `tiny-skia` always sample a fixed 2x2 (bilinear)
+//!   or 4x4 (bicubic, Mitchell-Netravali B=1/3, C=1/3) grid. `vello_cpu_nopack` omits the
+//!   tile-to-row-major `pack` step.
 //! - **Unpaired baselines**: `swap_rb`, `flip_horizontal`, `flip_vertical`, `rotate_180`,
-//!   and `transpose` have no direct `vello_cpu` counterpart and are reported as `pixmap`
-//!   baselines only.
+//!   and `transpose` have no direct `vello_cpu` or `tiny-skia` counterpart and are reported
+//!   as `pixmap` baselines only.
 
 use std::hint::black_box;
 use std::iter;
@@ -43,6 +48,12 @@ use pixmap::{
     BlendMode as PmBlendMode, Compose as PmCompose, Mix as PmMix, Pixmap as AnyPixmap,
     ResampleFilter, composite_color_rgba8, composite_rgba8, multiply_alpha_rgba8,
     premultiply_rgba8, swap_rb_rgba8, unpremultiply_rgba8,
+};
+use tiny_skia::{
+    BlendMode as TsBlendMode, Color as TsColor, ColorU8 as TsColorU8,
+    FilterQuality as TsFilterQuality, IntSize as TsIntSize, Paint as TsPaint, Pixmap as TsPixmap,
+    PixmapMut as TsPixmapMut, PixmapPaint as TsPixmapPaint, PixmapRef as TsPixmapRef,
+    Rect as TsRect, Transform as TsTransform,
 };
 use vello_common::encode::{EncodeExt, EncodedImage, EncodedPaint};
 use vello_common::fearless_simd::{Level, Simd, dispatch, u8x32};
@@ -70,7 +81,10 @@ const LARGE_H: u16 = 1024;
 const LARGE_PIXELS: usize = LARGE_W as usize * LARGE_H as usize;
 
 const SOLID_COLOR: [u8; 4] = [180, 90, 45, 200];
+// Straight-alpha equivalent of `SOLID_COLOR` (premultiplies to ~[180, 90, 45, 200]).
+const SOLID_COLOR_STRAIGHT: [u8; 4] = [230, 115, 57, 200];
 const OPACITY: u8 = 180;
+const OPACITY_F32: f32 = OPACITY as f32 / 255.0;
 
 struct XorShift64(u64);
 
@@ -165,6 +179,43 @@ fn bench_in_place<F: FnMut(&mut [u8])>(b: &mut Bencher<'_>, initial: &[u8], mut 
         }
         total
     });
+}
+
+/// Draws `src` over the whole of `dst` (same size) through `tiny-skia`'s raster pipeline.
+fn ts_draw(
+    dst: &mut [u8],
+    w: u16,
+    h: u16,
+    src: TsPixmapRef<'_>,
+    blend_mode: TsBlendMode,
+    opacity: f32,
+) {
+    let paint = TsPixmapPaint {
+        opacity,
+        blend_mode,
+        quality: TsFilterQuality::Nearest,
+    };
+    let mut ts_dst = TsPixmapMut::from_bytes(dst, u32::from(w), u32::from(h)).unwrap();
+    ts_dst.draw_pixmap(0, 0, src, &paint, TsTransform::identity(), None);
+}
+
+/// Resamples `src` into the whole of `dst` with `transform` through `tiny-skia`'s raster
+/// pipeline (`Source` blend, so the destination is overwritten).
+fn ts_resample(
+    dst: &mut [u8],
+    w: u16,
+    h: u16,
+    src: TsPixmapRef<'_>,
+    quality: TsFilterQuality,
+    transform: TsTransform,
+) {
+    let paint = TsPixmapPaint {
+        opacity: 1.0,
+        blend_mode: TsBlendMode::Source,
+        quality,
+    };
+    let mut ts_dst = TsPixmapMut::from_bytes(dst, u32::from(w), u32::from(h)).unwrap();
+    ts_dst.draw_pixmap(0, 0, src, &paint, transform, None);
 }
 
 /// Runs `U8Kernel::alpha_composite_buffer` inside the detected SIMD level.
@@ -334,6 +385,20 @@ fn bench_alpha(c: &mut Criterion) {
                 });
             },
         );
+        group.bench_function(
+            BenchmarkId::new(format!("premultiply_mixed/{label}"), "tiny_skia"),
+            |b| {
+                bench_in_place(b, &straight_mixed, |buf| {
+                    for px in buf.chunks_exact_mut(4) {
+                        let p = TsColorU8::from_rgba(px[0], px[1], px[2], px[3]).premultiply();
+                        px[0] = p.red();
+                        px[1] = p.green();
+                        px[2] = p.blue();
+                        px[3] = p.alpha();
+                    }
+                });
+            },
+        );
 
         group.bench_function(
             BenchmarkId::new(format!("premultiply_opaque/{label}"), "pixmap"),
@@ -349,6 +414,20 @@ fn bench_alpha(c: &mut Criterion) {
                 });
             },
         );
+        group.bench_function(
+            BenchmarkId::new(format!("premultiply_opaque/{label}"), "tiny_skia"),
+            |b| {
+                bench_in_place(b, &straight_opaque, |buf| {
+                    for px in buf.chunks_exact_mut(4) {
+                        let p = TsColorU8::from_rgba(px[0], px[1], px[2], px[3]).premultiply();
+                        px[0] = p.red();
+                        px[1] = p.green();
+                        px[2] = p.blue();
+                        px[3] = p.alpha();
+                    }
+                });
+            },
+        );
 
         group.bench_function(
             BenchmarkId::new(format!("unpremultiply/{label}"), "pixmap"),
@@ -361,6 +440,27 @@ fn bench_alpha(c: &mut Criterion) {
             |b| {
                 bench_in_place(b, &premul, |buf| {
                     black_box(vello_unpremultiply_rgba8(buf));
+                });
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new(format!("unpremultiply/{label}"), "tiny_skia"),
+            |b| {
+                let size = TsIntSize::from_wh(u32::from(w), u32::from(h)).unwrap();
+                let mut buf = Some(premul.clone());
+                b.iter_custom(|iters| {
+                    let mut total = Duration::ZERO;
+                    for _ in 0..iters {
+                        let mut v = buf.take().unwrap();
+                        v.copy_from_slice(&premul);
+                        let pm = TsPixmap::from_vec(v, size).unwrap();
+                        let start = Instant::now();
+                        let out = black_box(pm).take_demultiplied();
+                        total += start.elapsed();
+                        black_box(&out);
+                        buf = Some(out);
+                    }
+                    total
                 });
             },
         );
@@ -450,6 +550,21 @@ fn bench_solid(c: &mut Criterion) {
             black_box(&fill_buf_vello);
         });
     });
+    let mut fill_buf_ts = dst_orig.clone();
+    group.bench_function(BenchmarkId::new("fill", "tiny_skia"), |b| {
+        let mut ts_pm =
+            TsPixmapMut::from_bytes(&mut fill_buf_ts, u32::from(W), u32::from(H)).unwrap();
+        let ts_color = TsColor::from_rgba8(
+            SOLID_COLOR_STRAIGHT[0],
+            SOLID_COLOR_STRAIGHT[1],
+            SOLID_COLOR_STRAIGHT[2],
+            SOLID_COLOR_STRAIGHT[3],
+        );
+        b.iter(|| {
+            ts_pm.fill(black_box(ts_color));
+            black_box(ts_pm.data_mut());
+        });
+    });
 
     // Solid SrcOver (uses vello_cpu's dedicated `alpha_composite_solid` fast path).
     group.bench_function(BenchmarkId::new("src_over", "pixmap"), |b| {
@@ -464,27 +579,46 @@ fn bench_solid(c: &mut Criterion) {
             });
         });
     });
+    let full_rect = TsRect::from_xywh(0.0, 0.0, f32::from(W), f32::from(H)).unwrap();
+    group.bench_function(BenchmarkId::new("src_over", "tiny_skia"), |b| {
+        let mut paint = TsPaint::default();
+        paint.set_color_rgba8(
+            SOLID_COLOR_STRAIGHT[0],
+            SOLID_COLOR_STRAIGHT[1],
+            SOLID_COLOR_STRAIGHT[2],
+            SOLID_COLOR_STRAIGHT[3],
+        );
+        paint.blend_mode = TsBlendMode::SourceOver;
+        paint.anti_alias = false;
+        bench_in_place(b, &dst_orig, |dst| {
+            let mut ts_pm = TsPixmapMut::from_bytes(dst, u32::from(W), u32::from(H)).unwrap();
+            ts_pm.fill_rect(full_rect, black_box(&paint), TsTransform::identity(), None);
+        });
+    });
 
     // Solid color with non-Normal mix modes.
-    let solid_mixes: &[(&str, PmBlendMode, VelloBlendMode)] = &[
+    let solid_mixes: &[(&str, PmBlendMode, VelloBlendMode, TsBlendMode)] = &[
         (
             "multiply",
             PmBlendMode::MULTIPLY,
             VelloBlendMode::new(VelloMix::Multiply, VelloCompose::SrcOver),
+            TsBlendMode::Multiply,
         ),
         (
             "screen",
             PmBlendMode::SCREEN,
             VelloBlendMode::new(VelloMix::Screen, VelloCompose::SrcOver),
+            TsBlendMode::Screen,
         ),
         (
             "soft_light",
             PmBlendMode::SOFT_LIGHT,
             VelloBlendMode::new(VelloMix::SoftLight, VelloCompose::SrcOver),
+            TsBlendMode::SoftLight,
         ),
     ];
 
-    for &(name, pm_mode, vello_mode) in solid_mixes {
+    for &(name, pm_mode, vello_mode, ts_mode) in solid_mixes {
         group.bench_function(BenchmarkId::new(name, "pixmap"), |b| {
             bench_in_place(b, &dst_orig, |dst| {
                 composite_color_rgba8(dst, black_box(SOLID_COLOR), pm_mode);
@@ -493,6 +627,21 @@ fn bench_solid(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new(name, "vello_cpu"), |b| {
             bench_in_place(b, &dst_orig, |dst| {
                 vello_blend_solid(level, dst, black_box(SOLID_COLOR), vello_mode);
+            });
+        });
+        group.bench_function(BenchmarkId::new(name, "tiny_skia"), |b| {
+            let mut paint = TsPaint::default();
+            paint.set_color_rgba8(
+                SOLID_COLOR_STRAIGHT[0],
+                SOLID_COLOR_STRAIGHT[1],
+                SOLID_COLOR_STRAIGHT[2],
+                SOLID_COLOR_STRAIGHT[3],
+            );
+            paint.blend_mode = ts_mode;
+            paint.anti_alias = false;
+            bench_in_place(b, &dst_orig, |dst| {
+                let mut ts_pm = TsPixmapMut::from_bytes(dst, u32::from(W), u32::from(H)).unwrap();
+                ts_pm.fill_rect(full_rect, black_box(&paint), TsTransform::identity(), None);
             });
         });
     }
@@ -509,6 +658,8 @@ fn bench_compose(c: &mut Criterion) {
     let src = make_premul_rgba8(PIXELS, 0x0102_0304_0506_0708);
     let uniform_alphas = vec![OPACITY; PIXELS];
 
+    let ts_src = TsPixmapRef::from_bytes(&src, u32::from(W), u32::from(H)).unwrap();
+
     // SrcOver fast path (what vello_cpu actually uses for default BlendMode::default()).
     group.bench_function(BenchmarkId::new("SrcOver", "pixmap"), |b| {
         bench_in_place(b, &dst_orig, |dst| {
@@ -518,6 +669,24 @@ fn bench_compose(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("SrcOver", "vello_cpu"), |b| {
         bench_in_place(b, &dst_orig, |dst| {
             vello_alpha_composite_buffer(level, dst, black_box(&src), None);
+        });
+    });
+    group.bench_function(BenchmarkId::new("SrcOver", "tiny_skia"), |b| {
+        let paint = TsPixmapPaint {
+            opacity: 1.0,
+            blend_mode: TsBlendMode::SourceOver,
+            quality: TsFilterQuality::Nearest,
+        };
+        bench_in_place(b, &dst_orig, |dst| {
+            let mut ts_dst = TsPixmapMut::from_bytes(dst, u32::from(W), u32::from(H)).unwrap();
+            ts_dst.draw_pixmap(
+                0,
+                0,
+                black_box(ts_src),
+                &paint,
+                TsTransform::identity(),
+                None,
+            );
         });
     });
 
@@ -542,30 +711,114 @@ fn bench_compose(c: &mut Criterion) {
             );
         });
     });
+    group.bench_function(BenchmarkId::new("SrcOver_opacity", "tiny_skia"), |b| {
+        let paint = TsPixmapPaint {
+            opacity: OPACITY_F32,
+            blend_mode: TsBlendMode::SourceOver,
+            quality: TsFilterQuality::Nearest,
+        };
+        bench_in_place(b, &dst_orig, |dst| {
+            let mut ts_dst = TsPixmapMut::from_bytes(dst, u32::from(W), u32::from(H)).unwrap();
+            ts_dst.draw_pixmap(
+                0,
+                0,
+                black_box(ts_src),
+                black_box(&paint),
+                TsTransform::identity(),
+                None,
+            );
+        });
+    });
 
     // All remaining Porter-Duff Compose modes (vello_cpu dispatches these through `U8Kernel::blend`).
-    let modes: &[(&str, PmCompose, VelloCompose)] = &[
-        ("Clear", PmCompose::Clear, VelloCompose::Clear),
-        ("Copy", PmCompose::Copy, VelloCompose::Copy),
-        ("Dest", PmCompose::Dest, VelloCompose::Dest),
-        ("SrcOver_blend", PmCompose::SrcOver, VelloCompose::SrcOver),
-        ("DestOver", PmCompose::DestOver, VelloCompose::DestOver),
-        ("SrcIn", PmCompose::SrcIn, VelloCompose::SrcIn),
-        ("DestIn", PmCompose::DestIn, VelloCompose::DestIn),
-        ("SrcOut", PmCompose::SrcOut, VelloCompose::SrcOut),
-        ("DestOut", PmCompose::DestOut, VelloCompose::DestOut),
-        ("SrcAtop", PmCompose::SrcAtop, VelloCompose::SrcAtop),
-        ("DestAtop", PmCompose::DestAtop, VelloCompose::DestAtop),
-        ("Xor", PmCompose::Xor, VelloCompose::Xor),
-        ("Plus", PmCompose::Plus, VelloCompose::Plus),
+    let modes: &[(&str, PmCompose, VelloCompose, Option<TsBlendMode>)] = &[
+        (
+            "Clear",
+            PmCompose::Clear,
+            VelloCompose::Clear,
+            Some(TsBlendMode::Clear),
+        ),
+        (
+            "Copy",
+            PmCompose::Copy,
+            VelloCompose::Copy,
+            Some(TsBlendMode::Source),
+        ),
+        (
+            "Dest",
+            PmCompose::Dest,
+            VelloCompose::Dest,
+            Some(TsBlendMode::Destination),
+        ),
+        (
+            "SrcOver_blend",
+            PmCompose::SrcOver,
+            VelloCompose::SrcOver,
+            None,
+        ),
+        (
+            "DestOver",
+            PmCompose::DestOver,
+            VelloCompose::DestOver,
+            Some(TsBlendMode::DestinationOver),
+        ),
+        (
+            "SrcIn",
+            PmCompose::SrcIn,
+            VelloCompose::SrcIn,
+            Some(TsBlendMode::SourceIn),
+        ),
+        (
+            "DestIn",
+            PmCompose::DestIn,
+            VelloCompose::DestIn,
+            Some(TsBlendMode::DestinationIn),
+        ),
+        (
+            "SrcOut",
+            PmCompose::SrcOut,
+            VelloCompose::SrcOut,
+            Some(TsBlendMode::SourceOut),
+        ),
+        (
+            "DestOut",
+            PmCompose::DestOut,
+            VelloCompose::DestOut,
+            Some(TsBlendMode::DestinationOut),
+        ),
+        (
+            "SrcAtop",
+            PmCompose::SrcAtop,
+            VelloCompose::SrcAtop,
+            Some(TsBlendMode::SourceAtop),
+        ),
+        (
+            "DestAtop",
+            PmCompose::DestAtop,
+            VelloCompose::DestAtop,
+            Some(TsBlendMode::DestinationAtop),
+        ),
+        (
+            "Xor",
+            PmCompose::Xor,
+            VelloCompose::Xor,
+            Some(TsBlendMode::Xor),
+        ),
+        (
+            "Plus",
+            PmCompose::Plus,
+            VelloCompose::Plus,
+            Some(TsBlendMode::Plus),
+        ),
         (
             "PlusLighter",
             PmCompose::PlusLighter,
             VelloCompose::PlusLighter,
+            None,
         ),
     ];
 
-    for &(name, pm_compose, vello_compose) in modes {
+    for &(name, pm_compose, vello_compose, ts_mode) in modes {
         let pm_mode = PmBlendMode::new(PmMix::Normal, pm_compose);
         let vello_mode = VelloBlendMode::new(VelloMix::Normal, vello_compose);
         // Clear, Copy, and Dest do not depend on prior destination contents, so time directly
@@ -610,12 +863,54 @@ fn bench_compose(c: &mut Criterion) {
                 });
             });
         }
+        if let Some(ts_blend) = ts_mode {
+            let paint = TsPixmapPaint {
+                opacity: 1.0,
+                blend_mode: ts_blend,
+                quality: TsFilterQuality::Nearest,
+            };
+            if stateless_dst {
+                let mut dst = dst_orig.clone();
+                group.bench_function(BenchmarkId::new(name, "tiny_skia"), |b| {
+                    let mut ts_dst =
+                        TsPixmapMut::from_bytes(&mut dst, u32::from(W), u32::from(H)).unwrap();
+                    b.iter(|| {
+                        ts_dst.draw_pixmap(
+                            0,
+                            0,
+                            black_box(ts_src),
+                            &paint,
+                            TsTransform::identity(),
+                            None,
+                        );
+                        black_box(ts_dst.data_mut());
+                    });
+                });
+            } else {
+                group.bench_function(BenchmarkId::new(name, "tiny_skia"), |b| {
+                    bench_in_place(b, &dst_orig, |dst| {
+                        let mut ts_dst =
+                            TsPixmapMut::from_bytes(dst, u32::from(W), u32::from(H)).unwrap();
+                        ts_dst.draw_pixmap(
+                            0,
+                            0,
+                            black_box(ts_src),
+                            &paint,
+                            TsTransform::identity(),
+                            None,
+                        );
+                    });
+                });
+            }
+        }
     }
 
     // Large (1024x1024) memory-bandwidth spot check for SrcOver.
     group.throughput(Throughput::Elements(LARGE_PIXELS as u64));
     let large_dst = make_premul_rgba8(LARGE_PIXELS, 0x1020_3040_5060_7080);
     let large_src = make_premul_rgba8(LARGE_PIXELS, 0x0102_0304_0506_0708);
+    let ts_large_src =
+        TsPixmapRef::from_bytes(&large_src, u32::from(LARGE_W), u32::from(LARGE_H)).unwrap();
     group.bench_function(BenchmarkId::new("SrcOver_1024x1024", "pixmap"), |b| {
         bench_in_place(b, &large_dst, |dst| {
             composite_rgba8(dst, black_box(&large_src), PmBlendMode::SRC_OVER, 255);
@@ -624,6 +919,25 @@ fn bench_compose(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("SrcOver_1024x1024", "vello_cpu"), |b| {
         bench_in_place(b, &large_dst, |dst| {
             vello_alpha_composite_buffer(level, dst, black_box(&large_src), None);
+        });
+    });
+    group.bench_function(BenchmarkId::new("SrcOver_1024x1024", "tiny_skia"), |b| {
+        let paint = TsPixmapPaint {
+            opacity: 1.0,
+            blend_mode: TsBlendMode::SourceOver,
+            quality: TsFilterQuality::Nearest,
+        };
+        bench_in_place(b, &large_dst, |dst| {
+            let mut ts_dst =
+                TsPixmapMut::from_bytes(dst, u32::from(LARGE_W), u32::from(LARGE_H)).unwrap();
+            ts_dst.draw_pixmap(
+                0,
+                0,
+                black_box(ts_large_src),
+                &paint,
+                TsTransform::identity(),
+                None,
+            );
         });
     });
 
@@ -639,27 +953,35 @@ fn bench_mix(c: &mut Criterion) {
     let src = make_premul_rgba8(PIXELS, 0x9988_7766_5544_3322);
     let uniform_alphas = vec![OPACITY; PIXELS];
 
-    let modes: &[(&str, PmMix, VelloMix)] = &[
+    let ts_src = TsPixmapRef::from_bytes(&src, u32::from(W), u32::from(H)).unwrap();
+
+    #[rustfmt::skip]
+    let modes: &[(&str, PmMix, VelloMix, TsBlendMode)] = &[
         // Integer u8 fast path in both pixmap and vello_cpu
-        ("Multiply", PmMix::Multiply, VelloMix::Multiply),
-        ("Screen", PmMix::Screen, VelloMix::Screen),
-        ("Overlay", PmMix::Overlay, VelloMix::Overlay),
-        ("Darken", PmMix::Darken, VelloMix::Darken),
-        ("Lighten", PmMix::Lighten, VelloMix::Lighten),
-        ("HardLight", PmMix::HardLight, VelloMix::HardLight),
-        ("Difference", PmMix::Difference, VelloMix::Difference),
-        ("Exclusion", PmMix::Exclusion, VelloMix::Exclusion),
+        ("Multiply", PmMix::Multiply, VelloMix::Multiply, TsBlendMode::Multiply),
+        ("Screen", PmMix::Screen, VelloMix::Screen, TsBlendMode::Screen),
+        ("Overlay", PmMix::Overlay, VelloMix::Overlay, TsBlendMode::Overlay),
+        ("Darken", PmMix::Darken, VelloMix::Darken, TsBlendMode::Darken),
+        ("Lighten", PmMix::Lighten, VelloMix::Lighten, TsBlendMode::Lighten),
+        ("HardLight", PmMix::HardLight, VelloMix::HardLight, TsBlendMode::HardLight),
+        ("Difference", PmMix::Difference, VelloMix::Difference, TsBlendMode::Difference),
+        ("Exclusion", PmMix::Exclusion, VelloMix::Exclusion, TsBlendMode::Exclusion),
         // Float f32 path in both pixmap and vello_cpu
-        ("ColorDodge", PmMix::ColorDodge, VelloMix::ColorDodge),
-        ("ColorBurn", PmMix::ColorBurn, VelloMix::ColorBurn),
-        ("SoftLight", PmMix::SoftLight, VelloMix::SoftLight),
-        ("Hue", PmMix::Hue, VelloMix::Hue),
-        ("Saturation", PmMix::Saturation, VelloMix::Saturation),
-        ("Color", PmMix::Color, VelloMix::Color),
-        ("Luminosity", PmMix::Luminosity, VelloMix::Luminosity),
+        ("ColorDodge", PmMix::ColorDodge, VelloMix::ColorDodge, TsBlendMode::ColorDodge),
+        ("ColorBurn", PmMix::ColorBurn, VelloMix::ColorBurn, TsBlendMode::ColorBurn),
+        ("SoftLight", PmMix::SoftLight, VelloMix::SoftLight, TsBlendMode::SoftLight),
+        ("Hue", PmMix::Hue, VelloMix::Hue, TsBlendMode::Hue),
+        ("Saturation", PmMix::Saturation, VelloMix::Saturation, TsBlendMode::Saturation),
+        ("Color", PmMix::Color, VelloMix::Color, TsBlendMode::Color),
+        ("Luminosity", PmMix::Luminosity, VelloMix::Luminosity, TsBlendMode::Luminosity),
     ];
 
-    for &(name, pm_mix, vello_mix) in modes {
+    for &(name, pm_mix, vello_mix, ts_blend) in modes {
+        group.bench_function(BenchmarkId::new(name, "tiny_skia"), |b| {
+            bench_in_place(b, &dst_orig, |dst| {
+                ts_draw(dst, W, H, black_box(ts_src), ts_blend, 1.0);
+            });
+        });
         let pm_mode = PmBlendMode::new(pm_mix, PmCompose::SrcOver);
         let vello_mode = VelloBlendMode::new(vello_mix, VelloCompose::SrcOver);
 
@@ -695,6 +1017,19 @@ fn bench_mix(c: &mut Criterion) {
         });
     });
 
+    group.bench_function(BenchmarkId::new("Multiply_opacity", "tiny_skia"), |b| {
+        bench_in_place(b, &dst_orig, |dst| {
+            ts_draw(
+                dst,
+                W,
+                H,
+                black_box(ts_src),
+                TsBlendMode::Multiply,
+                black_box(OPACITY_F32),
+            );
+        });
+    });
+
     // Large (1024x1024) memory-bandwidth spot check for Multiply.
     group.throughput(Throughput::Elements(LARGE_PIXELS as u64));
     let large_dst = make_premul_rgba8(LARGE_PIXELS, 0x2233_4455_6677_8899);
@@ -702,6 +1037,20 @@ fn bench_mix(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("Multiply_1024x1024", "pixmap"), |b| {
         bench_in_place(b, &large_dst, |dst| {
             composite_rgba8(dst, black_box(&large_src), pm_mul, 255);
+        });
+    });
+    group.bench_function(BenchmarkId::new("Multiply_1024x1024", "tiny_skia"), |b| {
+        let ts_large_src =
+            TsPixmapRef::from_bytes(&large_src, u32::from(LARGE_W), u32::from(LARGE_H)).unwrap();
+        bench_in_place(b, &large_dst, |dst| {
+            ts_draw(
+                dst,
+                LARGE_W,
+                LARGE_H,
+                black_box(ts_large_src),
+                TsBlendMode::Multiply,
+                1.0,
+            );
         });
     });
     group.bench_function(BenchmarkId::new("Multiply_1024x1024", "vello_cpu"), |b| {
@@ -741,6 +1090,33 @@ fn bench_resample(c: &mut Criterion) {
 
         let mut strip_buf = vec![0u8; usize::from(dst_w) * usize::from(Tile::HEIGHT) * 4];
         let mut vello_dst = vec![0u8; dst_pixels * 4];
+
+        let ts_src =
+            TsPixmapRef::from_bytes(&src_bytes, u32::from(src_w), u32::from(src_h)).unwrap();
+        let ts_transform = TsTransform::from_scale(scale_x as f32, scale_y as f32);
+        let mut ts_dst = vec![0u8; dst_pixels * 4];
+        for (name, quality) in [
+            ("nearest", TsFilterQuality::Nearest),
+            ("bilinear", TsFilterQuality::Bilinear),
+            ("bicubic", TsFilterQuality::Bicubic),
+        ] {
+            group.bench_function(
+                BenchmarkId::new(format!("{dir}/{name}"), "tiny_skia"),
+                |b| {
+                    b.iter(|| {
+                        ts_resample(
+                            &mut ts_dst,
+                            dst_w,
+                            dst_h,
+                            black_box(ts_src),
+                            quality,
+                            ts_transform,
+                        );
+                        black_box(&ts_dst);
+                    });
+                },
+            );
+        }
 
         // Nearest neighbor
         group.bench_function(BenchmarkId::new(format!("{dir}/nearest"), "pixmap"), |b| {
@@ -946,6 +1322,36 @@ fn bench_blit_and_transform(c: &mut Criterion) {
         });
     });
 
+    let ts_src = TsPixmapRef::from_bytes(&src_bytes, u32::from(W), u32::from(H)).unwrap();
+    let mut ts_dst = vec![0u8; PIXELS * 4];
+    group.bench_function(BenchmarkId::new("blit_copy_from", "tiny_skia_nn"), |b| {
+        b.iter(|| {
+            ts_resample(
+                &mut ts_dst,
+                W,
+                H,
+                black_box(ts_src),
+                TsFilterQuality::Nearest,
+                TsTransform::identity(),
+            );
+            black_box(&ts_dst);
+        });
+    });
+    group.bench_function(BenchmarkId::new("rotate_90", "tiny_skia_nn"), |b| {
+        let rot90 = TsTransform::from_row(0.0, 1.0, -1.0, 0.0, f32::from(H), 0.0);
+        b.iter(|| {
+            ts_resample(
+                &mut ts_dst,
+                W,
+                H,
+                black_box(ts_src),
+                TsFilterQuality::Nearest,
+                rot90,
+            );
+            black_box(&ts_dst);
+        });
+    });
+
     // 90-degree clockwise rotation vs vello_cpu rotated NN painter + pack.
     group.bench_function(BenchmarkId::new("rotate_90", "pixmap"), |b| {
         b.iter(|| black_box(black_box(&pm_src).rotated_90()));
@@ -997,7 +1403,7 @@ fn bench_blit_and_transform(c: &mut Criterion) {
 fn configure_criterion() -> Criterion {
     let level = Level::try_detect().unwrap_or(Level::baseline());
     eprintln!(
-        "pixmap vs vello_cpu benchmark | arch={} os={} | vello_cpu SIMD level={level:?}",
+        "pixmap vs vello_cpu vs tiny-skia benchmark | arch={} os={} | vello_cpu SIMD level={level:?}",
         std::env::consts::ARCH,
         std::env::consts::OS,
     );

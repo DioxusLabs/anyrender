@@ -3046,6 +3046,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "png",
+ "tiny-skia 0.12.0",
  "vello_common",
  "vello_cpu",
 ]

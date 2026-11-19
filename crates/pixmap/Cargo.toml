@@ -20,6 +20,7 @@ png = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
 vello_common = { workspace = true }
 vello_cpu = { workspace = true }
 
