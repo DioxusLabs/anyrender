@@ -4,8 +4,26 @@ pub(crate) fn row_bytes(width: u16) -> usize {
     width as usize * BYTES_PER_PIXEL
 }
 
+pub(crate) fn checked_byte_len(width: u16, height: u16) -> Option<usize> {
+    usize::from(width)
+        .checked_mul(BYTES_PER_PIXEL)?
+        .checked_mul(usize::from(height))
+}
+
 pub(crate) fn byte_len(width: u16, height: u16) -> usize {
-    row_bytes(width) * height as usize
+    checked_byte_len(width, height).expect("pixmap dimensions overflow usize")
+}
+
+pub(crate) fn is_valid_packed_parts(data_len: usize, width: u16, height: u16) -> bool {
+    checked_byte_len(width, height) == Some(data_len)
+}
+
+pub(crate) fn validate_packed_parts(data_len: usize, width: u16, height: u16) {
+    assert_eq!(
+        data_len,
+        byte_len(width, height),
+        "pixel data length must match the pixmap's dimensions"
+    );
 }
 
 pub(crate) fn is_contiguous(width: u16, height: u16, stride: usize) -> bool {
@@ -113,4 +131,69 @@ pub(crate) fn numbered_pixmap(width: u16, height: u16) -> crate::Pixmap {
         }
     }
     crate::Pixmap::from_parts(data, width, height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_byte_len_handles_zero_and_large_dimensions() {
+        assert_eq!(checked_byte_len(0, 0), Some(0));
+        assert_eq!(checked_byte_len(u16::MAX, 0), Some(0));
+        assert_eq!(checked_byte_len(0, u16::MAX), Some(0));
+        assert_eq!(checked_byte_len(3, 2), Some(24));
+
+        // 32768 * 32768 * 4 == 2^32, which wraps to 0 in unchecked 32-bit arithmetic.
+        #[cfg(target_pointer_width = "32")]
+        {
+            assert_eq!(checked_byte_len(32768, 32768), None);
+            assert_eq!(checked_byte_len(u16::MAX, u16::MAX), None);
+        }
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(checked_byte_len(32768, 32768), Some(4_294_967_296));
+            assert_eq!(
+                checked_byte_len(u16::MAX, u16::MAX),
+                Some(usize::from(u16::MAX) * usize::from(u16::MAX) * BYTES_PER_PIXEL)
+            );
+        }
+
+        assert!(!is_valid_packed_parts(0, 32768, 32768));
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn try_from_parts_rejects_32_bit_overflow_dimensions() {
+        use crate::{Pixmap, PixmapMut, PixmapRef};
+        use alloc::vec::Vec;
+
+        assert!(Pixmap::try_from_parts(Vec::new(), 32768, 32768).is_none());
+        assert!(Pixmap::try_from_unpremultiplied(Vec::new(), 32768, 32768).is_none());
+        assert!(PixmapRef::try_from_parts(&[], 32768, 32768).is_none());
+        assert!(PixmapMut::try_from_parts(&mut [], 32768, 32768).is_none());
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn from_parts_panics_on_32_bit_overflow_dimensions() {
+        let _ = crate::Pixmap::from_parts(alloc::vec::Vec::new(), 32768, 32768);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn resize_buffer_panics_on_32_bit_overflow_dimensions() {
+        let mut pixmap = crate::Pixmap::new(1, 1);
+        pixmap.resize_buffer(32768, 32768);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn reset_panics_on_32_bit_overflow_dimensions() {
+        let mut pixmap = crate::Pixmap::new(1, 1);
+        pixmap.reset(32768, 32768);
+    }
 }

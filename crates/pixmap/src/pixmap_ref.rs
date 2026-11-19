@@ -4,8 +4,8 @@ use core::iter::FusedIterator;
 use core::slice::ChunksExact;
 
 use crate::util::{
-    as_pixels, byte_len, is_contiguous, is_valid_strided_parts, row_bytes, slice_is_opaque,
-    subregion_byte_range, validate_strided_parts,
+    as_pixels, byte_len, is_contiguous, is_valid_packed_parts, is_valid_strided_parts, row_bytes,
+    slice_is_opaque, subregion_byte_range, validate_packed_parts, validate_strided_parts,
 };
 use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter};
 
@@ -36,13 +36,9 @@ impl<'a> PixmapRef<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `data.len()` is not `width * height * 4`.
+    /// Panics if `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn from_parts(data: &'a [u8], width: u16, height: u16) -> Self {
-        assert_eq!(
-            data.len(),
-            byte_len(width, height),
-            "pixel data length must match the pixmap's dimensions"
-        );
+        validate_packed_parts(data.len(), width, height);
         Self {
             width,
             height,
@@ -52,9 +48,9 @@ impl<'a> PixmapRef<'a> {
     }
 
     /// Creates a tightly packed view borrowing existing pixel data, returning `None` if
-    /// `data.len()` is not `width * height * 4`.
+    /// `width * height * 4` overflows `usize` or `data.len()` does not match.
     pub fn try_from_parts(data: &'a [u8], width: u16, height: u16) -> Option<Self> {
-        if data.len() != byte_len(width, height) {
+        if !is_valid_packed_parts(data.len(), width, height) {
             return None;
         }
         Some(Self {

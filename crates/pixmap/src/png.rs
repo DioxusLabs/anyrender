@@ -6,6 +6,7 @@ use std::path::Path;
 
 use ::png::{BitDepth, ColorType, Decoder, DecodingError, Encoder, EncodingError, Transformations};
 
+use crate::util::checked_byte_len;
 use crate::{
     BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef, premultiply_rgba8, unpremultiply_rgba8,
 };
@@ -35,10 +36,7 @@ impl Pixmap {
             .try_into()
             .map_err(|_| DecodingError::LimitsExceeded)?;
 
-        let rgba_len = usize::from(width)
-            .checked_mul(usize::from(height))
-            .and_then(|pixels| pixels.checked_mul(BYTES_PER_PIXEL))
-            .ok_or(DecodingError::LimitsExceeded)?;
+        let rgba_len = checked_byte_len(width, height).ok_or(DecodingError::LimitsExceeded)?;
 
         let (color_type, bit_depth) = reader.output_color_type();
         debug_assert_eq!(
