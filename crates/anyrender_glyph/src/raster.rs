@@ -5,8 +5,9 @@
 
 use crate::colr::ColrPainter;
 use crate::glyph::{GlyphColr, OutlineCacheSession};
-use crate::interface::DrawSink;
-use crate::kurbo::{Affine, BezPath, Shape};
+use crate::interface::{DrawSink, GlyphPaint};
+use crate::kurbo::{Affine, BezPath, Rect, Shape, Vec2};
+use crate::peniko::BlendMode;
 use crate::peniko::color::palette::css::BLACK;
 use crate::peniko::color::{AlphaColor, Srgb};
 use core::fmt::Debug;
@@ -62,9 +63,72 @@ pub(crate) enum GlyphCommandsInner<'a> {
     },
     Colr {
         glyph: &'a GlyphColr<'a>,
+        /// Where the glyph's area starts in the image, less than a pixel in each direction.
+        offset: Vec2,
         context_color: AlphaColor<Srgb>,
         outline_cache: &'a mut dyn ColrOutlines,
     },
+}
+
+/// Moves everything drawn into a sink by `offset`.
+struct OffsetSink<'a> {
+    sink: &'a mut dyn DrawSink,
+    offset: Vec2,
+}
+
+impl DrawSink for OffsetSink<'_> {
+    fn set_transform(&mut self, t: Affine) {
+        self.sink.set_transform(t.then_translate(self.offset));
+    }
+
+    fn set_paint(&mut self, paint: GlyphPaint) {
+        self.sink.set_paint(paint);
+    }
+
+    // Paint transforms are relative to the transform, so they move with it.
+    fn set_paint_transform(&mut self, t: Affine) {
+        self.sink.set_paint_transform(t);
+    }
+
+    fn fill_path(&mut self, path: &BezPath) {
+        self.sink.fill_path(path);
+    }
+
+    fn fill_rect(&mut self, rect: &Rect) {
+        self.sink.fill_rect(rect);
+    }
+
+    fn push_clip_layer(&mut self, clip: &BezPath) {
+        self.sink.push_clip_layer(clip);
+    }
+
+    fn push_clip_path(&mut self, clip: &BezPath) {
+        self.sink.push_clip_path(clip);
+    }
+
+    fn push_clip_rect(&mut self, clip: &Rect) {
+        self.sink.push_clip_rect(clip);
+    }
+
+    fn push_blend_layer(&mut self, blend_mode: BlendMode) {
+        self.sink.push_blend_layer(blend_mode);
+    }
+
+    fn pop_layer(&mut self) {
+        self.sink.pop_layer();
+    }
+
+    fn pop_clip_path(&mut self) {
+        self.sink.pop_clip_path();
+    }
+
+    fn width(&self) -> u16 {
+        self.sink.width()
+    }
+
+    fn height(&self) -> u16 {
+        self.sink.height()
+    }
 }
 
 /// Type-erases the lifetime of an [`OutlineCacheSession`].
@@ -110,9 +174,14 @@ impl GlyphCommands<'_> {
             }
             GlyphCommandsInner::Colr {
                 glyph,
+                offset,
                 context_color,
                 outline_cache,
             } => {
+                let sink = &mut OffsetSink {
+                    sink,
+                    offset: *offset,
+                };
                 sink.set_transform(Affine::IDENTITY);
                 // See the comment in `render_uncached_colr_glyph` for why we wrap COLR glyphs
                 // in a clip layer.

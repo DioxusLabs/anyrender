@@ -9,7 +9,7 @@ use crate::glyph::{
     PreparedGlyph,
 };
 use crate::interface::{GlyphCache, GlyphRenderer};
-use crate::key::{GlyphCacheKey, subpixel_offset};
+use crate::key::{GlyphCacheKey, SUBPIXEL_COLR, subpixel_offset};
 use crate::raster::{GlyphCommands, GlyphCommandsInner, GlyphRaster, RasterMetrics};
 use crate::util::AffineExt;
 use crate::{kurbo, peniko};
@@ -215,20 +215,11 @@ pub(crate) fn render_cached_glyph<R: GlyphRenderer>(
                 None,
             );
         }
-        // The fractional area preserves sub-pixel accuracy, avoiding scaling artifacts.
-        CachedGlyphType::Colr(area) => {
-            let quality = quality_for_skew(&transform);
-            // The image was rasterized with `area`'s corner on a pixel corner. Move it to the
-            // nearest pixel corner, so that nearest-neighbour sampling reproduces its pixels
-            // and does not shift them by up to half a pixel in a direction that depends on
-            // the fractional position.
-            let device_area = transform.transform_rect_bbox(area);
-            let snap = Vec2::new(
-                device_area.x0.round() - device_area.x0,
-                device_area.y0.round() - device_area.y0,
-            );
-            let transform = Affine::translate(snap) * transform;
-            render_from_cache(renderer, cached, transform, area, quality, None);
+        // The image holds the glyph at its sub-pixel offset, so it is drawn on whole pixels.
+        CachedGlyphType::Colr => {
+            let (transform, _) = colr_image_placement(transform);
+            let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
+            render_from_cache(renderer, cached, transform, area, ImageQuality::Low, None);
         }
     }
 }
@@ -348,18 +339,28 @@ fn cache_and_render_colr<R: GlyphRenderer>(
     key: &GlyphCacheKey,
     outline_cache: &mut OutlineCacheSession<'_>,
 ) -> bool {
-    if !supports_raster_caching(&outline_transform, CachedGlyphType::Colr(Rect::ZERO)) {
+    if !supports_raster_caching(&outline_transform, CachedGlyphType::Colr) {
         return false;
     }
 
+    // One more pixel in each direction, for the sub-pixel offset.
     let metrics = RasterMetrics {
-        width: glyph.pix_width,
-        height: glyph.pix_height,
+        width: glyph.pix_width + 1,
+        height: glyph.pix_height + 1,
         bearing_x: 0,
         bearing_y: 0,
     };
+    // Horizontally the glyph is drawn at the offset of its key, which is shared by nearby
+    // positions. Vertically it is drawn at its exact offset: text baselines are usually on
+    // whole pixels, which makes that offset the same each time the glyph is drawn.
+    let (_, exact_offset) = colr_image_placement(outline_transform);
+    let offset = Vec2::new(
+        f64::from(subpixel_offset(key.subpixel_x - SUBPIXEL_COLR)),
+        exact_offset.y,
+    );
     let raster = GlyphRaster::Commands(GlyphCommands(GlyphCommandsInner::Colr {
         glyph,
+        offset,
         context_color: key.context_color,
         outline_cache,
     }));
@@ -372,9 +373,23 @@ fn cache_and_render_colr<R: GlyphRenderer>(
         &cached,
         metrics,
         outline_transform,
-        CachedGlyphType::Colr(glyph.area),
+        CachedGlyphType::Colr,
     );
     true
+}
+
+/// Where a cached COLR glyph's image is drawn, and where in the image the glyph is.
+///
+/// `transform` maps the glyph's area, with the y axis pointing up, to the device. Returns that
+/// transform moved to the whole pixel before the area's corner (to the left of it and, as the
+/// image is drawn flipped, below it), and the distance from there to the corner in the image.
+pub(crate) fn colr_image_placement(transform: Affine) -> (Affine, Vec2) {
+    let [a, b, c, d, x, y] = transform.as_coeffs();
+    let (image_x, image_y) = (x.floor(), y.ceil());
+    (
+        Affine::new([a, b, c, d, image_x, image_y]),
+        Vec2::new(x - image_x, image_y - y),
+    )
 }
 
 /// Calculate raster metrics (pixel bounds, bearings) from a glyph's bounding box.
@@ -408,20 +423,6 @@ pub(crate) fn calculate_raster_metrics(bounds: &Rect) -> RasterMetrics {
     }
 }
 
-/// Choose image sampling quality based on skew presence.
-///
-/// Skewed transforms need `Medium` quality to avoid aliasing; axis-aligned
-/// transforms use `Low` (nearest-neighbour) since the content was already
-/// rasterized at pixel boundaries.
-#[inline]
-pub(crate) fn quality_for_skew(transform: &Affine) -> ImageQuality {
-    if transform.has_skew() {
-        ImageQuality::Medium
-    } else {
-        ImageQuality::Low
-    }
-}
-
 /// Returns `true` if the transform is safe for raster-cached glyph rendering.
 #[inline]
 pub(crate) fn supports_raster_caching(transform: &Affine, glyph_type: CachedGlyphType) -> bool {
@@ -434,7 +435,7 @@ pub(crate) fn supports_raster_caching(transform: &Affine, glyph_type: CachedGlyp
     match glyph_type {
         // For those glyphs, we expect any scaling factor to have been completely absorbed. Due to the fact
         // that we had to apply a flip transform for outlines, the y-scaling factor is expected to be negative.
-        CachedGlyphType::Outline | CachedGlyphType::Colr(_) => {
+        CachedGlyphType::Outline | CachedGlyphType::Colr => {
             !transform.has_non_unit_skew_or_scale() && a.is_sign_positive() && d.is_sign_negative()
         }
         // For bitmap glyphs, we need to relax the condition a bit, since bitmap glyphs already have a fixed
@@ -451,7 +452,6 @@ mod tests {
     use super::supports_raster_caching;
     use crate::glyph::CachedGlyphType;
     use peniko::kurbo::Affine;
-    use peniko::kurbo::Rect;
 
     #[test]
     fn supports_bitmap_caching_for_identity_and_translation() {
@@ -477,7 +477,7 @@ mod tests {
         ));
         assert!(!supports_raster_caching(
             &Affine::skew(0.2, 0.0),
-            CachedGlyphType::Colr(Rect::ZERO)
+            CachedGlyphType::Colr
         ));
     }
 
@@ -493,7 +493,7 @@ mod tests {
         ));
         assert!(!supports_raster_caching(
             &Affine::scale(2.0),
-            CachedGlyphType::Colr(Rect::ZERO)
+            CachedGlyphType::Colr
         ));
     }
 
@@ -505,7 +505,7 @@ mod tests {
         ));
         assert!(supports_raster_caching(
             &Affine::scale_non_uniform(1.0, -1.0),
-            CachedGlyphType::Colr(Rect::ZERO)
+            CachedGlyphType::Colr
         ));
         assert!(!supports_raster_caching(
             &Affine::scale_non_uniform(-1.0, -1.0),
