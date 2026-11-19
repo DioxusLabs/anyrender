@@ -1,5 +1,6 @@
 use core::fmt;
 use core::iter::FusedIterator;
+use core::slice::ChunksExactMut;
 
 use crate::{
     BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous, row_bytes,
@@ -240,16 +241,19 @@ impl<'a> PixmapMut<'a> {
     }
 
     /// Iterates over the rows of pixels from top to bottom.
+    #[inline]
     pub fn rows(&self) -> Rows<'_> {
         self.as_ref().rows()
     }
 
     /// Iterates mutably over the rows of pixels from top to bottom.
+    #[inline]
     pub fn rows_mut(&mut self) -> RowsMut<'_> {
         RowsMut::new(self.data, self.width, self.height, self.stride)
     }
 
     /// Consumes the view and iterates mutably over the rows of pixels with the original lifetime.
+    #[inline]
     pub fn into_rows_mut(self) -> RowsMut<'a> {
         RowsMut::new(self.data, self.width, self.height, self.stride)
     }
@@ -320,26 +324,52 @@ impl<'a> PixmapMut<'a> {
 /// padding.
 #[derive(Debug)]
 pub struct RowsMut<'a> {
-    data: &'a mut [u8],
-    row_bytes: usize,
-    stride: usize,
-    remaining: usize,
+    inner: RowsMutInner<'a>,
+}
+
+#[derive(Debug)]
+enum RowsMutInner<'a> {
+    /// Non-empty rows (`row_bytes > 0`, so `stride >= row_bytes > 0`).
+    Strided {
+        head: ChunksExactMut<'a, u8>,
+        last: Option<&'a mut [u8]>,
+        row_bytes: usize,
+    },
+    /// Zero-width or zero-height pixmap: yields `remaining` empty slices without touching `data`.
+    Empty(usize),
 }
 
 impl<'a> RowsMut<'a> {
+    #[inline]
     fn new(data: &'a mut [u8], width: u16, height: u16, stride: usize) -> Self {
         let row_len = row_bytes(width);
         let remaining = height as usize;
-        let data = if remaining == 0 {
-            &mut []
-        } else {
-            &mut data[..(remaining - 1) * stride + row_len]
-        };
+        if remaining == 0 || row_len == 0 {
+            return Self {
+                inner: RowsMutInner::Empty(remaining),
+            };
+        }
+        // When the backing slice includes trailing padding on the final row (always true for
+        // tightly packed pixmaps and full-stride buffers), every row fits in `ChunksExactMut`.
+        if let Some(full_len) = remaining.checked_mul(stride)
+            && full_len <= data.len()
+        {
+            return Self {
+                inner: RowsMutInner::Strided {
+                    head: data[..full_len].chunks_exact_mut(stride),
+                    last: None,
+                    row_bytes: row_len,
+                },
+            };
+        }
+        let head_len = (remaining - 1) * stride;
+        let (head_bytes, tail) = data[..head_len + row_len].split_at_mut(head_len);
         Self {
-            data,
-            row_bytes: row_len,
-            stride,
-            remaining,
+            inner: RowsMutInner::Strided {
+                head: head_bytes.chunks_exact_mut(stride),
+                last: Some(tail),
+                row_bytes: row_len,
+            },
         }
     }
 }
@@ -347,48 +377,190 @@ impl<'a> RowsMut<'a> {
 impl<'a> Iterator for RowsMut<'a> {
     type Item = &'a mut [u8];
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
-        }
-        self.remaining -= 1;
-        let data = core::mem::take(&mut self.data);
-        if self.remaining == 0 {
-            Some(data)
-        } else {
-            let (head, rest) = data.split_at_mut(self.stride);
-            self.data = rest;
-            Some(&mut head[..self.row_bytes])
+        match &mut self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                if let Some(chunk) = head.next() {
+                    Some(&mut chunk[..*row_bytes])
+                } else {
+                    last.take()
+                }
+            }
+            RowsMutInner::Empty(remaining) => {
+                *remaining = remaining.checked_sub(1)?;
+                Some(&mut [])
+            }
         }
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
+        let len = self.len();
+        (len, Some(len))
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        self.len()
+    }
+
+    #[inline]
+    fn last(mut self) -> Option<Self::Item> {
+        self.next_back()
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        match &mut self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                let head_len = head.len();
+                if n < head_len {
+                    head.nth(n).map(|chunk| &mut chunk[..*row_bytes])
+                } else {
+                    if head_len > 0 {
+                        head.nth(head_len);
+                    }
+                    if n == head_len {
+                        last.take()
+                    } else {
+                        *last = None;
+                        None
+                    }
+                }
+            }
+            RowsMutInner::Empty(remaining) => {
+                if n < *remaining {
+                    *remaining -= n + 1;
+                    Some(&mut [])
+                } else {
+                    *remaining = 0;
+                    None
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn fold<B, F>(self, mut acc: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        match self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                acc = head.fold(acc, |acc, chunk| f(acc, &mut chunk[..row_bytes]));
+                if let Some(row) = last {
+                    acc = f(acc, row);
+                }
+                acc
+            }
+            RowsMutInner::Empty(remaining) => {
+                for _ in 0..remaining {
+                    acc = f(acc, &mut []);
+                }
+                acc
+            }
+        }
     }
 }
 
 impl DoubleEndedIterator for RowsMut<'_> {
+    #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.remaining == 0 {
-            return None;
+        match &mut self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                if let Some(row) = last.take() {
+                    Some(row)
+                } else {
+                    head.next_back().map(|chunk| &mut chunk[..*row_bytes])
+                }
+            }
+            RowsMutInner::Empty(remaining) => {
+                *remaining = remaining.checked_sub(1)?;
+                Some(&mut [])
+            }
         }
-        self.remaining -= 1;
-        let data = core::mem::take(&mut self.data);
-        if self.remaining == 0 {
-            Some(data)
-        } else {
-            let last_start = self.remaining * self.stride;
-            let prev_end = (self.remaining - 1) * self.stride + self.row_bytes;
-            let (head, row) = data.split_at_mut(last_start);
-            self.data = &mut head[..prev_end];
-            Some(row)
+    }
+
+    #[inline]
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        match &mut self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                if let Some(row) = last.take() {
+                    if n == 0 {
+                        Some(row)
+                    } else {
+                        head.nth_back(n - 1).map(|chunk| &mut chunk[..*row_bytes])
+                    }
+                } else {
+                    head.nth_back(n).map(|chunk| &mut chunk[..*row_bytes])
+                }
+            }
+            RowsMutInner::Empty(remaining) => {
+                if n < *remaining {
+                    *remaining -= n + 1;
+                    Some(&mut [])
+                } else {
+                    *remaining = 0;
+                    None
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn rfold<B, F>(self, mut acc: B, mut f: F) -> B
+    where
+        F: FnMut(B, Self::Item) -> B,
+    {
+        match self.inner {
+            RowsMutInner::Strided {
+                head,
+                last,
+                row_bytes,
+            } => {
+                if let Some(row) = last {
+                    acc = f(acc, row);
+                }
+                head.rfold(acc, |acc, chunk| f(acc, &mut chunk[..row_bytes]))
+            }
+            RowsMutInner::Empty(remaining) => {
+                for _ in 0..remaining {
+                    acc = f(acc, &mut []);
+                }
+                acc
+            }
         }
     }
 }
 
 impl ExactSizeIterator for RowsMut<'_> {
+    #[inline]
     fn len(&self) -> usize {
-        self.remaining
+        match &self.inner {
+            RowsMutInner::Strided { head, last, .. } => head.len() + usize::from(last.is_some()),
+            RowsMutInner::Empty(remaining) => *remaining,
+        }
     }
 }
 
