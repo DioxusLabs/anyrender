@@ -2,7 +2,7 @@
 members = [
   "crates/anyrender",
   "crates/image_filters_types",
-  "crates/anyrender_pixmap",
+  "crates/pixmap",
   "crates/anyrender_serialize",
   "crates/anyrender_skia",
   "crates/anyrender_vello",
@@ -31,7 +31,7 @@ rust-version = "1.90.0"
 # AnyRender dependencies (in-repo)
 anyrender = { version = "0.15.0", path = "./crates/anyrender" }
 image_filters_types = { version = "0.1.0", path = "./crates/image_filters_types" }
-anyrender_pixmap = { version = "0.1.0", path = "./crates/anyrender_pixmap" }
+pixmap = { version = "0.1.0", path = "./crates/pixmap" }
 anyrender_serialize = { version = "0.9.0", path = "./crates/anyrender_serialize" }
 anyrender_skia = { version = "0.13.0", path = "./crates/anyrender_skia" }
 anyrender_tiny_skia = { version = "0.1.0", path = "./crates/anyrender_tiny_skia" }

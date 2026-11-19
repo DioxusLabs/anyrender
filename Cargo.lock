@@ -175,10 +175,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyrender_pixmap"
-version = "0.1.0"
-
-[[package]]
 name = "anyrender_serialize"
 version = "0.9.0"
 dependencies = [
@@ -2944,6 +2940,10 @@ dependencies = [
  "pixels",
  "raw-window-handle",
 ]
+
+[[package]]
+name = "pixmap"
+version = "0.1.0"
 
 [[package]]
 name = "pkg-config"
