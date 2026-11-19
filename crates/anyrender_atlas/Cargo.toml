@@ -11,3 +11,4 @@ edition.workspace = true
 [dependencies]
 pixmap = { workspace = true }
 etagere = "0.3"
+hashbrown = { version = "0.17.1", default-features = false, features = ["default-hasher"] }

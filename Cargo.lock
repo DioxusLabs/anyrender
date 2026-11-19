@@ -179,6 +179,7 @@ name = "anyrender_atlas"
 version = "0.1.0"
 dependencies = [
  "etagere",
+ "hashbrown 0.17.1",
  "pixmap",
 ]
 
