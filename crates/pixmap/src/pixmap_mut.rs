@@ -294,6 +294,78 @@ impl<'a> PixmapMut<'a> {
         }
     }
 
+    /// Flips active pixels horizontally (left-to-right) in place, leaving any inter-row stride
+    /// padding untouched.
+    pub fn flip_horizontal(&mut self) {
+        crate::transform::flip_horizontal_in_place(self);
+    }
+
+    /// Flips active pixels vertically (top-to-bottom) in place, leaving any inter-row stride
+    /// padding untouched.
+    pub fn flip_vertical(&mut self) {
+        crate::transform::flip_vertical_in_place(self);
+    }
+
+    /// Rotates active pixels 180 degrees in place, leaving any inter-row stride padding untouched.
+    pub fn rotate_180(&mut self) {
+        crate::transform::rotate_180_in_place(self);
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] flipped horizontally (left-to-right).
+    pub fn flipped_horizontal(&self) -> Pixmap {
+        self.as_ref().flipped_horizontal()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] flipped vertically (top-to-bottom).
+    pub fn flipped_vertical(&self) -> Pixmap {
+        self.as_ref().flipped_vertical()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 90 degrees clockwise
+    /// (`(x, y) -> (height - 1 - y, x)`).
+    pub fn rotated_90(&self) -> Pixmap {
+        self.as_ref().rotated_90()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 180 degrees.
+    pub fn rotated_180(&self) -> Pixmap {
+        self.as_ref().rotated_180()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 270 degrees clockwise (90 degrees
+    /// counter-clockwise, `(x, y) -> (y, width - 1 - x)`).
+    pub fn rotated_270(&self) -> Pixmap {
+        self.as_ref().rotated_270()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] transposed across the main diagonal
+    /// (`(x, y) -> (y, x)`).
+    pub fn transposed(&self) -> Pixmap {
+        self.as_ref().transposed()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by the given pixel counts,
+    /// filling the border with `fill`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Pixmap {
+        self.as_ref().padded(top, right, bottom, left, fill)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by repeating (clamping) the
+    /// outermost edge and corner pixels.
+    ///
+    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
+        self.as_ref().padded_clamped(top, right, bottom, left)
+    }
+
     /// The number of bytes of active pixel data (`width * height * 4`), excluding stride padding.
     pub fn byte_len(&self) -> usize {
         byte_len(self.width, self.height)

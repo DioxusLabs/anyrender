@@ -20,6 +20,7 @@ mod blit;
 mod pixmap;
 mod pixmap_mut;
 mod pixmap_ref;
+mod transform;
 
 pub use alpha::{multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8, unpremultiply_rgba8};
 pub use blend::{BlendMode, Compose, Mix, composite_color_rgba8, composite_rgba8};
