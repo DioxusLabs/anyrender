@@ -159,11 +159,13 @@ impl Pixmap {
     }
 
     /// Iterates over the rows of pixels from top to bottom.
+    #[inline]
     pub fn rows(&self) -> Rows<'_> {
         self.as_ref().rows()
     }
 
     /// Iterates mutably over the rows of pixels from top to bottom.
+    #[inline]
     pub fn rows_mut(&mut self) -> RowsMut<'_> {
         self.as_mut().into_rows_mut()
     }
