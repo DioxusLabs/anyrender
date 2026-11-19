@@ -2942,6 +2942,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pixmap"
+version = "0.1.0"
+
+[[package]]
 name = "pkg-config"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,11 @@
+[package]
+name = "pixmap"
+description = "A minimal owned pixel buffer shared by AnyRender's glyph and atlas crates"
+version = "0.1.0"
+documentation = "https://docs.rs/pixmap"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
