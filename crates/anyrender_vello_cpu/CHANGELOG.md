@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Glyphs are drawn with `anyrender_glyph` in place of Vello's `text` feature and `glifo`, which `vello_cpu` is now built without.
 - Rasterized glyphs are cached by default, one image per glyph, within a 16 MiB budget. `set_glyph_caching(false)` turns the cache off for debugging.
+- Off Apple platforms, text baselines are rounded to the nearest whole device pixel when the transform has no rotation or skew, as Skia does. They were not snapped vertically before.
 
 ## [0.19.0] - 2026-11-16
 
