@@ -3,8 +3,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::{
-    PixmapMut, PixmapRef, Rows, RowsMut, byte_len, fill_slice, multiply_alpha_rgba8,
-    premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
+    BlendMode, PixmapMut, PixmapRef, Rows, RowsMut, byte_len, composite_color_rgba8, fill_slice,
+    multiply_alpha_rgba8, premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8,
+    unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -178,6 +179,28 @@ impl Pixmap {
     /// unchanged.
     pub fn copy_from(&mut self, src: PixmapRef<'_>, x: i32, y: i32) {
         self.as_mut().copy_from(src, x, y);
+    }
+
+    /// Composites `src` onto `self` with `src`'s top-left corner placed at `(x, y)`, using
+    /// `blend_mode` and uniform `opacity` (`0..=255`).
+    ///
+    /// Any part of `src` falling outside `self` is clipped; if there is no overlap, `self` is
+    /// left unchanged.
+    pub fn composite(
+        &mut self,
+        src: PixmapRef<'_>,
+        x: i32,
+        y: i32,
+        blend_mode: BlendMode,
+        opacity: u8,
+    ) {
+        self.as_mut().composite(src, x, y, blend_mode, opacity);
+    }
+
+    /// Composites a solid premultiplied RGBA8 `color` onto every pixel of `self` using
+    /// `blend_mode`.
+    pub fn composite_color(&mut self, color: [u8; 4], blend_mode: BlendMode) {
+        composite_color_rgba8(&mut self.data, color, blend_mode);
     }
 
     /// The pixel bytes.
