@@ -15,7 +15,7 @@ use crate::util::AffineExt;
 use crate::{kurbo, peniko};
 #[cfg(not(feature = "std"))]
 use core_maths::CoreFloat as _;
-use kurbo::{Affine, BezPath, Rect, Shape};
+use kurbo::{Affine, BezPath, Rect, Shape, Vec2};
 use peniko::ImageQuality;
 use peniko::color::{AlphaColor, Srgb};
 
@@ -208,6 +208,16 @@ pub(crate) fn render_cached_glyph(
         // The fractional area preserves sub-pixel accuracy, avoiding scaling artifacts.
         CachedGlyphType::Colr(area) => {
             let quality = quality_for_skew(&transform);
+            // The image was rasterized with `area`'s corner on a pixel corner. Move it to the
+            // nearest pixel corner, so that nearest-neighbour sampling reproduces its pixels
+            // and does not shift them by up to half a pixel in a direction that depends on
+            // the fractional position.
+            let device_area = transform.transform_rect_bbox(area);
+            let snap = Vec2::new(
+                device_area.x0.round() - device_area.x0,
+                device_area.y0.round() - device_area.y0,
+            );
+            let transform = Affine::translate(snap) * transform;
             render_from_cache(renderer, key, transform, area, quality, None);
         }
     }
