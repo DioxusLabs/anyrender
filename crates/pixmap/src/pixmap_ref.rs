@@ -4,8 +4,8 @@ use core::iter::FusedIterator;
 use core::slice::ChunksExact;
 
 use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapMut, byte_len, is_contiguous, row_bytes, slice_is_opaque,
-    subregion_byte_range, validate_strided_parts,
+    BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter, byte_len, is_contiguous, row_bytes,
+    slice_is_opaque, subregion_byte_range, validate_strided_parts,
 };
 
 /// An immutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -245,6 +245,21 @@ impl<'a> PixmapRef<'a> {
     /// Panics if the resulting width or height overflows `u16`.
     pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
         crate::transform::padded_clamped(*self, top, right, bottom, left)
+    }
+
+    /// Resamples the pixmap view to `width × height` using `filter`, returning a new tightly
+    /// packed [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
+        crate::resample::resize(*self, width, height, filter)
+    }
+
+    /// Resamples the pixmap view into `dst` using `filter`, leaving any inter-row stride padding
+    /// on `dst` untouched.
+    pub fn resize_into(&self, mut dst: PixmapMut<'_>, filter: ResampleFilter) {
+        crate::resample::resize_into(*self, &mut dst, filter);
     }
 }
 

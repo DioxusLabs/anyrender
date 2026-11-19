@@ -3,9 +3,9 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use crate::{
-    BlendMode, PixmapMut, PixmapRef, Rows, RowsMut, byte_len, composite_color_rgba8, fill_slice,
-    multiply_alpha_rgba8, premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8,
-    unpremultiply_rgba8,
+    BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, byte_len,
+    composite_color_rgba8, fill_slice, multiply_alpha_rgba8, premultiply_rgba8, row_bytes,
+    slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -269,6 +269,21 @@ impl Pixmap {
     /// Panics if the resulting width or height overflows `u16`.
     pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Self {
         self.as_ref().padded_clamped(top, right, bottom, left)
+    }
+
+    /// Resamples the pixmap to `width × height` using `filter`, returning a new tightly packed
+    /// [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Self {
+        self.as_ref().resize(width, height, filter)
+    }
+
+    /// Resamples the pixmap into `dst` using `filter`, leaving any inter-row stride padding on
+    /// `dst` untouched.
+    pub fn resize_into(&self, dst: PixmapMut<'_>, filter: ResampleFilter) {
+        self.as_ref().resize_into(dst, filter);
     }
 
     /// The pixel bytes.
