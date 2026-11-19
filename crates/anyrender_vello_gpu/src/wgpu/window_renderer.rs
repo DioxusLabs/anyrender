@@ -436,6 +436,8 @@ impl WindowRenderer for VelloGpuWindowRenderer {
         }
         // Regenerate the vello scene
         draw_fn(&mut scene_painter);
+        // Uploads the frame's new glyphs, which has to happen before rendering.
+        drop(scene_painter);
         timer.record_time("cmd");
 
         let Ok(texture_view) = render_surface.target_texture_view() else {
