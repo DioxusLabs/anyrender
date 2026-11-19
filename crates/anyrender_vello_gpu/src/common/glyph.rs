@@ -138,8 +138,14 @@ impl Rasters {
         commands: &mut anyrender_glyph::GlyphCommands<'_>,
     ) -> Pixmap {
         let (ctx, resources) = self.scratch.get_or_insert_with(|| {
+            // Single-threaded: a glyph is too small to be worth handing to worker threads,
+            // which costs far more than rasterizing it.
+            let settings = vello_cpu::RenderSettings {
+                num_threads: 0,
+                ..vello_cpu::RenderSettings::default()
+            };
             (
-                vello_cpu::RenderContext::new(1, 1),
+                vello_cpu::RenderContext::new_with(1, 1, settings),
                 vello_cpu::Resources::new(),
             )
         });
