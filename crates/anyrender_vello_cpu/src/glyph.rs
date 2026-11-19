@@ -15,7 +15,7 @@ use peniko::{BlendMode, ImageBrush, ImageQuality, ImageSampler};
 use vello_common::paint::{ImageSource, Tint, TintMode};
 use vello_common::pixmap::PixelMetadata;
 use vello_common::render_state::RenderState;
-use vello_cpu::{PaintType, Pixmap, RenderContext, Resources};
+use vello_cpu::{PaintType, Pixmap, RenderContext, RenderSettings, Resources};
 
 /// Number of frames a rasterized glyph is kept without being drawn.
 const MAX_IDLE_FRAMES: u64 = 120;
@@ -62,9 +62,15 @@ impl RasterCache {
         match raster {
             GlyphRaster::Pixmap(pixmap) => convert_pixmap(pixmap),
             GlyphRaster::Commands(mut commands) => {
-                let (ctx, resources) = self
-                    .scratch
-                    .get_or_insert_with(|| (RenderContext::new(1, 1), Resources::new()));
+                let (ctx, resources) = self.scratch.get_or_insert_with(|| {
+                    // Single-threaded: a glyph is too small to be worth handing to worker
+                    // threads, which costs far more than rasterizing it.
+                    let settings = RenderSettings {
+                        num_threads: 0,
+                        ..RenderSettings::default()
+                    };
+                    (RenderContext::new_with(1, 1, settings), Resources::new())
+                });
                 ctx.reset_and_resize(metrics.width, metrics.height);
                 commands.draw(&mut ContextSink(ctx));
                 let mut pixmap = Pixmap::new(metrics.width, metrics.height);
