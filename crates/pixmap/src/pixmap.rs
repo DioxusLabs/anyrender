@@ -171,6 +171,15 @@ impl Pixmap {
         swap_rb_rgba8(&mut self.data);
     }
 
+    /// Copies pixels from `src` into `self` with `src`'s top-left corner placed at `(x, y)`.
+    ///
+    /// Source pixels are written verbatim (overwriting destination pixels without blending). Any
+    /// part of `src` falling outside `self` is clipped; if there is no overlap, `self` is left
+    /// unchanged.
+    pub fn copy_from(&mut self, src: PixmapRef<'_>, x: i32, y: i32) {
+        self.as_mut().copy_from(src, x, y);
+    }
+
     /// The pixel bytes.
     pub fn data(&self) -> &[u8] {
         &self.data

@@ -4,7 +4,7 @@ use core::iter::FusedIterator;
 use core::slice::ChunksExactMut;
 
 use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, fill_slice, is_contiguous,
+    BYTES_PER_PIXEL, Pixmap, PixmapRef, Rows, byte_len, clip_blit, fill_slice, is_contiguous,
     multiply_alpha_rgba8, premultiply_rgba8, row_bytes, subregion_byte_range, swap_rb_rgba8,
     unpremultiply_rgba8, validate_strided_parts,
 };
@@ -228,6 +228,27 @@ impl<'a> PixmapMut<'a> {
         } else {
             for row in self.rows_mut() {
                 swap_rb_rgba8(row);
+            }
+        }
+    }
+
+    /// Copies pixels from `src` into `self` with `src`'s top-left corner placed at `(x, y)`,
+    /// leaving any inter-row stride padding untouched.
+    ///
+    /// Source pixels are written verbatim (overwriting destination pixels without blending). Any
+    /// part of `src` falling outside `self` is clipped; if there is no overlap, `self` is left
+    /// unchanged.
+    pub fn copy_from(&mut self, src: PixmapRef<'_>, x: i32, y: i32) {
+        let Some(rect) = clip_blit(self.width, self.height, src.width(), src.height(), x, y) else {
+            return;
+        };
+        let src_region = src.subregion(rect.src_x, rect.src_y, rect.width, rect.height);
+        let mut dst_region = self.subregion_mut(rect.dst_x, rect.dst_y, rect.width, rect.height);
+        if let (Some(dst_data), Some(src_data)) = (dst_region.data_mut(), src_region.data()) {
+            dst_data.copy_from_slice(src_data);
+        } else {
+            for (dst_row, src_row) in dst_region.rows_mut().zip(src_region.rows()) {
+                dst_row.copy_from_slice(src_row);
             }
         }
     }
