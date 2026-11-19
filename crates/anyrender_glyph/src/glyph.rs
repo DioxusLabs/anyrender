@@ -1304,12 +1304,10 @@ fn decode_png(data: &[u8]) -> Result<Pixmap, png::DecodingError> {
             let mut grayscale_data =
                 alloc::vec![0; reader.output_buffer_size().unwrap_or_default()];
             reader.next_frame(&mut grayscale_data)?;
-            for (gray_alpha, pixel) in grayscale_data
-                .chunks_exact(2)
-                .zip(pixmap.data_mut().chunks_exact_mut(4))
-            {
-                let (gray, alpha) = (gray_alpha[0], gray_alpha[1]);
-                pixel.copy_from_slice(&[gray, gray, gray, alpha]);
+            let gray_alpha = grayscale_data.as_chunks::<2>().0;
+            let pixels = pixmap.data_mut().as_chunks_mut::<4>().0;
+            for ([gray, alpha], pixel) in gray_alpha.iter().zip(pixels) {
+                *pixel = [*gray, *gray, *gray, *alpha];
             }
         }
         png::ColorType::Rgb | png::ColorType::Grayscale | png::ColorType::Indexed => {
@@ -1317,7 +1315,7 @@ fn decode_png(data: &[u8]) -> Result<Pixmap, png::DecodingError> {
         }
     }
 
-    for pixel in pixmap.data_mut().chunks_exact_mut(4) {
+    for pixel in pixmap.data_mut().as_chunks_mut::<4>().0 {
         let alpha = u16::from(pixel[3]);
         if alpha != 255 {
             for channel in &mut pixel[..3] {
