@@ -13,6 +13,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(feature = "png")]
+extern crate std;
 
 mod alpha;
 mod blend;
@@ -20,9 +22,13 @@ mod blit;
 mod pixmap;
 mod pixmap_mut;
 mod pixmap_ref;
+#[cfg(feature = "png")]
+mod png;
 mod resample;
 mod transform;
 
+#[cfg(feature = "png")]
+pub use ::png::{DecodingError as PngDecodingError, EncodingError as PngEncodingError};
 pub use alpha::{multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8, unpremultiply_rgba8};
 pub use blend::{BlendMode, Compose, Mix, composite_color_rgba8, composite_rgba8};
 pub use pixmap::Pixmap;

@@ -8,4 +8,9 @@ repository.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+png = ["dep:png"]
+
 [dependencies]
+png = { workspace = true, optional = true }
