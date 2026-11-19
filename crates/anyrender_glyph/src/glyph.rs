@@ -13,7 +13,7 @@ use crate::color::PremulRgba8;
 use crate::color::palette::css::BLACK;
 use crate::colr::{convert_bounding_box, get_colr_info};
 use crate::key::GlyphCacheKey;
-use crate::key::{SUBPIXEL_BITMAP, SUBPIXEL_COLR, pack_color};
+use crate::key::{SUBPIXEL_BITMAP, colr_subpixel, pack_color};
 use crate::kurbo::Point;
 use crate::kurbo::Rect;
 use crate::kurbo::Vec2;
@@ -186,9 +186,7 @@ pub(crate) enum CachedGlyphType {
     /// A cached bitmap glyph.
     Bitmap,
     /// A cached COLR glyph.
-    /// The `Rect` parameter contains the fractional area dimensions
-    /// to preserve sub-pixel accuracy during rendering.
-    Colr(Rect),
+    Colr,
 }
 
 /// A simplified representation of a glyph, prepared for easy rendering.
@@ -514,20 +512,18 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 );
                 let outline_transform = calculate_colr_transform(&metrics);
 
-                // COLR glyphs are never hinted and have no sub-pixel offset;
-                // context_color is part of the key because it affects painted layers.
+                // COLR glyphs are never hinted. Like outlines, they are cached per horizontal
+                // sub-pixel offset; context_color is part of the key because it affects
+                // painted layers.
                 let cache_key = (colr_bitmap_cache_enabled
-                    && supports_raster_caching(
-                        &outline_transform,
-                        CachedGlyphType::Colr(Rect::ZERO),
-                    ))
+                    && supports_raster_caching(&outline_transform, CachedGlyphType::Colr))
                 .then(|| GlyphCacheKey {
                     font_id: font_info.id,
                     font_index: font_info.index,
                     glyph_id: glyph.id,
                     size_bits: draw_props.font_size.to_bits(),
                     hinted: false,
-                    subpixel_x: SUBPIXEL_COLR,
+                    subpixel_x: colr_subpixel(outline_transform.translation().x.fract() as f32),
                     context_color,
                     context_color_packed,
                     embolden_x_bits: 0,
@@ -541,19 +537,12 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 if let Some(ref key) = cache_key
                     && let Some(raster_metrics) = renderer.cached_glyph(key)
                 {
-                    // Use fractional scaled_bbox dimensions to preserve sub-pixel accuracy.
-                    let area = Rect::new(
-                        0.0,
-                        0.0,
-                        metrics.scaled_bbox.width(),
-                        metrics.scaled_bbox.height(),
-                    );
                     render_cached_glyph(
                         renderer,
                         key,
                         raster_metrics,
                         outline_transform,
-                        CachedGlyphType::Colr(area),
+                        CachedGlyphType::Colr,
                     );
                     continue;
                 }
@@ -2310,8 +2299,11 @@ mod tests {
         /// Whether a glyph is currently being rasterized into the cache.
         rasterizing: bool,
         transform: Affine,
-        /// Where the last glyph drawn from the cache was drawn, in device space.
-        cached_draw_area: Option<Rect>,
+        /// The transform the last glyph drawn from the cache was drawn with.
+        cached_draw_transform: Option<Affine>,
+        /// The translation of the first transform set while rasterizing the last glyph
+        /// that was put into the cache: where a COLR glyph's area starts in its image.
+        raster_offset: Option<Vec2>,
     }
 
     #[derive(Default)]
@@ -2323,6 +2315,9 @@ mod tests {
     impl DrawSink for TestRenderer {
         fn set_transform(&mut self, t: Affine) {
             self.transform = t;
+            if self.rasterizing {
+                self.raster_offset.get_or_insert(t.translation());
+            }
         }
 
         fn set_paint(&mut self, _paint: GlyphPaint) {}
@@ -2402,6 +2397,7 @@ mod tests {
                 }
                 GlyphRaster::Commands(mut commands) => {
                     self.rasterizing = true;
+                    self.raster_offset = None;
                     commands.draw(self);
                     self.rasterizing = false;
                 }
@@ -2416,13 +2412,13 @@ mod tests {
         fn draw_cached_glyph(
             &mut self,
             key: &GlyphCacheKey,
-            area: &Rect,
+            _area: &Rect,
             _quality: ImageQuality,
             _tint: Option<AlphaColor<Srgb>>,
         ) {
             assert!(self.cache.get(key).is_some(), "drawn glyph must be cached");
             self.cached_draws += 1;
-            self.cached_draw_area = Some(self.transform.transform_rect_bbox(*area));
+            self.cached_draw_transform = Some(self.transform);
         }
     }
 
@@ -2620,21 +2616,35 @@ mod tests {
         ensure_cache(TestGlyphKind::Colr, Style::Fill);
     }
 
-    /// A cached COLR glyph's image is not resampled, so it has to be drawn on whole pixels.
+    /// A cached COLR glyph's image holds the glyph at its sub-pixel offset, so that the image
+    /// can be drawn on whole pixels without moving the glyph.
     #[test]
-    fn cached_colr_glyph_is_drawn_on_the_pixel_grid() {
+    fn cached_colr_glyph_keeps_its_subpixel_position() {
         let font = test_font(TestGlyphKind::Colr);
         let glyph = test_glyph(&font, TestGlyphKind::Colr);
         let mut resources = TestResources::default();
-
-        // Once to fill the cache and once from the cache.
-        for _ in 0..2 {
-            let transform = Affine::translate((10.3, 20.6));
+        let mut draw = |x: f64, y: f64| {
+            let transform = Affine::translate((x, y));
             draw_test_glyph_with(&font, glyph, true, Style::Fill, transform, &mut resources);
-            let area = resources.renderer.cached_draw_area.take().unwrap();
-            assert_eq!((area.x0.fract(), area.y0.fract()), (0.0, 0.0), "{area:?}");
-        }
-        assert_eq!(resources.renderer.cached_draws, 2);
+            let renderer = &mut resources.renderer;
+            let image = renderer.cached_draw_transform.take().unwrap().translation();
+            assert_eq!((image.x.fract(), image.y.fract()), (0.0, 0.0), "{image:?}");
+            // Where the glyph's area starts on the device.
+            let offset = renderer.raster_offset.unwrap();
+            let area = image + Vec2::new(offset.x, -offset.y);
+            (renderer.cache.len(), area)
+        };
+
+        let (entries, first) = draw(10.25, 20.0);
+        assert_eq!(entries, 1);
+        // The same sub-pixel position, a whole number of pixels away: the same image.
+        let (entries, moved) = draw(13.25, 27.0);
+        assert_eq!(entries, 1);
+        assert!((moved - first - Vec2::new(3.0, 7.0)).hypot() < 1e-6);
+        // Another sub-pixel position: another image, with the glyph half a pixel further in.
+        let (entries, shifted) = draw(10.75, 20.0);
+        assert_eq!(entries, 2);
+        assert!((shifted - first - Vec2::new(0.5, 0.0)).hypot() < 1e-6);
     }
 
     #[test]
