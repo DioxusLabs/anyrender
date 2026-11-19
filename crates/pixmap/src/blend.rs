@@ -652,6 +652,14 @@ pub(crate) fn sqrt_unit(x: f32) -> f32 {
     y
 }
 
+/// Unpremultiplies a channel in byte space, preserving exact `1.0` when `c >= a` so reciprocal
+/// multiplication cannot round just below `1.0` and miss discontinuous W3C blend endpoints
+/// (such as Color Burn's `cb == 1.0` and Color Dodge's `cs == 1.0`).
+#[inline]
+fn unpremul_ch_f32(c: u8, a: u8, inv_a: f32) -> f32 {
+    if c >= a { 1.0 } else { f32::from(c) * inv_a }
+}
+
 #[inline]
 fn mix_src_f32(
     src: [u8; 4],
@@ -667,14 +675,14 @@ fn mix_src_f32(
     let inv_ba = RECIP_ALPHA_F32[usize::from(dst[3])];
 
     let cs = [
-        (f32::from(src[0]) * inv_sa).min(1.0),
-        (f32::from(src[1]) * inv_sa).min(1.0),
-        (f32::from(src[2]) * inv_sa).min(1.0),
+        unpremul_ch_f32(src[0], src[3], inv_sa),
+        unpremul_ch_f32(src[1], src[3], inv_sa),
+        unpremul_ch_f32(src[2], src[3], inv_sa),
     ];
     let cb = [
-        (f32::from(dst[0]) * inv_ba).min(1.0),
-        (f32::from(dst[1]) * inv_ba).min(1.0),
-        (f32::from(dst[2]) * inv_ba).min(1.0),
+        unpremul_ch_f32(dst[0], dst[3], inv_ba),
+        unpremul_ch_f32(dst[1], dst[3], inv_ba),
+        unpremul_ch_f32(dst[2], dst[3], inv_ba),
     ];
 
     let blended = mix_fn(cs, cb);
@@ -1597,6 +1605,48 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn color_burn_and_color_dodge_endpoints_hold_for_every_nonzero_alpha() {
+        for a in 1u8..=255 {
+            // Color Burn: white backdrop (`cb == 1.0`, premul `c == a`) stays white even under
+            // opaque black source (`cs == 0.0`), producing `[a, a, a, 255]`.
+            assert_eq!(
+                BlendMode::COLOR_BURN.blend_pixel([0, 0, 0, 255], [a, a, a, a]),
+                [a, a, a, 255],
+                "ColorBurn white-backdrop endpoint failed at alpha={a}"
+            );
+            assert_eq!(
+                BlendMode::COLOR_BURN.blend_pixel([0, 0, 0, 255], [a, 0, 0, a]),
+                [a, 0, 0, 255],
+                "ColorBurn single-channel white-backdrop endpoint failed at alpha={a}"
+            );
+            let semi_burn = BlendMode::COLOR_BURN.blend_pixel([0, 0, 0, 128], [a, a, a, a]);
+            let semi_burn_ref = reference_w3c_blend_pixel(
+                Mix::ColorBurn,
+                Compose::SrcOver,
+                [0, 0, 0, 128],
+                [a, a, a, a],
+            );
+            assert_pixel_near(semi_burn, semi_burn_ref, 1);
+
+            // Color Dodge: white source (`cs == 1.0`, premul `c == a`) over non-black backdrop
+            // produces 1.0, while black backdrop (`cb == 0.0`) stays black.
+            assert_eq!(
+                BlendMode::COLOR_DODGE.blend_pixel([a, a, a, a], [0, 0, 0, 255]),
+                [0, 0, 0, 255],
+                "ColorDodge black-backdrop endpoint failed at alpha={a}"
+            );
+            let dodge = BlendMode::COLOR_DODGE.blend_pixel([a, a, a, a], [1, 1, 1, 255]);
+            let dodge_ref = reference_w3c_blend_pixel(
+                Mix::ColorDodge,
+                Compose::SrcOver,
+                [a, a, a, a],
+                [1, 1, 1, 255],
+            );
+            assert_pixel_near(dodge, dodge_ref, 1);
         }
     }
 }
