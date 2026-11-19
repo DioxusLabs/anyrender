@@ -3,11 +3,11 @@ use core::fmt;
 use core::iter::FusedIterator;
 use core::slice::ChunksExact;
 
-use crate::{
-    BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter, as_pixels, byte_len, is_contiguous,
-    is_valid_strided_parts, row_bytes, slice_is_opaque, subregion_byte_range,
-    validate_strided_parts,
+use crate::util::{
+    as_pixels, byte_len, is_contiguous, is_valid_strided_parts, row_bytes, slice_is_opaque,
+    subregion_byte_range, validate_strided_parts,
 };
+use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter};
 
 /// An immutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
 /// row stride in bytes.
@@ -621,7 +621,309 @@ impl fmt::Debug for PixmapRef<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::numbered_pixmap;
     use alloc::vec;
+
+    #[test]
+    fn as_ref_and_pixmap_ref_from_parts() {
+        let pixmap = numbered_pixmap(3, 2);
+        let view = pixmap.as_ref();
+        assert_eq!((view.width(), view.height(), view.stride()), (3, 2, 12));
+        assert_eq!(view.byte_len(), 24);
+        assert!(view.is_contiguous());
+        assert_eq!(view.data(), Some(pixmap.data()));
+        assert_eq!(view.raw_data(), pixmap.data());
+        assert_eq!(view.to_owned(), pixmap);
+
+        let from_parts = PixmapRef::from_parts(pixmap.data(), 3, 2);
+        assert_eq!(from_parts, view);
+        assert_eq!(PixmapRef::from(&pixmap), view);
+    }
+
+    #[test]
+    #[should_panic(expected = "pixel data length")]
+    fn pixmap_ref_rejects_wrong_length() {
+        let _ = PixmapRef::from_parts(&[0; 7], 1, 2);
+    }
+
+    #[test]
+    fn strided_view_handles_row_padding_and_trimmed_last_row() {
+        // 2x3 image with 16-byte stride (8 bytes active + 8 bytes padding per row).
+        // Buffer has trailing padding on rows 0 and 1, and only active bytes on row 2.
+        let mut buf = vec![0xAA_u8; 2 * 16 + 8];
+        buf[0..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        buf[16..24].copy_from_slice(&[9, 10, 11, 12, 13, 14, 15, 16]);
+        buf[32..40].copy_from_slice(&[17, 18, 19, 20, 21, 22, 23, 24]);
+
+        let view = PixmapRef::from_parts_with_stride(&buf, 2, 3, 16);
+        assert!(!view.is_contiguous());
+        assert_eq!(view.data(), None);
+        assert_eq!(view.byte_len(), 24);
+        assert_eq!(view.stride(), 16);
+        assert_eq!(view.raw_data().len(), 40);
+        assert_eq!(view.row(0), &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(view.row(1), &[9, 10, 11, 12, 13, 14, 15, 16]);
+        assert_eq!(view.row(2), &[17, 18, 19, 20, 21, 22, 23, 24]);
+
+        let owned = view.to_owned();
+        assert_eq!(owned.data(), &(1_u8..=24).collect::<Vec<_>>()[..]);
+        // Equality compares active pixels, ignoring stride and padding bytes.
+        assert_eq!(view, owned.as_ref());
+    }
+
+    #[test]
+    fn single_row_strided_view_is_contiguous() {
+        let buf = [1, 2, 3, 4, 5, 6, 7, 8, 0xFF, 0xFF, 0xFF, 0xFF];
+        let view = PixmapRef::from_parts_with_stride(&buf, 2, 1, 12);
+        assert!(view.is_contiguous());
+        assert_eq!(view.data(), Some(&[1, 2, 3, 4, 5, 6, 7, 8][..]));
+        assert_eq!(view.raw_data().len(), 12);
+    }
+
+    #[test]
+    #[should_panic(expected = "stride")]
+    fn from_parts_with_stride_rejects_small_stride() {
+        let _ = PixmapRef::from_parts_with_stride(&[0; 32], 3, 2, 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "pixel data length")]
+    fn from_parts_with_stride_rejects_short_buffer() {
+        let _ = PixmapRef::from_parts_with_stride(&[0; 23], 2, 2, 16);
+    }
+
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn from_parts_with_stride_rejects_overflow() {
+        let _ = PixmapRef::from_parts_with_stride(&[0; 16], 1, 2, usize::MAX);
+    }
+
+    #[test]
+    fn subregion_reads_and_nests_without_copying() {
+        let pixmap = numbered_pixmap(4, 4);
+        let sub = pixmap.subregion(1, 1, 2, 2);
+        assert_eq!((sub.width(), sub.height(), sub.stride()), (2, 2, 16));
+        assert!(!sub.is_contiguous());
+        assert_eq!(sub.data(), None);
+        assert_eq!(sub.row(0), &[1, 1, 2, 255, 2, 1, 3, 255]);
+        assert_eq!(sub.row(1), &[1, 2, 3, 255, 2, 2, 4, 255]);
+
+        let owned = sub.to_owned();
+        assert_eq!(owned.as_ref(), sub);
+
+        // Nested 1x1 subregion should point directly at pixel (2, 2).
+        let nested = sub.subregion(1, 1, 1, 1);
+        assert!(nested.is_contiguous());
+        assert_eq!(nested.data(), Some(&[2, 2, 4, 255][..]));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn subregion_rejects_out_of_bounds_and_u16_overflow() {
+        let pixmap = Pixmap::new(4, 4);
+        let _ = pixmap.subregion(u16::MAX, 0, 2, 1);
+    }
+
+    #[test]
+    fn empty_dimensions_and_edge_subregions() {
+        let empty = Pixmap::new(0, 3);
+        assert!(empty.is_empty());
+        assert_eq!(empty.as_ref().data(), Some(&[][..]));
+        assert_eq!(empty.rows().len(), 3);
+        assert_eq!(empty.rows().collect::<Vec<_>>(), vec![&[][..]; 3]);
+
+        let zero_h = Pixmap::new(3, 0);
+        assert!(zero_h.is_empty());
+        assert_eq!(zero_h.as_ref().data(), Some(&[][..]));
+        assert_eq!(zero_h.rows().count(), 0);
+
+        let pixmap = numbered_pixmap(4, 4);
+        let right_edge = pixmap.subregion(4, 0, 0, 4);
+        assert!(right_edge.is_empty());
+        assert!(right_edge.is_contiguous());
+        assert_eq!(right_edge.data(), Some(&[][..]));
+        assert_eq!(right_edge.rows().len(), 4);
+
+        let bottom_corner = pixmap.subregion(4, 4, 0, 0);
+        assert!(bottom_corner.is_empty());
+        assert_eq!(bottom_corner.rows().count(), 0);
+        assert_eq!(bottom_corner.to_owned(), Pixmap::new(0, 0));
+    }
+
+    #[test]
+    fn rows_and_rows_mut_support_double_ended_and_exact_size() {
+        let mut pixmap = numbered_pixmap(4, 4);
+        let sub = pixmap.subregion(1, 0, 2, 4);
+        let mut rows = sub.rows();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.next(), Some(&[1, 0, 1, 255, 2, 0, 2, 255][..]));
+        assert_eq!(rows.next_back(), Some(&[1, 3, 4, 255, 2, 3, 5, 255][..]));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.next_back(), Some(&[1, 2, 3, 255, 2, 2, 4, 255][..]));
+        assert_eq!(rows.next(), Some(&[1, 1, 2, 255, 2, 1, 3, 255][..]));
+        assert_eq!(rows.len(), 0);
+        assert_eq!(rows.next(), None);
+        assert_eq!(rows.next_back(), None);
+
+        let mut sub_mut = pixmap.subregion_mut(1, 1, 2, 3);
+        let mut rows_mut = sub_mut.rows_mut();
+        assert_eq!(rows_mut.len(), 3);
+        rows_mut.next_back().unwrap().fill(99);
+        rows_mut.next().unwrap().fill(11);
+        rows_mut.next_back().unwrap().fill(55);
+        assert_eq!(rows_mut.next(), None);
+        assert_eq!(rows_mut.next_back(), None);
+
+        assert_eq!(pixmap.subregion(1, 1, 2, 1).row(0), &[11; 8]);
+        assert_eq!(pixmap.subregion(1, 2, 2, 1).row(0), &[55; 8]);
+        assert_eq!(pixmap.subregion(1, 3, 2, 1).row(0), &[99; 8]);
+    }
+
+    #[test]
+    #[allow(clippy::iter_nth_zero)]
+    fn rows_and_rows_mut_fold_rfold_nth_and_nth_back() {
+        // Test both full-stride (last row padded) and trimmed-last-row buffers.
+        for extra_tail in [0usize, 8] {
+            // 2x4 strided buffer with stride 16 (8 active + 8 padding per row).
+            let mut buf = vec![0xEE_u8; 3 * 16 + 8 + extra_tail];
+            for y in 0..4usize {
+                let start = y * 16;
+                buf[start..start + 8].fill(y as u8 + 1);
+            }
+
+            let view = PixmapRef::from_parts_with_stride(&buf, 2, 4, 16);
+            assert_eq!(view.rows().count(), 4);
+            assert_eq!(view.rows().last().unwrap(), &[4; 8]);
+
+            let folded: Vec<u8> = view.rows().fold(Vec::new(), |mut acc, r| {
+                acc.push(r[0]);
+                acc
+            });
+            assert_eq!(folded, vec![1, 2, 3, 4]);
+
+            let rfolded: Vec<u8> = view.rows().rfold(Vec::new(), |mut acc, r| {
+                acc.push(r[0]);
+                acc
+            });
+            assert_eq!(rfolded, vec![4, 3, 2, 1]);
+
+            // nth from front across head and last.
+            let mut it = view.rows();
+            assert_eq!(it.nth(1).unwrap(), &[2; 8]);
+            assert_eq!(it.len(), 2);
+            assert_eq!(it.nth(1).unwrap(), &[4; 8]);
+            assert_eq!(it.len(), 0);
+            assert_eq!(it.nth(0), None);
+            assert_eq!(it.next(), None);
+
+            // nth past end empties iterator cleanly.
+            let mut it = view.rows();
+            assert_eq!(it.nth(10), None);
+            assert_eq!(it.len(), 0);
+            assert_eq!(it.next(), None);
+
+            // nth_back across last and head.
+            let mut it = view.rows();
+            assert_eq!(it.nth_back(0).unwrap(), &[4; 8]);
+            assert_eq!(it.len(), 3);
+            assert_eq!(it.nth_back(1).unwrap(), &[2; 8]);
+            assert_eq!(it.len(), 1);
+            assert_eq!(it.nth_back(0).unwrap(), &[1; 8]);
+            assert_eq!(it.len(), 0);
+            assert_eq!(it.nth_back(0), None);
+
+            // nth_back skipping last directly into head.
+            let mut it = view.rows();
+            assert_eq!(it.nth_back(2).unwrap(), &[2; 8]);
+            assert_eq!(it.len(), 1);
+            assert_eq!(it.next().unwrap(), &[1; 8]);
+            assert_eq!(it.next_back(), None);
+
+            // RowsMut fold, rfold, nth, nth_back preserve stride padding.
+            let mut mut_view = PixmapMut::from_parts_with_stride(&mut buf, 2, 4, 16);
+            assert_eq!(mut_view.rows_mut().count(), 4);
+            assert_eq!(mut_view.rows_mut().last().unwrap(), &[4; 8]);
+
+            mut_view.rows_mut().fold(10u8, |v, row| {
+                row.fill(v);
+                v + 1
+            });
+            assert_eq!(mut_view.row(0), &[10; 8]);
+            assert_eq!(mut_view.row(3), &[13; 8]);
+
+            mut_view.rows_mut().rfold(20u8, |v, row| {
+                row[0] = v;
+                v + 1
+            });
+            assert_eq!(mut_view.row(3)[0], 20);
+            assert_eq!(mut_view.row(0)[0], 23);
+
+            {
+                let mut it = mut_view.rows_mut();
+                it.nth(3).unwrap()[1] = 99;
+                assert_eq!(it.len(), 0);
+                assert_eq!(it.nth(0), None);
+            }
+            assert_eq!(mut_view.row(3)[1], 99);
+
+            {
+                let mut it = mut_view.rows_mut();
+                it.nth_back(2).unwrap()[1] = 77;
+                assert_eq!(it.len(), 1);
+                assert_eq!(it.nth_back(5), None);
+                assert_eq!(it.len(), 0);
+            }
+            assert_eq!(mut_view.row(1)[1], 77);
+
+            // All inter-row padding and optional trailing padding stayed untouched.
+            for y in 0..3 {
+                assert_eq!(&buf[y * 16 + 8..(y + 1) * 16], &[0xEE; 8]);
+            }
+            if extra_tail > 0 {
+                assert_eq!(&buf[3 * 16 + 8..], &[0xEE; 8]);
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::iter_nth_zero)]
+    fn rows_and_rows_mut_handle_zero_width_and_zero_height() {
+        let mut empty_w = Pixmap::new(0, 3);
+        assert_eq!(empty_w.rows().count(), 3);
+        assert_eq!(
+            empty_w.rows().fold(0usize, |n, r| {
+                assert!(r.is_empty());
+                n + 1
+            }),
+            3
+        );
+        assert_eq!(
+            empty_w.rows().rfold(0usize, |n, r| {
+                assert!(r.is_empty());
+                n + 1
+            }),
+            3
+        );
+
+        let mut it = empty_w.rows();
+        assert_eq!(it.nth(1), Some(&[][..]));
+        assert_eq!(it.len(), 1);
+        assert_eq!(it.nth_back(0), Some(&[][..]));
+        assert_eq!(it.len(), 0);
+        assert_eq!(it.nth(0), None);
+
+        let mut mit = empty_w.rows_mut();
+        assert_eq!(mit.nth_back(1), Some(&mut [][..]));
+        assert_eq!(mit.len(), 1);
+        assert_eq!(mit.nth(1), None);
+        assert_eq!(mit.len(), 0);
+
+        let mut empty_h = Pixmap::new(3, 0);
+        assert_eq!(empty_h.rows().count(), 0);
+        assert_eq!(empty_h.rows().last(), None);
+        assert_eq!(empty_h.rows_mut().count(), 0);
+        assert_eq!(empty_h.rows_mut().last(), None);
+    }
 
     #[test]
     fn try_from_parts_and_strided_validation() {

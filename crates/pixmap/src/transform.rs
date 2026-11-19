@@ -1,6 +1,7 @@
 use alloc::vec;
 
-use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef, byte_len, fill_slice, row_bytes};
+use crate::util::{byte_len, fill_slice, row_bytes};
+use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef};
 
 /// Square tile edge length (in pixels) for cache-blocked 90°/270° rotations and transposition.
 /// A 16×16 tile of RGBA8 pixels is 1 KiB, fitting comfortably in L1 cache and keeping both

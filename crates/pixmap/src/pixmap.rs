@@ -2,10 +2,11 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::util::{as_pixels, as_pixels_mut, byte_len, fill_slice, row_bytes, slice_is_opaque};
 use crate::{
-    BYTES_PER_PIXEL, BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut, as_pixels,
-    as_pixels_mut, byte_len, composite_color_rgba8, fill_slice, multiply_alpha_rgba8,
-    premultiply_rgba8, row_bytes, slice_is_opaque, swap_rb_rgba8, unpremultiply_rgba8,
+    BYTES_PER_PIXEL, BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut,
+    composite_color_rgba8, multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8,
+    unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -522,7 +523,137 @@ impl fmt::Debug for Pixmap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::numbered_pixmap;
     use alloc::vec;
+
+    #[test]
+    fn new_is_transparent() {
+        let pixmap = Pixmap::new(3, 2);
+        assert_eq!(pixmap.byte_len(), 24);
+        assert_eq!(pixmap.stride(), 12);
+        assert!(!pixmap.is_empty());
+        assert!(pixmap.data().iter().all(|&byte| byte == 0));
+    }
+
+    #[test]
+    fn from_parts_round_trips_without_copying() {
+        let data = vec![7_u8; 16];
+        let ptr = data.as_ptr();
+        let pixmap = Pixmap::from_parts(data, 2, 2);
+        assert_eq!((pixmap.width(), pixmap.height()), (2, 2));
+        let data = pixmap.into_data();
+        assert_eq!(data.as_ptr(), ptr);
+    }
+
+    #[test]
+    #[should_panic(expected = "pixel data length")]
+    fn from_parts_rejects_wrong_length() {
+        let _ = Pixmap::from_parts(vec![0; 15], 2, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "row index")]
+    fn row_rejects_out_of_bounds() {
+        let pixmap = Pixmap::new(2, 2);
+        let _ = pixmap.row(2);
+    }
+
+    #[test]
+    fn pixel_and_set_pixel_work_on_owned_and_strided_views() {
+        let mut pixmap = numbered_pixmap(4, 3);
+        assert_eq!(pixmap.pixel(2, 1), [2, 1, 3, 255]);
+        assert_eq!(pixmap.as_ref().pixel(3, 2), [3, 2, 5, 255]);
+
+        pixmap.set_pixel(2, 1, [10, 20, 30, 40]);
+        assert_eq!(pixmap.pixel(2, 1), [10, 20, 30, 40]);
+
+        let mut sub = pixmap.subregion_mut(1, 1, 2, 2);
+        assert_eq!(sub.pixel(1, 0), [10, 20, 30, 40]);
+        sub.set_pixel(0, 1, [50, 60, 70, 80]);
+        assert_eq!(sub.pixel(0, 1), [50, 60, 70, 80]);
+        assert_eq!(pixmap.pixel(1, 2), [50, 60, 70, 80]);
+        // Neighbouring pixel outside the subregion is untouched.
+        assert_eq!(pixmap.pixel(0, 2), [0, 2, 2, 255]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn pixel_rejects_out_of_bounds_x() {
+        let pixmap = Pixmap::new(2, 2);
+        let _ = pixmap.pixel(2, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn set_pixel_rejects_out_of_bounds_y() {
+        let mut pixmap = Pixmap::new(2, 2);
+        pixmap.set_pixel(0, 2, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn fill_rect_and_clear_rect_modify_only_target_region() {
+        let mut pixmap = Pixmap::new(4, 4);
+        pixmap.fill([10, 20, 30, 255]);
+        pixmap.fill_rect(1, 1, 2, 2, [1, 2, 3, 4]);
+
+        for y in 0..4 {
+            for x in 0..4 {
+                let expected = if (1..3).contains(&x) && (1..3).contains(&y) {
+                    [1, 2, 3, 4]
+                } else {
+                    [10, 20, 30, 255]
+                };
+                assert_eq!(pixmap.pixel(x, y), expected, "at ({x}, {y})");
+            }
+        }
+
+        // Zero-sized rects are no-ops, including at edges.
+        pixmap.fill_rect(4, 4, 0, 0, [99, 99, 99, 99]);
+        pixmap.clear_rect(0, 0, 0, 4);
+        assert_eq!(pixmap.pixel(0, 0), [10, 20, 30, 255]);
+
+        pixmap.as_mut().clear_rect(1, 2, 2, 1);
+        assert_eq!(pixmap.pixel(1, 1), [1, 2, 3, 4]);
+        assert_eq!(pixmap.pixel(1, 2), [0, 0, 0, 0]);
+        assert_eq!(pixmap.pixel(2, 2), [0, 0, 0, 0]);
+        assert_eq!(pixmap.pixel(3, 2), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn fill_rect_rejects_out_of_bounds() {
+        let mut pixmap = Pixmap::new(4, 4);
+        pixmap.fill_rect(3, 0, 2, 1, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn is_opaque_checks_active_pixels_and_ignores_padding() {
+        assert!(Pixmap::new(0, 0).is_opaque());
+        assert!(Pixmap::new(0, 3).is_opaque());
+        assert!(Pixmap::new(3, 0).is_opaque());
+        assert!(!Pixmap::new(2, 2).is_opaque());
+
+        let mut pixmap = Pixmap::new(3, 2);
+        pixmap.fill([10, 20, 30, 255]);
+        assert!(pixmap.is_opaque());
+        assert!(pixmap.as_ref().is_opaque());
+        assert!(pixmap.as_mut().is_opaque());
+
+        pixmap.set_pixel(2, 1, [10, 20, 30, 254]);
+        assert!(!pixmap.is_opaque());
+        assert!(pixmap.subregion(0, 0, 2, 2).is_opaque());
+
+        // Strided buffer with zeroed padding bytes is still opaque if active pixels have alpha 255.
+        let mut buf = vec![0_u8; 16 + 8];
+        let mut view = PixmapMut::from_parts_with_stride(&mut buf, 2, 2, 16);
+        view.fill([1, 2, 3, 255]);
+        assert_eq!(&view.raw_data()[8..16], &[0; 8]);
+        assert!(view.is_opaque());
+        assert!(view.as_ref().is_opaque());
+
+        view.set_pixel(1, 1, [1, 2, 3, 0]);
+        assert!(!view.is_opaque());
+    }
 
     #[test]
     fn try_from_parts_and_try_from_unpremultiplied() {

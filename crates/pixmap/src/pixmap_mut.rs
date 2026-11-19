@@ -4,11 +4,13 @@ use core::iter::FusedIterator;
 use core::slice::ChunksExactMut;
 
 use crate::blit::clip_blit;
+use crate::util::{
+    as_pixels, as_pixels_mut, byte_len, fill_slice, is_contiguous, is_valid_strided_parts,
+    row_bytes, subregion_byte_range, validate_strided_parts,
+};
 use crate::{
-    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, as_pixels, as_pixels_mut,
-    byte_len, composite_color_rgba8, composite_rgba8, fill_slice, is_contiguous,
-    is_valid_strided_parts, multiply_alpha_rgba8, premultiply_rgba8, row_bytes,
-    subregion_byte_range, swap_rb_rgba8, unpremultiply_rgba8, validate_strided_parts,
+    BYTES_PER_PIXEL, BlendMode, Pixmap, PixmapRef, ResampleFilter, Rows, composite_color_rgba8,
+    composite_rgba8, multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// A mutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
@@ -884,6 +886,102 @@ impl fmt::Debug for PixmapMut<'_> {
 mod tests {
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn as_mut_writes_through_to_the_pixmap() {
+        let mut pixmap = Pixmap::new(2, 1);
+        let mut view = pixmap.as_mut();
+        assert_eq!((view.width(), view.height(), view.stride()), (2, 1, 8));
+        view.data_mut().unwrap()[4..].fill(9);
+        assert_eq!(pixmap.data(), [0, 0, 0, 0, 9, 9, 9, 9]);
+    }
+
+    #[test]
+    fn pixmap_mut_borrows_external_data() {
+        let mut data = [1_u8; 8];
+        let mut view = PixmapMut::from_parts(&mut data, 1, 2);
+        view.reborrow().data_mut().unwrap()[0] = 5;
+        assert_eq!(view.to_owned().data(), [5, 1, 1, 1, 1, 1, 1, 1]);
+        view.into_raw_data()[7] = 6;
+        assert_eq!(data, [5, 1, 1, 1, 1, 1, 1, 6]);
+    }
+
+    #[test]
+    #[should_panic(expected = "pixel data length")]
+    fn pixmap_mut_rejects_wrong_length() {
+        let _ = PixmapMut::from_parts(&mut [0; 7], 1, 2);
+    }
+
+    #[test]
+    fn subregion_mut_writes_only_inside_region() {
+        let mut pixmap = Pixmap::new(4, 3);
+        {
+            let mut sub = pixmap.subregion_mut(1, 1, 2, 2);
+            assert!(!sub.is_contiguous());
+            assert_eq!(sub.data_mut(), None);
+            for row in sub.rows_mut() {
+                row.fill(42);
+            }
+        }
+        assert_eq!(pixmap.row(0), &[0; 16]);
+        assert_eq!(
+            pixmap.row(1),
+            &[0, 0, 0, 0, 42, 42, 42, 42, 42, 42, 42, 42, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            pixmap.row(2),
+            &[0, 0, 0, 0, 42, 42, 42, 42, 42, 42, 42, 42, 0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn equality_ignores_padding_bytes_and_distinguishes_pixels() {
+        let mut buf_a = vec![0x11_u8; 16 + 4];
+        let mut buf_b = vec![0x99_u8; 24 + 4];
+        buf_a[0..4].copy_from_slice(&[1, 2, 3, 4]);
+        buf_a[16..20].copy_from_slice(&[5, 6, 7, 8]);
+        buf_b[0..4].copy_from_slice(&[1, 2, 3, 4]);
+        buf_b[24..28].copy_from_slice(&[5, 6, 7, 8]);
+
+        let view_a = PixmapMut::from_parts_with_stride(&mut buf_a, 1, 2, 16);
+        let mut view_b = PixmapMut::from_parts_with_stride(&mut buf_b, 1, 2, 24);
+        assert_eq!(view_a, view_b);
+
+        view_b.row_mut(1)[0] = 9;
+        assert_ne!(view_a, view_b);
+    }
+
+    #[test]
+    fn fill_and_clear_preserve_stride_padding() {
+        // 2x2 strided buffer with 16-byte stride (8 active + 8 padding) and 4 trailing bytes.
+        let mut buf = vec![0xAA_u8; 16 + 8 + 4];
+        let mut view = PixmapMut::from_parts_with_stride(&mut buf, 2, 2, 16);
+
+        view.fill([1, 2, 3, 4]);
+        assert_eq!(view.row(0), &[1, 2, 3, 4, 1, 2, 3, 4]);
+        assert_eq!(view.row(1), &[1, 2, 3, 4, 1, 2, 3, 4]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+        assert_eq!(&view.raw_data()[24..28], &[0xAA; 4]);
+
+        // Uniform-byte fast path.
+        view.fill([0x55; 4]);
+        assert_eq!(view.row(0), &[0x55; 8]);
+        assert_eq!(view.row(1), &[0x55; 8]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+
+        view.clear();
+        assert_eq!(view.row(0), &[0; 8]);
+        assert_eq!(view.row(1), &[0; 8]);
+        assert_eq!(&view.raw_data()[8..16], &[0xAA; 8]);
+        assert_eq!(&view.raw_data()[24..28], &[0xAA; 4]);
+
+        // Single-row contiguous strided view also preserves trailing bytes.
+        let mut row_buf = [0xBB_u8; 12];
+        let mut single = PixmapMut::from_parts_with_stride(&mut row_buf, 2, 1, 12);
+        single.fill([9, 8, 7, 6]);
+        assert_eq!(&row_buf[..8], &[9, 8, 7, 6, 9, 8, 7, 6]);
+        assert_eq!(&row_buf[8..], &[0xBB; 4]);
+    }
 
     #[test]
     fn try_from_parts_pixels_mut_and_get_pixel() {
