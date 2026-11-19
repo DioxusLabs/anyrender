@@ -3,11 +3,33 @@
 
 //! Traits for rendering glyphs and replaying them.
 
-use crate::atlas::{AtlasPaint, AtlasSlot};
 use crate::color::{AlphaColor, Srgb};
+use crate::key::GlyphCacheKey;
 use crate::kurbo::{Affine, BezPath, Rect, Shape};
-use crate::peniko::BlendMode;
-use vello_common::paint::{Image, ImageSource, PaintType, Tint};
+use crate::peniko::{BlendMode, Gradient, ImageQuality};
+use crate::raster::{GlyphCacheConfig, GlyphRaster, RasterMetrics};
+use pixmap::Pixmap;
+
+/// The paint of a glyph draw command: a solid colour or a gradient.
+#[derive(Clone, Debug)]
+pub enum GlyphPaint {
+    /// A solid colour (used for outlines and COLR solid fills).
+    Solid(AlphaColor<Srgb>),
+    /// A gradient (used for COLR gradient fills).
+    Gradient(Gradient),
+}
+
+impl From<AlphaColor<Srgb>> for GlyphPaint {
+    fn from(c: AlphaColor<Srgb>) -> Self {
+        Self::Solid(c)
+    }
+}
+
+impl From<Gradient> for GlyphPaint {
+    fn from(g: Gradient) -> Self {
+        Self::Gradient(g)
+    }
+}
 
 // TODO: This trait is only temporary and will hopefully be replaced once we have a better
 // unifying imaging API.
@@ -16,7 +38,7 @@ pub trait DrawSink {
     /// Set the current transform.
     fn set_transform(&mut self, t: Affine);
     /// Set the current paint.
-    fn set_paint(&mut self, paint: AtlasPaint);
+    fn set_paint(&mut self, paint: GlyphPaint);
     /// Set the paint transform.
     fn set_paint_transform(&mut self, t: Affine);
     /// Fill a path with the current paint and transform.
@@ -60,6 +82,12 @@ pub trait DrawSink {
 }
 
 /// A stateful renderer that can draw sequences of cached and uncached glyphs.
+///
+/// The raster cache methods have default implementations that disable caching. A renderer that
+/// caches glyphs overrides all four of [`glyph_cache_config`](Self::glyph_cache_config),
+/// [`cached_glyph`](Self::cached_glyph), [`cache_glyph`](Self::cache_glyph) and
+/// [`draw_cached_glyph`](Self::draw_cached_glyph). It owns the storage; this crate decides which
+/// glyphs are cacheable and under which [`GlyphCacheKey`].
 pub trait GlyphRenderer: DrawSink {
     /// The type of state used by the renderer.
     type SavedState;
@@ -73,24 +101,60 @@ pub trait GlyphRenderer: DrawSink {
     /// Stroke a path with the current paint and stroke settings.
     fn stroke_path(&mut self, path: &BezPath);
 
-    /// Set the current paint to an image.
-    fn set_paint_image(&mut self, image: Image);
-
-    /// Set the tint for subsequent image draws.
-    fn set_tint(&mut self, tint: Option<Tint>);
-
     /// Get the context color from the renderer's current paint, used for resolving the
     /// context-dependent colors of COLR glyphs.
     fn get_context_color(&self) -> AlphaColor<Srgb>;
 
-    /// Get the currently active paint.
-    fn current_paint(&self) -> &PaintType;
+    /// Whether the currently active paint is a solid colour.
+    ///
+    /// Cached outline glyphs are coloured by tinting, which only works for solid colours.
+    fn has_solid_paint(&self) -> bool;
 
-    // Hopefully we can get rid of those below in the future.
+    /// Draw a bitmap glyph that was not served from the raster cache.
+    ///
+    /// The pixmap's top-left corner is at the origin of the current transform, with one pixel
+    /// per unit, and only `area` is filled. `key` identifies the bitmap, so that a renderer which
+    /// has to upload pixels before it can draw them can reuse an earlier upload.
+    fn draw_pixmap(&mut self, key: &GlyphCacheKey, pixmap: Pixmap, area: &Rect);
 
-    /// Construct the [`ImageSource`] for sampling a cached glyph from the atlas.
-    fn atlas_image_source(&self, atlas_slot: &AtlasSlot) -> ImageSource;
+    /// The raster cache settings, or `None` if this renderer does not cache glyphs.
+    fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
+        None
+    }
 
-    /// Compute the paint transform for sampling a cached glyph from the atlas.
-    fn atlas_paint_transform(&self, atlas_slot: &AtlasSlot) -> Affine;
+    /// Look up a glyph in the raster cache, marking it as used.
+    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<RasterMetrics> {
+        let _ = key;
+        None
+    }
+
+    /// Rasterize a glyph and store it in the raster cache under `key`.
+    ///
+    /// `metrics` gives the size of the image. Returns the raster back if the glyph could not be
+    /// stored (for example because the cache is full), in which case it is drawn uncached.
+    fn cache_glyph<'a>(
+        &mut self,
+        key: &GlyphCacheKey,
+        metrics: RasterMetrics,
+        raster: GlyphRaster<'a>,
+    ) -> Result<(), GlyphRaster<'a>> {
+        let _ = (key, metrics);
+        Err(raster)
+    }
+
+    /// Draw a glyph from the raster cache.
+    ///
+    /// Only called for a key that [`cached_glyph`](Self::cached_glyph) or
+    /// [`cache_glyph`](Self::cache_glyph) just reported as present. The cached image's top-left
+    /// corner is at the origin of the current transform, with one pixel per unit, and only
+    /// `area` is filled. With a `tint`, the image is an alpha mask to be drawn in that colour.
+    fn draw_cached_glyph(
+        &mut self,
+        key: &GlyphCacheKey,
+        area: &Rect,
+        quality: ImageQuality,
+        tint: Option<AlphaColor<Srgb>>,
+    ) {
+        let _ = (key, area, quality, tint);
+    }
 }

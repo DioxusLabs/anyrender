@@ -1,16 +1,17 @@
 // Copyright 2026 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Glifo provides APIs for efficiently rendering glyphs and paint styles like underline.
+//! Glyph preparation and drawing for AnyRender backends.
 //!
-//! # Goals
+//! This crate is a fork of [`glifo`](https://docs.rs/glifo) 0.5 that does not depend on a
+//! renderer. It turns a font and a sequence of positioned glyphs into draw commands (outlines
+//! with hinting, variations and synthetic emboldening, COLR v0/v1 glyphs, and decoded bitmap
+//! glyphs) for a renderer that implements [`GlyphRenderer`].
 //!
-//! Glifo is under rapid development. Consider it experimental for now. Its goals are to:
-//!
-//! - Provide an API surface that accepts glyphs and their positions and renders them to a surface.
-//! - Cache those glyphs so that repeated renders of a glyph are fast.
-//! - Support rendering paint styles like underline, strikethrough, and brush color.
-//! - Share expensive structs and data between the shaper and renderer like the hinting instance and hinted advance.
+//! It does not rasterize and it does not store rasterized glyphs. Instead it decides which
+//! glyphs can be served from a raster cache and under which [`GlyphCacheKey`], and asks the
+//! renderer to look them up, store them and draw them. [`GlyphRasterCache`] is a ready-made
+//! store for renderers that keep one image per glyph.
 //!
 //! # Features
 //!
@@ -30,6 +31,10 @@
 // Targeting e.g. 32-bit means structs containing usize can give false positives for 64-bit.
 #![cfg_attr(target_pointer_width = "64", warn(clippy::trivially_copy_pass_by_ref))]
 // END LINEBENDER LINT SET
+#![allow(
+    clippy::too_many_arguments,
+    reason = "inherited from glifo, whose lint configuration allows it"
+)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![no_std]
 
@@ -45,22 +50,22 @@ use png as _;
 extern crate std;
 
 use peniko::{self, color, kurbo};
-use vello_common::pixmap::Pixmap;
 
-pub mod atlas;
+mod cache;
 mod colr;
 mod glyph;
 mod interface;
-pub mod renderer;
+mod key;
+mod raster;
+mod renderer;
 mod util;
 
-pub use atlas::{
-    AtlasCommand, AtlasCommandRecorder, AtlasConfig, AtlasPaint, AtlasSlot, GLYPH_PADDING,
-    GlyphAtlas, GlyphCacheConfig, GlyphCacheKey, ImageCache, PendingClearRect, RasterMetrics,
-};
+pub use cache::{GlyphRasterCache, GlyphRasterCacheStats};
 pub use glyph::{
-    AtlasCacher, FontEmbolden, Glyph, GlyphCaches, GlyphColr, GlyphPrepCache, GlyphPrepCacheMut,
-    GlyphRenderError, GlyphRun, GlyphRunBackend, GlyphRunBuilder, GlyphRunRenderer,
-    GlyphSkipReason, HintCache, HintKey, NormalizedCoord, OutlineCache, SkippedGlyph,
+    FontEmbolden, Glyph, GlyphColr, GlyphPrepCache, GlyphPrepCacheMut, GlyphRenderError, GlyphRun,
+    GlyphRunBackend, GlyphRunBuilder, GlyphRunRenderer, GlyphSkipReason, HintCache, HintKey,
+    NormalizedCoord, OutlineCache, SkippedGlyph,
 };
-pub use interface::{DrawSink, GlyphRenderer};
+pub use interface::{DrawSink, GlyphPaint, GlyphRenderer};
+pub use key::GlyphCacheKey;
+pub use raster::{GlyphCacheConfig, GlyphCommands, GlyphRaster, RasterMetrics};
