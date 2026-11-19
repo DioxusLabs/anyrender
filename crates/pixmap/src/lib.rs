@@ -15,6 +15,7 @@
 extern crate alloc;
 
 mod alpha;
+mod blit;
 mod pixmap;
 mod pixmap_mut;
 mod pixmap_ref;
