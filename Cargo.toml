@@ -79,6 +79,7 @@ pixels = "0.17"
 # SVG
 usvg = { version = "0.50.0", default-features = false }
 image = { version = "0.25", default-features = false }
+png = "0.18"
 
 # Other dependencies
 debug_timer = "0.1.1"
