@@ -176,9 +176,9 @@ fn render_uncached_colr_glyph(
 }
 
 /// Render a glyph that is present in the renderer's raster cache.
-pub(crate) fn render_cached_glyph(
-    renderer: &mut impl GlyphRenderer,
-    key: &GlyphCacheKey,
+pub(crate) fn render_cached_glyph<R: GlyphRenderer>(
+    renderer: &mut R,
+    cached: &R::CachedGlyph,
     metrics: RasterMetrics,
     transform: Affine,
     glyph_type: CachedGlyphType,
@@ -194,7 +194,7 @@ pub(crate) fn render_cached_glyph(
             let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
             render_from_cache(
                 renderer,
-                key,
+                cached,
                 rect_transform,
                 area,
                 ImageQuality::Low,
@@ -203,20 +203,27 @@ pub(crate) fn render_cached_glyph(
         }
         CachedGlyphType::Bitmap => {
             let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
-            render_from_cache(renderer, key, transform, area, ImageQuality::Medium, None);
+            render_from_cache(
+                renderer,
+                cached,
+                transform,
+                area,
+                ImageQuality::Medium,
+                None,
+            );
         }
         // The image holds the glyph at its sub-pixel offset, so it is drawn on whole pixels.
         CachedGlyphType::Colr => {
             let (transform, _) = colr_image_placement(transform);
             let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
-            render_from_cache(renderer, key, transform, area, ImageQuality::Low, None);
+            render_from_cache(renderer, cached, transform, area, ImageQuality::Low, None);
         }
     }
 }
 
-fn render_from_cache(
-    renderer: &mut impl GlyphRenderer,
-    key: &GlyphCacheKey,
+fn render_from_cache<R: GlyphRenderer>(
+    renderer: &mut R,
+    cached: &R::CachedGlyph,
     rect_transform: Affine,
     area: Rect,
     quality: ImageQuality,
@@ -224,7 +231,7 @@ fn render_from_cache(
 ) {
     let state = renderer.save_state();
     renderer.set_transform(rect_transform);
-    renderer.draw_cached_glyph(key, &area, quality, tint);
+    renderer.draw_cached_glyph(cached, &area, quality, tint);
     renderer.restore_state(state);
 }
 
@@ -259,13 +266,13 @@ fn cache_and_render_outline(
         path: &glyph.path,
         transform,
     }));
-    if renderer.cache_glyph(key, metrics, raster).is_err() {
+    let Ok(cached) = renderer.cache_glyph(key, metrics, raster) else {
         return false;
-    }
+    };
 
     render_cached_glyph(
         renderer,
-        key,
+        &cached,
         metrics,
         outline_transform,
         CachedGlyphType::Outline,
@@ -302,8 +309,15 @@ fn cache_and_render_bitmap(
     } = glyph;
 
     match renderer.cache_glyph(key, metrics, GlyphRaster::Pixmap(pixmap)) {
-        Ok(()) => {
-            render_from_cache(renderer, key, transform, area, ImageQuality::Medium, None);
+        Ok(cached) => {
+            render_from_cache(
+                renderer,
+                &cached,
+                transform,
+                area,
+                ImageQuality::Medium,
+                None,
+            );
             Ok(())
         }
         Err(GlyphRaster::Pixmap(pixmap)) => Err(GlyphBitmap {
@@ -352,13 +366,13 @@ fn cache_and_render_colr(
         context_color: key.context_color,
         outline_cache,
     }));
-    if renderer.cache_glyph(key, metrics, raster).is_err() {
+    let Ok(cached) = renderer.cache_glyph(key, metrics, raster) else {
         return false;
-    }
+    };
 
     render_cached_glyph(
         renderer,
-        key,
+        &cached,
         metrics,
         outline_transform,
         CachedGlyphType::Colr,

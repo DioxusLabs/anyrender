@@ -161,25 +161,25 @@ impl Rasters {
         )
     }
 
-    fn insert(&mut self, key: &GlyphCacheKey, metrics: RasterMetrics, image: &Pixmap) -> bool {
+    fn insert(
+        &mut self,
+        key: &GlyphCacheKey,
+        metrics: RasterMetrics,
+        image: &Pixmap,
+    ) -> Option<PixelRect> {
         self.atlas
             .insert(&mut self.uploads, key.clone(), image, metrics)
-            .is_some()
     }
 
-    /// Draw the atlas entry for `key` into `area` of `scene`, if there is one.
+    /// Draw the atlas region `rect` into `area` of `scene`.
     fn draw(
-        &mut self,
+        &self,
         scene: &mut Scene,
-        key: &GlyphCacheKey,
+        rect: PixelRect,
         area: &Rect,
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        let Some(entry) = self.atlas.get(key) else {
-            return;
-        };
-        let rect = entry.rect;
         if rect.width == 0 || rect.height == 0 {
             return;
         }
@@ -451,6 +451,8 @@ impl DrawSink for GlyphSink<'_> {
 
 impl GlyphRenderer for GlyphSink<'_> {
     type SavedState = RenderState;
+    /// Where the glyph is in the atlas texture.
+    type CachedGlyph = PixelRect;
 
     fn save_state(&mut self) -> Self::SavedState {
         self.scene.save_current_state()
@@ -478,27 +480,32 @@ impl GlyphRenderer for GlyphSink<'_> {
     /// Vello can't draw a pixmap, so an uncached bitmap glyph goes through the atlas too. If
     /// the atlas has no room for it, it is not drawn.
     fn draw_pixmap(&mut self, key: &GlyphCacheKey, pixmap: Pixmap, area: &Rect) {
-        if self.rasters.atlas.get(key).is_none() {
-            let metrics = RasterMetrics {
-                width: pixmap.width(),
-                height: pixmap.height(),
-                bearing_x: 0,
-                bearing_y: 0,
-            };
-            if !self.rasters.insert(key, metrics, &pixmap) {
-                return;
+        let rect = match self.rasters.atlas.get(key) {
+            Some(entry) => entry.rect,
+            None => {
+                let metrics = RasterMetrics {
+                    width: pixmap.width(),
+                    height: pixmap.height(),
+                    bearing_x: 0,
+                    bearing_y: 0,
+                };
+                let Some(rect) = self.rasters.insert(key, metrics, &pixmap) else {
+                    return;
+                };
+                rect
             }
-        }
+        };
         self.rasters
-            .draw(self.scene, key, area, ImageQuality::Medium, None);
+            .draw(self.scene, rect, area, ImageQuality::Medium, None);
     }
 
     fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
         self.caching.then(GlyphCacheConfig::default)
     }
 
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<RasterMetrics> {
-        self.rasters.atlas.get(key).map(|entry| *entry.data)
+    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, PixelRect)> {
+        let entry = self.rasters.atlas.get(key)?;
+        Some((*entry.data, entry.rect))
     }
 
     fn cache_glyph<'a>(
@@ -506,21 +513,17 @@ impl GlyphRenderer for GlyphSink<'_> {
         key: &GlyphCacheKey,
         metrics: RasterMetrics,
         raster: GlyphRaster<'a>,
-    ) -> Result<(), GlyphRaster<'a>> {
+    ) -> Result<PixelRect, GlyphRaster<'a>> {
         match raster {
-            GlyphRaster::Pixmap(pixmap) => {
-                if self.rasters.insert(key, metrics, &pixmap) {
-                    Ok(())
-                } else {
-                    Err(GlyphRaster::Pixmap(pixmap))
-                }
-            }
+            GlyphRaster::Pixmap(pixmap) => match self.rasters.insert(key, metrics, &pixmap) {
+                Some(rect) => Ok(rect),
+                None => Err(GlyphRaster::Pixmap(pixmap)),
+            },
             GlyphRaster::Commands(mut commands) => {
                 let pixmap = self.rasters.rasterize(metrics, &mut commands);
-                if self.rasters.insert(key, metrics, &pixmap) {
-                    Ok(())
-                } else {
-                    Err(GlyphRaster::Commands(commands))
+                match self.rasters.insert(key, metrics, &pixmap) {
+                    Some(rect) => Ok(rect),
+                    None => Err(GlyphRaster::Commands(commands)),
                 }
             }
         }
@@ -528,11 +531,11 @@ impl GlyphRenderer for GlyphSink<'_> {
 
     fn draw_cached_glyph(
         &mut self,
-        key: &GlyphCacheKey,
+        rect: &PixelRect,
         area: &Rect,
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        self.rasters.draw(self.scene, key, area, quality, tint);
+        self.rasters.draw(self.scene, *rect, area, quality, tint);
     }
 }
