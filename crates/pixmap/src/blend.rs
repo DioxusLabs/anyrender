@@ -294,7 +294,7 @@ pub fn composite_color_rgba8(dst: &mut [u8], color: [u8; 4], blend_mode: BlendMo
         return;
     }
     if blend_mode.mix == Mix::Normal && blend_mode.compose == Compose::Copy {
-        crate::fill_slice(dst, color);
+        crate::util::fill_slice(dst, color);
         return;
     }
 

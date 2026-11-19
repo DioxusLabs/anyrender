@@ -44,19 +44,9 @@ pub(crate) fn clip_blit(
 #[cfg(test)]
 mod tests {
     use alloc::vec;
-    use alloc::vec::Vec;
 
-    use crate::{Pixmap, PixmapMut, PixmapRef, byte_len};
-
-    fn numbered_pixmap(width: u16, height: u16) -> Pixmap {
-        let mut data = Vec::with_capacity(byte_len(width, height));
-        for y in 0..height {
-            for x in 0..width {
-                data.extend_from_slice(&[x as u8, y as u8, (x + y) as u8, 255]);
-            }
-        }
-        Pixmap::from_parts(data, width, height)
-    }
+    use crate::util::numbered_pixmap;
+    use crate::{Pixmap, PixmapMut, PixmapRef};
 
     #[test]
     fn copy_from_full_and_interior() {
