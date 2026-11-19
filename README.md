@@ -51,6 +51,7 @@ These crates sit on top of the the AnyRender abstraction, and allow you render c
 - [softbuffer_window_renderer](https://docs.rs/softbuffer_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [softbuffer](https://docs.rs/softbuffer) crate.
 - [image_filters_types](https://docs.rs/image_filters_types) defines the filter graph types (`Filter`, `FilterEffect` and the primitive parameters) that `anyrender::filters` re-exports, generic over the content of `feImage`.
 - [pixmap](https://docs.rs/pixmap) provides minimal RGBA8 pixel buffers (`Pixmap`, `PixmapRef`, `PixmapMut`) with no dependencies.
+- [anyrender_glyph](https://docs.rs/anyrender_glyph) prepares glyphs for drawing (outlines, hinting, COLR and bitmap glyphs) and decides which can be served from a renderer's raster cache. It is a fork of [glifo](https://docs.rs/glifo) that does not depend on a renderer.
 
 
 ## Version compatibility

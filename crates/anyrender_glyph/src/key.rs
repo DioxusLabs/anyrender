@@ -1,12 +1,12 @@
 // Copyright 2026 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Cache key for glyph bitmaps stored in the atlas.
+//! Cache key for rasterized glyphs.
 //!
 //! [`GlyphCacheKey`] captures every parameter that affects the visual appearance
 //! of a rasterized glyph — font identity, size, hinting, subpixel position,
 //! COLR context color, and variable-font coordinates. Two keys that compare
-//! equal produce identical bitmaps and can safely share a single atlas entry.
+//! equal produce identical bitmaps and can safely share a single cache entry.
 
 use crate::color::{AlphaColor, Srgb};
 use crate::glyph::FontEmbolden;
@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 
 /// Number of horizontal subpixel quantization buckets (valid range: 1–253).
 ///
-/// Higher values improve rendering quality at the cost of more atlas entries
+/// Higher values improve rendering quality at the cost of more cache entries
 /// per glyph. Common values: 1 (disabled), 2, 4 (default), 8.
 pub(crate) const SUBPIXEL_BUCKETS: u8 = 4;
 
@@ -40,12 +40,6 @@ pub(crate) const SUBPIXEL_BITMAP: u8 = SUBPIXEL_BUCKETS + 1;
 /// Two glyphs with the same key are visually identical and can share
 /// the same cached bitmap. The key includes all parameters that affect
 /// the glyph's appearance.
-///
-/// `var_coords` is deliberately excluded from `Hash`/`Eq` because the
-/// [`GlyphAtlas`](crate::atlas::cache::GlyphAtlas) uses a two-level map
-/// structure that already partitions entries by variation coordinates.
-/// Callers that use a flat map must ensure equivalent `var_coords`
-/// externally.
 #[derive(Clone, Debug)]
 pub struct GlyphCacheKey {
     /// Unique identifier for the font blob.
@@ -135,6 +129,7 @@ impl Hash for GlyphCacheKey {
         self.embolden_join_bits.hash(state);
         self.embolden_miter_limit_bits.hash(state);
         self.embolden_tolerance_bits.hash(state);
+        self.var_coords.hash(state);
     }
 }
 
@@ -153,6 +148,7 @@ impl PartialEq for GlyphCacheKey {
             && self.embolden_join_bits == other.embolden_join_bits
             && self.embolden_miter_limit_bits == other.embolden_miter_limit_bits
             && self.embolden_tolerance_bits == other.embolden_tolerance_bits
+            && self.var_coords == other.var_coords
     }
 }
 
@@ -331,10 +327,8 @@ mod tests {
     }
 
     #[test]
-    fn test_var_coords_excluded_from_equality() {
+    fn test_var_coords_included_in_equality() {
         let packed = pack_color(BLACK);
-        // var_coords is excluded from Hash/Eq (two-level map handles it),
-        // so keys differing only in var_coords are considered equal.
         let key1 = GlyphCacheKey::new(
             1,
             0,
@@ -359,6 +353,6 @@ mod tests {
             FontEmbolden::default(),
             &[NormalizedCoord::from_bits(100)],
         );
-        assert_eq!(key1, key2);
+        assert_ne!(key1, key2);
     }
 }
