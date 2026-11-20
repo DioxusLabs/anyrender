@@ -88,9 +88,17 @@ pub trait DrawSink {
 /// [`cached_glyph`](Self::cached_glyph), [`cache_glyph`](Self::cache_glyph) and
 /// [`draw_cached_glyph`](Self::draw_cached_glyph). It owns the storage; this crate decides which
 /// glyphs are cacheable and under which [`GlyphCacheKey`].
+///
+/// The cache is asked for a glyph once per draw: looking a glyph up or storing it returns a
+/// [`CachedGlyph`](Self::CachedGlyph), which is all the renderer gets to draw it.
 pub trait GlyphRenderer: DrawSink {
     /// The type of state used by the renderer.
     type SavedState;
+
+    /// What the renderer needs to draw a glyph from its raster cache without looking it up
+    /// again, such as a handle to its image or its place in an atlas. `()` for a renderer
+    /// that does not cache glyphs.
+    type CachedGlyph;
 
     /// Save the current state.
     fn save_state(&mut self) -> Self::SavedState;
@@ -123,38 +131,39 @@ pub trait GlyphRenderer: DrawSink {
     }
 
     /// Look up a glyph in the raster cache, marking it as used.
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<RasterMetrics> {
+    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, Self::CachedGlyph)> {
         let _ = key;
         None
     }
 
     /// Rasterize a glyph and store it in the raster cache under `key`.
     ///
-    /// `metrics` gives the size of the image. Returns the raster back if the glyph could not be
-    /// stored (for example because the cache is full), in which case it is drawn uncached.
+    /// `metrics` gives the size of the image. Returns the raster back if the glyph can't be
+    /// drawn from an image (for example because the cache is full and the renderer can only
+    /// draw images that are in it), in which case it is drawn uncached.
     fn cache_glyph<'a>(
         &mut self,
         key: &GlyphCacheKey,
         metrics: RasterMetrics,
         raster: GlyphRaster<'a>,
-    ) -> Result<(), GlyphRaster<'a>> {
+    ) -> Result<Self::CachedGlyph, GlyphRaster<'a>> {
         let _ = (key, metrics);
         Err(raster)
     }
 
     /// Draw a glyph from the raster cache.
     ///
-    /// Only called for a key that [`cached_glyph`](Self::cached_glyph) or
-    /// [`cache_glyph`](Self::cache_glyph) just reported as present. The cached image's top-left
+    /// Only called with what [`cached_glyph`](Self::cached_glyph) or
+    /// [`cache_glyph`](Self::cache_glyph) just returned. The cached image's top-left
     /// corner is at the origin of the current transform, with one pixel per unit, and only
     /// `area` is filled. With a `tint`, the image is an alpha mask to be drawn in that colour.
     fn draw_cached_glyph(
         &mut self,
-        key: &GlyphCacheKey,
+        glyph: &Self::CachedGlyph,
         area: &Rect,
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        let _ = (key, area, quality, tint);
+        let _ = (glyph, area, quality, tint);
     }
 }
