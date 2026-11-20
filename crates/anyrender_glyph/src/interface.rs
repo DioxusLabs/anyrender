@@ -7,7 +7,8 @@ use crate::color::{AlphaColor, Srgb};
 use crate::key::GlyphCacheKey;
 use crate::kurbo::{Affine, BezPath, Rect, Shape};
 use crate::peniko::{BlendMode, Gradient, ImageQuality};
-use crate::raster::{GlyphCacheConfig, GlyphRaster, RasterMetrics};
+use crate::raster::{GlyphCacheConfig, GlyphRaster, GlyphRasterJob, RasterMetrics};
+use alloc::vec::Vec;
 use pixmap::Pixmap;
 
 /// The paint of a glyph draw command: a solid colour or a gradient.
@@ -91,8 +92,8 @@ pub trait GlyphRenderer: DrawSink {
 
     /// What the renderer needs to draw a glyph that was rasterized earlier, such as a handle
     /// to its image or its place in an atlas. `()` for a renderer that can't draw cached
-    /// glyphs.
-    type CachedGlyph;
+    /// glyphs. One glyph can be drawn several times from clones of it.
+    type CachedGlyph: Clone;
 
     /// Save the current state.
     fn save_state(&mut self) -> Self::SavedState;
@@ -120,10 +121,10 @@ pub trait GlyphRenderer: DrawSink {
 
     /// Draw a glyph that a [`GlyphCache`] holds.
     ///
-    /// Only called with what [`GlyphCache::get`] or [`GlyphCache::store`] just returned. The
-    /// cached image's top-left corner is at the origin of the current transform, with one
-    /// pixel per unit, and only `area` is filled. With a `tint`, the image is an alpha mask to
-    /// be drawn in that colour.
+    /// Only called with what [`GlyphCache::get`], [`GlyphCache::store`] or
+    /// [`GlyphCache::store_batch`] just returned. The cached image's top-left corner is at the
+    /// origin of the current transform, with one pixel per unit, and only `area` is filled.
+    /// With a `tint`, the image is an alpha mask to be drawn in that colour.
     fn draw_cached_glyph(
         &mut self,
         glyph: &Self::CachedGlyph,
@@ -159,6 +160,20 @@ pub trait GlyphCache<G> {
         metrics: RasterMetrics,
         raster: GlyphRaster<'a>,
     ) -> Result<G, GlyphRaster<'a>>;
+
+    /// Rasterize the outline and COLR glyphs of a run that are not in the cache, and store
+    /// them.
+    ///
+    /// Returns one entry per glyph, in order: `None` for a glyph that can't be drawn from an
+    /// image, as when [`store`](Self::store) returns its raster. The glyphs have different
+    /// keys and don't depend on each other, so a cache can rasterize them in parallel. By
+    /// default they go through [`store`](Self::store) one by one.
+    fn store_batch(&mut self, glyphs: &[GlyphRasterJob<'_>]) -> Vec<Option<G>> {
+        glyphs
+            .iter()
+            .map(|glyph| self.store(glyph.key, glyph.metrics, glyph.to_raster()).ok())
+            .collect()
+    }
 }
 
 /// A [`GlyphCache`] that caches nothing: every glyph is drawn uncached.

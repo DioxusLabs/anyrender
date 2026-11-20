@@ -19,7 +19,11 @@ use crate::kurbo::Rect;
 use crate::kurbo::Vec2;
 use crate::kurbo::{self, Affine, BezPath, Diagonal2, Join, Line, ParamCurve as _, PathSeg, Shape};
 use crate::peniko::FontData;
-use crate::renderer::{fill_glyph, render_cached_glyph, stroke_glyph, supports_raster_caching};
+use crate::raster::{GlyphCommands, GlyphCommandsInner, RasterMetrics, Recorder};
+use crate::renderer::{
+    DeferredGlyph, fill_glyph, flush_deferred_glyphs, render_cached_glyph, stroke_glyph,
+    supports_raster_caching,
+};
 use crate::util::AffineExt;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
@@ -449,6 +453,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
         let mut first_skipped = None;
         let mut skipped_count = 0;
+        // Outline glyphs whose drawing waits until the cache misses among them are rasterized.
+        let mut deferred = Vec::new();
         for (index, glyph) in self.glyph_iterator.clone().enumerate() {
             // TODO: Add a mechanism such that glyphs that are completely outside of the viewport
             // (especially for more expensive COLR glyphs), we don't do any processing in the
@@ -490,13 +496,12 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             if let Some(ref key) = outline_cache_key
                 && let Some((metrics, cached)) = cache.get(key)
             {
-                render_cached_glyph(
-                    renderer,
-                    &cached,
+                deferred.push(DeferredGlyph::Cached {
+                    cached,
                     metrics,
-                    outline_transform,
-                    CachedGlyphType::Outline,
-                );
+                    transform: outline_transform,
+                    glyph_type: CachedGlyphType::Outline,
+                });
                 continue;
             }
 
@@ -549,13 +554,12 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                         metrics.scaled_bbox.width(),
                         metrics.scaled_bbox.height(),
                     );
-                    render_cached_glyph(
-                        renderer,
-                        &cached,
-                        raster_metrics,
-                        outline_transform,
-                        CachedGlyphType::Colr(area),
-                    );
+                    deferred.push(DeferredGlyph::Cached {
+                        cached,
+                        metrics: raster_metrics,
+                        transform: outline_transform,
+                        glyph_type: CachedGlyphType::Colr(area),
+                    });
                     continue;
                 }
 
@@ -568,12 +572,45 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     font_info,
                 );
 
+                // A cacheable COLR glyph is recorded, so that it can be rasterized together with
+                // the run's other cache misses.
+                let (glyph_type, cache_key) = match (glyph_type, cache_key) {
+                    (GlyphType::Colr(colr), Some(key)) => {
+                        let mut recorder = Recorder {
+                            commands: Vec::new(),
+                            width: colr.pix_width,
+                            height: colr.pix_height,
+                        };
+                        GlyphCommands(GlyphCommandsInner::Colr {
+                            glyph: &colr,
+                            context_color: key.context_color,
+                            outline_cache: &mut outline_cache_session,
+                        })
+                        .draw(&mut recorder);
+                        deferred.push(DeferredGlyph::Colr {
+                            commands: recorder.commands,
+                            metrics: RasterMetrics {
+                                width: colr.pix_width,
+                                height: colr.pix_height,
+                                bearing_x: 0,
+                                bearing_y: 0,
+                            },
+                            transform: outline_transform,
+                            area: colr.area,
+                            key,
+                        });
+                        continue;
+                    }
+                    other => other,
+                };
+
                 let prepared_glyph = PreparedGlyph {
                     glyph_type,
                     outline_transform,
                     relative_paint_transform: Affine::IDENTITY,
                     cache_key,
                 };
+                flush_deferred_glyphs(renderer, cache, &mut deferred);
                 match style {
                     Style::Fill => {
                         fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
@@ -649,6 +686,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 if let Some(ref key) = cache_key
                     && let Some((metrics, cached)) = cache.get(key)
                 {
+                    flush_deferred_glyphs(renderer, cache, &mut deferred);
                     render_cached_glyph(
                         renderer,
                         &cached,
@@ -668,6 +706,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     relative_paint_transform: Affine::IDENTITY,
                     cache_key,
                 };
+                flush_deferred_glyphs(renderer, cache, &mut deferred);
                 match style {
                     Style::Fill => {
                         fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
@@ -711,21 +750,45 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
             let relative_paint_transform = outline_draw_transform.inverse() * scene_paint_transform;
 
-            let prepared_glyph = PreparedGlyph {
-                glyph_type,
-                outline_transform,
-                relative_paint_transform,
-                cache_key: outline_cache_key,
-            };
-            match style {
-                Style::Fill => {
-                    fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session)
+            match (style, glyph_type) {
+                // Filled outlines wait for the run's other cache misses, so that a renderer
+                // can rasterize them together.
+                (Style::Fill, GlyphType::Outline(glyph)) => {
+                    // A glyph without an outline, such as a space, draws nothing.
+                    if !glyph.path.is_empty() {
+                        deferred.push(DeferredGlyph::Outline {
+                            glyph,
+                            transform: outline_transform,
+                            paint_transform: relative_paint_transform,
+                            key: outline_cache_key,
+                        });
+                    }
                 }
-                Style::Stroke => {
-                    stroke_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
+                (_, glyph_type) => {
+                    flush_deferred_glyphs(renderer, cache, &mut deferred);
+                    let prepared_glyph = PreparedGlyph {
+                        glyph_type,
+                        outline_transform,
+                        relative_paint_transform,
+                        cache_key: outline_cache_key,
+                    };
+                    match style {
+                        Style::Fill => {
+                            fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
+                        }
+                        Style::Stroke => {
+                            stroke_glyph(
+                                renderer,
+                                cache,
+                                prepared_glyph,
+                                &mut outline_cache_session,
+                            );
+                        }
+                    }
                 }
             }
         }
+        flush_deferred_glyphs(renderer, cache, &mut deferred);
 
         match first_skipped {
             Some(first_skipped) => Err(GlyphRenderError {
@@ -2281,7 +2344,7 @@ mod tests {
     use crate::interface::{DrawSink, GlyphCache, GlyphPaint, GlyphRenderer};
     use crate::peniko::color::{AlphaColor, Srgb};
     use crate::peniko::{BlendMode, Blob, ImageQuality};
-    use crate::raster::{GlyphCacheConfig, GlyphRaster, RasterMetrics};
+    use crate::raster::{GlyphCacheConfig, GlyphRaster, GlyphRasterJob};
     use alloc::sync::Arc;
 
     const _NORMALISED_COORD_SIZE_MATCHES: () =
@@ -2316,6 +2379,8 @@ mod tests {
         images: GlyphRasterCache<()>,
         /// Number of lookups.
         lookups: usize,
+        /// Sizes of the batches of glyphs it was asked to store.
+        batches: Vec<usize>,
     }
 
     #[derive(Default)]
@@ -2422,6 +2487,13 @@ mod tests {
                 .insert(key.clone(), (), metrics, bytes)
                 .expect("the test cache is large enough");
             Ok(())
+        }
+
+        fn store_batch(&mut self, jobs: &[GlyphRasterJob<'_>]) -> Vec<Option<()>> {
+            self.batches.push(jobs.len());
+            jobs.iter()
+                .map(|job| self.store(job.key, job.metrics, job.to_raster()).ok())
+                .collect()
         }
     }
 
@@ -2546,6 +2618,47 @@ mod tests {
             assert_eq!(resources.cache.lookups, 2 * lookups, "hit");
             assert_eq!(resources.renderer.cached_draws, 2);
         }
+    }
+
+    /// The cache misses of a run reach the renderer as one batch, so that it can rasterize them
+    /// in parallel, with one entry per key.
+    #[test]
+    fn cache_misses_of_a_run_are_batched() {
+        let font = test_font(TestGlyphKind::Outline);
+        let charmap = font.as_skrifa().charmap();
+        // "HeH" at whole pixel offsets: the two "H" share a key.
+        let glyphs = [('H', 0.0), ('e', 20.0), ('H', 40.0)].map(|(ch, x)| Glyph {
+            id: charmap.map(ch).unwrap().to_u32(),
+            x,
+            y: 0.0,
+        });
+        let mut resources = TestResources::default();
+        resources.cache.enabled = true;
+
+        for _ in 0..2 {
+            let transform = Affine::translate((0.0, 20.0));
+            let mut run = GlyphRun {
+                font: font.clone(),
+                font_size: 20.0,
+                font_embolden: FontEmbolden::default(),
+                transform,
+                scene_paint_transform: transform,
+                glyph_transform: None,
+                normalized_coords: &[],
+                hint: false,
+            }
+            .build(glyphs.into_iter(), resources.prep_cache.as_mut());
+            assert_eq!(
+                run.fill_glyphs(&mut resources.renderer, &mut resources.cache),
+                Ok(())
+            );
+        }
+
+        // Only the first run has misses, and the second "H" is not rasterized again.
+        assert_eq!(resources.cache.batches, [2]);
+        assert_eq!(resources.cache.images.len(), 2);
+        assert_eq!(resources.renderer.cached_draws, 6);
+        assert_eq!(resources.renderer.uncached_draws, 0);
     }
 
     /// A glyph without an outline has no pixels to cache. Offering it to the cache would make a
