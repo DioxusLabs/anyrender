@@ -6,14 +6,14 @@
 //! Run on x86 or ARM/macOS with:
 //!
 //! ```sh
-//! cargo bench -p pixmap --bench vs_vello_cpu
+//! cargo bench -p pixmap --all-features --bench vs_vello_cpu
 //! ```
 //!
 //! To compare `pixmap` auto-vectorization and `tiny-skia` compile-time SIMD under host
 //! ISA (e.g. AVX2 or NEON) as well:
 //!
 //! ```sh
-//! RUSTFLAGS="-C target-cpu=native" cargo bench -p pixmap --bench vs_vello_cpu
+//! RUSTFLAGS="-C target-cpu=native" cargo bench -p pixmap --all-features --bench vs_vello_cpu
 //! ```
 //!
 //! # Methodological notes
