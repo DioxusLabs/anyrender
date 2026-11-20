@@ -1,0 +1,26 @@
+[package]
+name = "anyrender_glyph"
+description = "Glyph preparation and drawing for AnyRender backends: outlines, hinting, COLR and bitmap glyphs"
+version = "0.1.0"
+documentation = "https://docs.rs/anyrender_glyph"
+homepage.workspace = true
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[features]
+default = ["std"]
+std = ["skrifa/std"]
+libm = ["skrifa/libm", "dep:core_maths"]
+png = ["std", "dep:png"]
+
+[dependencies]
+bytemuck = { version = "1.25", features = ["derive"] }
+core_maths = { version = "0.1.1", optional = true }
+hashbrown = { version = "0.17.1", default-features = false, features = ["default-hasher", "raw-entry"] }
+log = "0.4.29"
+peniko = { workspace = true }
+skrifa = { workspace = true, features = ["autohint_shaping"] }
+smallvec = "1.15.1"
+pixmap = { workspace = true }
+png = { version = "0.18.1", optional = true }
