@@ -776,16 +776,22 @@ fn mix_src_pixel(mix: Mix, src: [u8; 4], dst: [u8; 4]) -> [u8; 4] {
     }
 }
 
+/// Mixes each source pixel with its backdrop, then applies `map_mixed` (the uniform opacity) and
+/// composes the result.
+///
+/// Opacity is applied after mixing because blend functions take unpremultiplied colours: scaling
+/// the 8-bit source first would quantise the colour they see, which the discontinuous and
+/// non-separable modes amplify.
 fn composite_slice_mixed_with(
     compose: Compose,
     dst: &mut [[u8; 4]],
     src: &[[u8; 4]],
-    map_src: impl Fn([u8; 4]) -> [u8; 4],
+    map_mixed: impl Fn([u8; 4]) -> [u8; 4],
     mix_fn: impl Fn([u8; 4], [u8; 4]) -> [u8; 4],
 ) {
     if compose == Compose::SrcOver {
         for (d, &s) in dst.iter_mut().zip(src) {
-            let ms = mix_fn(map_src(s), *d);
+            let ms = map_mixed(mix_fn(s, *d));
             *d = compose_src_over_u8(ms, *d);
         }
     } else {
@@ -793,7 +799,7 @@ fn composite_slice_mixed_with(
         for (dst_chunk, src_chunk) in dst.chunks_mut(MIX_TILE_LEN).zip(src.chunks(MIX_TILE_LEN)) {
             let len = dst_chunk.len();
             for ((ms, &s), &d) in ms_buf[..len].iter_mut().zip(src_chunk).zip(&*dst_chunk) {
-                *ms = mix_fn(map_src(s), d);
+                *ms = map_mixed(mix_fn(s, d));
             }
             composite_slice_normal_opaque(compose, dst_chunk, &ms_buf[..len]);
         }
@@ -1647,6 +1653,78 @@ mod tests {
                 [1, 1, 1, 255],
             );
             assert_pixel_near(dodge, dodge_ref, 1);
+        }
+    }
+
+    #[test]
+    fn opacity_scales_the_mixed_source_not_the_mix_input() {
+        // W3C blending is defined on unpremultiplied colours, so a uniform opacity must not change
+        // the colour fed to the blend function: only the mixed result's coverage scales.
+        let mixes = [
+            Mix::Multiply,
+            Mix::Screen,
+            Mix::Overlay,
+            Mix::Darken,
+            Mix::Lighten,
+            Mix::ColorDodge,
+            Mix::ColorBurn,
+            Mix::HardLight,
+            Mix::SoftLight,
+            Mix::Difference,
+            Mix::Exclusion,
+            Mix::Hue,
+            Mix::Saturation,
+            Mix::Color,
+            Mix::Luminosity,
+        ];
+        let mut pairs = vec![
+            // Colour Dodge / Colour Burn: sources one step from the `cs == 1` / `cs == 0` endpoint.
+            ([254, 254, 254, 255], [1, 1, 1, 255]),
+            ([1, 1, 1, 255], [254, 254, 254, 255]),
+            // Hue: a nearly grey source whose hue is lost when its channels are quantised.
+            ([116, 115, 115, 255], [146, 200, 13, 255]),
+            ([254, 254, 254, 255], [253, 254, 1, 254]),
+        ];
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut premul_pixel = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let [r, g, b, a, ..] = state.to_le_bytes();
+            let mut px = [r, g, b, a];
+            crate::premultiply_rgba8(&mut px);
+            px
+        };
+        for _ in 0..2000 {
+            pairs.push((premul_pixel(), premul_pixel()));
+        }
+
+        for mix in mixes {
+            for opacity in [1u8, 64, 128, 200, 254] {
+                for &(src, dst) in &pairs {
+                    let mixed = reference_w3c_blend_pixel(mix, Compose::Copy, src, dst);
+                    let o = f32::from(opacity) / 255.0;
+                    let keep = 1.0 - f32::from(mixed[3]) * o / 255.0;
+                    let expected: [u8; 4] = core::array::from_fn(|i| {
+                        (f32::from(mixed[i]) * o + f32::from(dst[i]) * keep + 0.5) as u8
+                    });
+
+                    let mut actual = dst;
+                    composite_rgba8(
+                        &mut actual,
+                        &src,
+                        BlendMode::new(mix, Compose::SrcOver),
+                        opacity,
+                    );
+                    for i in 0..4 {
+                        assert!(
+                            actual[i].abs_diff(expected[i]) <= 2,
+                            "{mix:?} opacity={opacity} src={src:?} dst={dst:?}: \
+                             got {actual:?}, expected {expected:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 }
