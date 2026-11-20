@@ -21,8 +21,8 @@ use crate::kurbo::{self, Affine, BezPath, Diagonal2, Join, Line, ParamCurve as _
 use crate::peniko::FontData;
 use crate::raster::{GlyphCommands, GlyphCommandsInner, RasterMetrics, Recorder};
 use crate::renderer::{
-    DeferredGlyph, fill_glyph, flush_deferred_glyphs, render_cached_glyph, stroke_glyph,
-    supports_raster_caching,
+    DeferredGlyph, draw_cached_glyph_in_run, fill_glyph, flush_deferred_glyphs,
+    render_cached_glyph, stroke_glyph, supports_raster_caching,
 };
 use crate::util::AffineExt;
 use alloc::boxed::Box;
@@ -456,6 +456,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
         // Glyphs from the run's first cache miss on, whose drawing waits until the cache misses
         // among them are rasterized.
         let mut deferred = Vec::new();
+        // The renderer's state, while cached glyphs are drawn without restoring it in between.
+        let mut saved = None;
         for (index, glyph) in self.glyph_iterator.clone().enumerate() {
             // TODO: Add a mechanism such that glyphs that are completely outside of the viewport
             // (especially for more expensive COLR glyphs), we don't do any processing in the
@@ -500,12 +502,14 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 // Nothing is waiting to be drawn before this glyph, so it is drawn right away.
                 // A run without cache misses then never allocates the list.
                 if deferred.is_empty() {
-                    render_cached_glyph(
+                    saved.get_or_insert_with(|| renderer.save_state());
+                    draw_cached_glyph_in_run(
                         renderer,
                         &cached,
                         metrics,
                         outline_transform,
                         CachedGlyphType::Outline,
+                        context_color,
                     );
                 } else {
                     deferred.push(DeferredGlyph::Cached {
@@ -568,12 +572,14 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                         metrics.scaled_bbox.height(),
                     );
                     if deferred.is_empty() {
-                        render_cached_glyph(
+                        saved.get_or_insert_with(|| renderer.save_state());
+                        draw_cached_glyph_in_run(
                             renderer,
                             &cached,
                             raster_metrics,
                             outline_transform,
                             CachedGlyphType::Colr(area),
+                            context_color,
                         );
                     } else {
                         deferred.push(DeferredGlyph::Cached {
@@ -633,7 +639,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     relative_paint_transform: Affine::IDENTITY,
                     cache_key,
                 };
-                flush_deferred_glyphs(renderer, cache, &mut deferred);
+                flush_deferred_glyphs(renderer, cache, &mut deferred, &mut saved, context_color);
                 match style {
                     Style::Fill => {
                         fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
@@ -709,7 +715,13 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 if let Some(ref key) = cache_key
                     && let Some((metrics, cached)) = cache.get(key)
                 {
-                    flush_deferred_glyphs(renderer, cache, &mut deferred);
+                    flush_deferred_glyphs(
+                        renderer,
+                        cache,
+                        &mut deferred,
+                        &mut saved,
+                        context_color,
+                    );
                     render_cached_glyph(
                         renderer,
                         &cached,
@@ -729,7 +741,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     relative_paint_transform: Affine::IDENTITY,
                     cache_key,
                 };
-                flush_deferred_glyphs(renderer, cache, &mut deferred);
+                flush_deferred_glyphs(renderer, cache, &mut deferred, &mut saved, context_color);
                 match style {
                     Style::Fill => {
                         fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
@@ -788,7 +800,13 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     }
                 }
                 (_, glyph_type) => {
-                    flush_deferred_glyphs(renderer, cache, &mut deferred);
+                    flush_deferred_glyphs(
+                        renderer,
+                        cache,
+                        &mut deferred,
+                        &mut saved,
+                        context_color,
+                    );
                     let prepared_glyph = PreparedGlyph {
                         glyph_type,
                         outline_transform,
@@ -811,7 +829,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 }
             }
         }
-        flush_deferred_glyphs(renderer, cache, &mut deferred);
+        flush_deferred_glyphs(renderer, cache, &mut deferred, &mut saved, context_color);
 
         match first_skipped {
             Some(first_skipped) => Err(GlyphRenderError {
@@ -2393,6 +2411,8 @@ mod tests {
         uncached_draws: usize,
         /// Number of draws from the cache.
         cached_draws: usize,
+        /// Number of times the renderer state was saved.
+        saves: usize,
     }
 
     /// A raster cache that stores no pixels, but counts what it is asked to do.
@@ -2447,7 +2467,9 @@ mod tests {
         type SavedState = ();
         type CachedGlyph = ();
 
-        fn save_state(&mut self) -> Self::SavedState {}
+        fn save_state(&mut self) -> Self::SavedState {
+            self.saves += 1;
+        }
 
         fn restore_state(&mut self, _state: Self::SavedState) {}
 
@@ -2677,6 +2699,8 @@ mod tests {
             );
         }
 
+        // A run of cached glyphs saves the renderer's state once, not once per glyph.
+        assert_eq!(resources.renderer.saves, 2);
         // Only the first run has misses, and the second "H" is not rasterized again.
         assert_eq!(resources.cache.batches, [2]);
         assert_eq!(resources.cache.images.len(), 2);
