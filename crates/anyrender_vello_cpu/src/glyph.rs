@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::ops::RangeInclusive;
 
 use anyrender_glyph::{
-    DrawSink, Glyph, GlyphCacheConfig, GlyphCacheKey, GlyphPaint, GlyphPrepCache, GlyphRaster,
-    GlyphRasterCache, GlyphRenderError, GlyphRenderer, GlyphRun, GlyphRunBackend, RasterMetrics,
+    DrawSink, Glyph, GlyphCache, GlyphCacheConfig, GlyphCacheKey, GlyphPaint, GlyphPrepCache,
+    GlyphRaster, GlyphRasterCache, GlyphRenderError, GlyphRenderer, GlyphRun, GlyphRunBackend,
+    NoGlyphCache, RasterMetrics,
 };
 use kurbo::{Affine, BezPath, Rect};
 use peniko::color::palette::css::BLACK;
@@ -92,7 +93,7 @@ fn draw_image(ctx: &mut RenderContext, image: Arc<Pixmap>, quality: ImageQuality
     ctx.fill_rect(area);
 }
 
-/// Draws glyph commands into a `vello_cpu` context.
+/// Draws glyphs into a `vello_cpu` context.
 struct ContextSink<'a>(&'a mut RenderContext);
 
 impl DrawSink for ContextSink<'_> {
@@ -167,10 +168,12 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
     {
         let GlyphCaches { prep, rasters } = self.caches;
         let mut run = run.build(glyphs, prep.as_mut());
-        run.fill_glyphs(&mut GlyphSink::new(
-            self.ctx,
-            self.caching.then_some(rasters),
-        ))
+        let mut sink = ContextSink(self.ctx);
+        if self.caching {
+            run.fill_glyphs(&mut sink, rasters)
+        } else {
+            run.fill_glyphs(&mut sink, &mut NoGlyphCache)
+        }
     }
 
     fn stroke_glyphs<Glyphs>(
@@ -187,10 +190,12 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
         let mut stroke = self.ctx.stroke().clone();
         stroke.width = width * run.stroke_adjustment();
         self.ctx.set_stroke(stroke.clone());
-        let result = run.stroke_glyphs(&mut GlyphSink::new(
-            self.ctx,
-            self.caching.then_some(rasters),
-        ));
+        let mut sink = ContextSink(self.ctx);
+        let result = if self.caching {
+            run.stroke_glyphs(&mut sink, rasters)
+        } else {
+            run.stroke_glyphs(&mut sink, &mut NoGlyphCache)
+        };
         stroke.width = width;
         self.ctx.set_stroke(stroke);
         result
@@ -208,144 +213,42 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
     ) where
         Glyphs: Iterator<Item = Glyph> + Clone,
     {
-        let GlyphCaches { prep, rasters } = self.caches;
-        let mut run = run.build(glyphs, prep.as_mut());
-        let mut sink = GlyphSink::new(self.ctx, self.caching.then_some(rasters));
+        let mut run = run.build(glyphs, self.caches.prep.as_mut());
+        let mut sink = ContextSink(self.ctx);
         run.render_decoration(x_range, baseline_y, offset, size, buffer, &mut sink);
     }
 }
 
-/// Draws glyphs into a scene's context, serving cacheable ones from its raster cache.
-struct GlyphSink<'a> {
-    ctx: ContextSink<'a>,
-    /// `None` disables caching.
-    rasters: Option<&'a mut RasterCache>,
-}
-
-impl<'a> GlyphSink<'a> {
-    fn new(ctx: &'a mut RenderContext, rasters: Option<&'a mut RasterCache>) -> Self {
-        Self {
-            ctx: ContextSink(ctx),
-            rasters,
-        }
-    }
-}
-
-impl DrawSink for GlyphSink<'_> {
-    fn set_transform(&mut self, t: Affine) {
-        self.ctx.set_transform(t);
-    }
-
-    fn set_paint(&mut self, paint: GlyphPaint) {
-        self.ctx.set_paint(paint);
-    }
-
-    fn set_paint_transform(&mut self, t: Affine) {
-        self.ctx.set_paint_transform(t);
-    }
-
-    fn fill_path(&mut self, path: &BezPath) {
-        self.ctx.fill_path(path);
-    }
-
-    fn fill_rect(&mut self, rect: &Rect) {
-        self.ctx.fill_rect(rect);
-    }
-
-    fn push_clip_layer(&mut self, clip: &BezPath) {
-        self.ctx.push_clip_layer(clip);
-    }
-
-    fn push_clip_path(&mut self, clip: &BezPath) {
-        self.ctx.push_clip_path(clip);
-    }
-
-    fn push_clip_rect(&mut self, clip: &Rect) {
-        self.ctx.push_clip_rect(clip);
-    }
-
-    fn push_blend_layer(&mut self, blend_mode: BlendMode) {
-        self.ctx.push_blend_layer(blend_mode);
-    }
-
-    fn pop_layer(&mut self) {
-        self.ctx.pop_layer();
-    }
-
-    fn pop_clip_path(&mut self) {
-        self.ctx.pop_clip_path();
-    }
-
-    fn width(&self) -> u16 {
-        self.ctx.width()
-    }
-
-    fn height(&self) -> u16 {
-        self.ctx.height()
-    }
-}
-
-impl GlyphRenderer for GlyphSink<'_> {
+impl GlyphRenderer for ContextSink<'_> {
     type SavedState = RenderState;
     type CachedGlyph = Arc<Pixmap>;
 
     fn save_state(&mut self) -> Self::SavedState {
-        self.ctx.0.save_current_state()
+        self.0.save_current_state()
     }
 
     fn restore_state(&mut self, state: Self::SavedState) {
-        self.ctx.0.restore_state(state);
+        self.0.restore_state(state);
     }
 
     fn stroke_path(&mut self, path: &BezPath) {
-        self.ctx.0.stroke_path(path);
+        self.0.stroke_path(path);
     }
 
     fn get_context_color(&self) -> AlphaColor<Srgb> {
-        match self.ctx.0.paint() {
+        match self.0.paint() {
             PaintType::Solid(color) => *color,
             _ => BLACK,
         }
     }
 
     fn has_solid_paint(&self) -> bool {
-        matches!(self.ctx.0.paint(), PaintType::Solid(_))
+        matches!(self.0.paint(), PaintType::Solid(_))
     }
 
-    fn draw_pixmap(&mut self, _key: &GlyphCacheKey, pixmap: pixmap::Pixmap, area: &Rect) {
+    fn draw_pixmap(&mut self, pixmap: pixmap::Pixmap, area: &Rect) {
         let image = Arc::new(convert_pixmap(pixmap));
-        draw_image(self.ctx.0, image, ImageQuality::Medium, area);
-    }
-
-    fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
-        self.rasters.as_ref().map(|_| GlyphCacheConfig::default())
-    }
-
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, Arc<Pixmap>)> {
-        let (image, metrics) = self.rasters.as_mut()?.images.get(key)?;
-        Some((metrics, image.clone()))
-    }
-
-    fn cache_glyph<'a>(
-        &mut self,
-        key: &GlyphCacheKey,
-        metrics: RasterMetrics,
-        raster: GlyphRaster<'a>,
-    ) -> Result<Arc<Pixmap>, GlyphRaster<'a>> {
-        let Some(rasters) = self.rasters.as_mut() else {
-            return Err(raster);
-        };
-        let bytes = usize::from(metrics.width) * usize::from(metrics.height) * 4;
-        if bytes > rasters.images.max_bytes() {
-            return Err(raster);
-        }
-        let image = Arc::new(rasters.rasterize(metrics, raster));
-        // The image fits the budget, so storing it only fails if everything else in the cache
-        // was used this frame. It is drawn either way.
-        let _ = rasters
-            .images
-            .insert(key.clone(), image.clone(), metrics, bytes);
-        Ok(image)
+        draw_image(self.0, image, ImageQuality::Medium, area);
     }
 
     fn draw_cached_glyph(
@@ -355,10 +258,40 @@ impl GlyphRenderer for GlyphSink<'_> {
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        self.ctx.0.set_tint(tint.map(|color| Tint {
+        self.0.set_tint(tint.map(|color| Tint {
             color,
             mode: TintMode::AlphaMask,
         }));
-        draw_image(self.ctx.0, image.clone(), quality, area);
+        draw_image(self.0, image.clone(), quality, area);
+    }
+}
+
+impl GlyphCache<Arc<Pixmap>> for RasterCache {
+    fn config(&self) -> Option<GlyphCacheConfig> {
+        Some(GlyphCacheConfig::default())
+    }
+
+    fn get(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, Arc<Pixmap>)> {
+        let (image, metrics) = self.images.get(key)?;
+        Some((metrics, image.clone()))
+    }
+
+    fn store<'a>(
+        &mut self,
+        key: &GlyphCacheKey,
+        metrics: RasterMetrics,
+        raster: GlyphRaster<'a>,
+    ) -> Result<Arc<Pixmap>, GlyphRaster<'a>> {
+        let bytes = usize::from(metrics.width) * usize::from(metrics.height) * 4;
+        if bytes > self.images.max_bytes() {
+            return Err(raster);
+        }
+        let image = Arc::new(self.rasterize(metrics, raster));
+        // The image fits the budget, so storing it only fails if everything else in the cache
+        // was used this frame. It is drawn either way.
+        let _ = self
+            .images
+            .insert(key.clone(), image.clone(), metrics, bytes);
+        Ok(image)
     }
 }
