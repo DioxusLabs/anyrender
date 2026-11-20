@@ -3,6 +3,57 @@ use alloc::vec::Vec;
 
 use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef};
 
+impl Pixmap {
+    /// Resamples the pixmap to `width × height` using `filter`, returning a new tightly packed
+    /// [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Self {
+        self.as_ref().resize(width, height, filter)
+    }
+
+    /// Resamples the pixmap into `dst` using `filter`, leaving any inter-row stride padding on
+    /// `dst` untouched.
+    pub fn resize_into(&self, dst: PixmapMut<'_>, filter: ResampleFilter) {
+        self.as_ref().resize_into(dst, filter);
+    }
+}
+
+impl PixmapRef<'_> {
+    /// Resamples the pixmap view to `width × height` using `filter`, returning a new tightly
+    /// packed [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
+        resize(*self, width, height, filter)
+    }
+
+    /// Resamples the pixmap view into `dst` using `filter`, leaving any inter-row stride padding
+    /// on `dst` untouched.
+    pub fn resize_into(&self, mut dst: PixmapMut<'_>, filter: ResampleFilter) {
+        resize_into(*self, &mut dst, filter);
+    }
+}
+
+impl PixmapMut<'_> {
+    /// Resamples the pixmap view to `width × height` using `filter`, returning a new tightly
+    /// packed [`Pixmap`].
+    ///
+    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
+    /// with transparent black (`[0, 0, 0, 0]`).
+    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
+        self.as_ref().resize(width, height, filter)
+    }
+
+    /// Resamples the pixmap view into `dst` using `filter`, leaving any inter-row stride padding
+    /// on `dst` untouched.
+    pub fn resize_into(&self, dst: PixmapMut<'_>, filter: ResampleFilter) {
+        self.as_ref().resize_into(dst, filter);
+    }
+}
+
 /// Fixed-point fractional bit width for precomputed convolution weights (`1 << 14 = 16384`).
 const WEIGHT_BITS: u32 = 14;
 const WEIGHT_ONE: i32 = 1 << WEIGHT_BITS;
@@ -640,7 +691,7 @@ fn resample_2d<const CLAMP_PREMUL: bool>(
 }
 
 /// Resamples `src` into `dst` using `filter`, preserving any inter-row stride padding on `dst`.
-pub(crate) fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: ResampleFilter) {
+fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: ResampleFilter) {
     let dst_w = dst.width();
     let dst_h = dst.height();
     if dst_w == 0 || dst_h == 0 {
@@ -694,12 +745,7 @@ pub(crate) fn resize_into(src: PixmapRef<'_>, dst: &mut PixmapMut<'_>, filter: R
 }
 
 /// Resamples `src` into a new tightly packed [`Pixmap`] of size `width × height` using `filter`.
-pub(crate) fn resize(
-    src: PixmapRef<'_>,
-    width: u16,
-    height: u16,
-    filter: ResampleFilter,
-) -> Pixmap {
+fn resize(src: PixmapRef<'_>, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
     let mut out = Pixmap::new(width, height);
     resize_into(src, &mut out.as_mut(), filter);
     out

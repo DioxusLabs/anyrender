@@ -10,7 +10,13 @@ edition.workspace = true
 
 [features]
 default = []
+blend = []
+resample = []
+transform = []
 png = ["dep:png"]
 
 [dependencies]
 png = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+all-features = true

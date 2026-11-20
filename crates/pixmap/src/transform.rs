@@ -3,13 +3,214 @@ use alloc::vec;
 use crate::util::{byte_len, fill_slice, row_bytes};
 use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef};
 
+impl Pixmap {
+    /// Flips the pixmap horizontally (left-to-right) in place.
+    pub fn flip_horizontal(&mut self) {
+        self.as_mut().flip_horizontal();
+    }
+
+    /// Flips the pixmap vertically (top-to-bottom) in place.
+    pub fn flip_vertical(&mut self) {
+        self.as_mut().flip_vertical();
+    }
+
+    /// Rotates the pixmap 180 degrees in place.
+    pub fn rotate_180(&mut self) {
+        self.as_mut().rotate_180();
+    }
+
+    /// Returns a new pixmap flipped horizontally (left-to-right).
+    pub fn flipped_horizontal(&self) -> Self {
+        self.as_ref().flipped_horizontal()
+    }
+
+    /// Returns a new pixmap flipped vertically (top-to-bottom).
+    pub fn flipped_vertical(&self) -> Self {
+        self.as_ref().flipped_vertical()
+    }
+
+    /// Returns a new pixmap rotated 90 degrees clockwise (`(x, y) -> (height - 1 - y, x)`).
+    pub fn rotated_90(&self) -> Self {
+        self.as_ref().rotated_90()
+    }
+
+    /// Returns a new pixmap rotated 180 degrees.
+    pub fn rotated_180(&self) -> Self {
+        self.as_ref().rotated_180()
+    }
+
+    /// Returns a new pixmap rotated 270 degrees clockwise (90 degrees counter-clockwise,
+    /// `(x, y) -> (y, width - 1 - x)`).
+    pub fn rotated_270(&self) -> Self {
+        self.as_ref().rotated_270()
+    }
+
+    /// Returns a new pixmap transposed across the main diagonal (`(x, y) -> (y, x)`).
+    pub fn transposed(&self) -> Self {
+        self.as_ref().transposed()
+    }
+
+    /// Returns a new pixmap padded on each side by the given pixel counts, filling the border
+    /// with `fill`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Self {
+        self.as_ref().padded(top, right, bottom, left, fill)
+    }
+
+    /// Returns a new pixmap padded on each side by repeating (clamping) the outermost edge and
+    /// corner pixels.
+    ///
+    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Self {
+        self.as_ref().padded_clamped(top, right, bottom, left)
+    }
+}
+
+impl PixmapRef<'_> {
+    /// Returns a new tightly packed [`Pixmap`] flipped horizontally (left-to-right).
+    pub fn flipped_horizontal(&self) -> Pixmap {
+        flipped_horizontal(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] flipped vertically (top-to-bottom).
+    pub fn flipped_vertical(&self) -> Pixmap {
+        flipped_vertical(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 90 degrees clockwise
+    /// (`(x, y) -> (height - 1 - y, x)`).
+    pub fn rotated_90(&self) -> Pixmap {
+        rotated_90(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 180 degrees.
+    pub fn rotated_180(&self) -> Pixmap {
+        rotated_180(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 270 degrees clockwise (90 degrees
+    /// counter-clockwise, `(x, y) -> (y, width - 1 - x)`).
+    pub fn rotated_270(&self) -> Pixmap {
+        rotated_270(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] transposed across the main diagonal
+    /// (`(x, y) -> (y, x)`).
+    pub fn transposed(&self) -> Pixmap {
+        transposed(*self)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by the given pixel counts,
+    /// filling the border with `fill`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Pixmap {
+        padded(*self, top, right, bottom, left, fill)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by repeating (clamping) the
+    /// outermost edge and corner pixels.
+    ///
+    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
+        padded_clamped(*self, top, right, bottom, left)
+    }
+}
+
+impl PixmapMut<'_> {
+    /// Flips active pixels horizontally (left-to-right) in place, leaving any inter-row stride
+    /// padding untouched.
+    pub fn flip_horizontal(&mut self) {
+        flip_horizontal_in_place(self);
+    }
+
+    /// Flips active pixels vertically (top-to-bottom) in place, leaving any inter-row stride
+    /// padding untouched.
+    pub fn flip_vertical(&mut self) {
+        flip_vertical_in_place(self);
+    }
+
+    /// Rotates active pixels 180 degrees in place, leaving any inter-row stride padding untouched.
+    pub fn rotate_180(&mut self) {
+        rotate_180_in_place(self);
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] flipped horizontally (left-to-right).
+    pub fn flipped_horizontal(&self) -> Pixmap {
+        self.as_ref().flipped_horizontal()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] flipped vertically (top-to-bottom).
+    pub fn flipped_vertical(&self) -> Pixmap {
+        self.as_ref().flipped_vertical()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 90 degrees clockwise
+    /// (`(x, y) -> (height - 1 - y, x)`).
+    pub fn rotated_90(&self) -> Pixmap {
+        self.as_ref().rotated_90()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 180 degrees.
+    pub fn rotated_180(&self) -> Pixmap {
+        self.as_ref().rotated_180()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] rotated 270 degrees clockwise (90 degrees
+    /// counter-clockwise, `(x, y) -> (y, width - 1 - x)`).
+    pub fn rotated_270(&self) -> Pixmap {
+        self.as_ref().rotated_270()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] transposed across the main diagonal
+    /// (`(x, y) -> (y, x)`).
+    pub fn transposed(&self) -> Pixmap {
+        self.as_ref().transposed()
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by the given pixel counts,
+    /// filling the border with `fill`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Pixmap {
+        self.as_ref().padded(top, right, bottom, left, fill)
+    }
+
+    /// Returns a new tightly packed [`Pixmap`] padded on each side by repeating (clamping) the
+    /// outermost edge and corner pixels.
+    ///
+    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the resulting width or height overflows `u16`.
+    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
+        self.as_ref().padded_clamped(top, right, bottom, left)
+    }
+}
+
 /// Square tile edge length (in pixels) for cache-blocked 90°/270° rotations and transposition.
 /// A 16×16 tile of RGBA8 pixels is 1 KiB, fitting comfortably in L1 cache and keeping both
 /// source reads and destination writes sequential row-major.
 const TILE: usize = 16;
 
 /// Flips `dst` horizontally in place (mirroring left-to-right), preserving stride padding.
-pub(crate) fn flip_horizontal_in_place(dst: &mut PixmapMut<'_>) {
+fn flip_horizontal_in_place(dst: &mut PixmapMut<'_>) {
     if dst.width() <= 1 || dst.height() == 0 {
         return;
     }
@@ -21,7 +222,7 @@ pub(crate) fn flip_horizontal_in_place(dst: &mut PixmapMut<'_>) {
 }
 
 /// Flips `dst` vertically in place (mirroring top-to-bottom), preserving stride padding.
-pub(crate) fn flip_vertical_in_place(dst: &mut PixmapMut<'_>) {
+fn flip_vertical_in_place(dst: &mut PixmapMut<'_>) {
     if dst.width() == 0 || dst.height() <= 1 {
         return;
     }
@@ -32,7 +233,7 @@ pub(crate) fn flip_vertical_in_place(dst: &mut PixmapMut<'_>) {
 }
 
 /// Rotates `dst` 180 degrees in place, preserving stride padding.
-pub(crate) fn rotate_180_in_place(dst: &mut PixmapMut<'_>) {
+fn rotate_180_in_place(dst: &mut PixmapMut<'_>) {
     let w = dst.width();
     let h = dst.height();
     if w == 0 || h == 0 || (w == 1 && h == 1) {
@@ -61,7 +262,7 @@ pub(crate) fn rotate_180_in_place(dst: &mut PixmapMut<'_>) {
 }
 
 /// Returns a new tightly packed [`Pixmap`] flipped horizontally (mirrored left-to-right).
-pub(crate) fn flipped_horizontal(src: PixmapRef<'_>) -> Pixmap {
+fn flipped_horizontal(src: PixmapRef<'_>) -> Pixmap {
     let w = src.width();
     let h = src.height();
     if w == 0 || h == 0 {
@@ -80,7 +281,7 @@ pub(crate) fn flipped_horizontal(src: PixmapRef<'_>) -> Pixmap {
 }
 
 /// Returns a new tightly packed [`Pixmap`] flipped vertically (mirrored top-to-bottom).
-pub(crate) fn flipped_vertical(src: PixmapRef<'_>) -> Pixmap {
+fn flipped_vertical(src: PixmapRef<'_>) -> Pixmap {
     let w = src.width();
     let h = src.height();
     if w == 0 || h == 0 {
@@ -94,7 +295,7 @@ pub(crate) fn flipped_vertical(src: PixmapRef<'_>) -> Pixmap {
 }
 
 /// Returns a new tightly packed [`Pixmap`] rotated 180 degrees.
-pub(crate) fn rotated_180(src: PixmapRef<'_>) -> Pixmap {
+fn rotated_180(src: PixmapRef<'_>) -> Pixmap {
     let w = src.width();
     let h = src.height();
     if w == 0 || h == 0 {
@@ -123,7 +324,7 @@ pub(crate) fn rotated_180(src: PixmapRef<'_>) -> Pixmap {
 
 /// Returns a new tightly packed [`Pixmap`] rotated 90 degrees clockwise
 /// (`(x, y) -> (height - 1 - y, x)`).
-pub(crate) fn rotated_90(src: PixmapRef<'_>) -> Pixmap {
+fn rotated_90(src: PixmapRef<'_>) -> Pixmap {
     let src_w = src.width() as usize;
     let src_h = src.height() as usize;
     let dst_w = src_h;
@@ -166,7 +367,7 @@ pub(crate) fn rotated_90(src: PixmapRef<'_>) -> Pixmap {
 
 /// Returns a new tightly packed [`Pixmap`] rotated 270 degrees clockwise (90 degrees
 /// counter-clockwise, `(x, y) -> (y, width - 1 - x)`).
-pub(crate) fn rotated_270(src: PixmapRef<'_>) -> Pixmap {
+fn rotated_270(src: PixmapRef<'_>) -> Pixmap {
     let src_w = src.width() as usize;
     let src_h = src.height() as usize;
     let dst_w = src_h;
@@ -207,7 +408,7 @@ pub(crate) fn rotated_270(src: PixmapRef<'_>) -> Pixmap {
 
 /// Returns a new tightly packed [`Pixmap`] transposed across the main diagonal
 /// (`(x, y) -> (y, x)`).
-pub(crate) fn transposed(src: PixmapRef<'_>) -> Pixmap {
+fn transposed(src: PixmapRef<'_>) -> Pixmap {
     let src_w = src.width() as usize;
     let src_h = src.height() as usize;
     let dst_w = src_h;
@@ -260,7 +461,7 @@ fn padded_dimensions(
 }
 
 /// Returns a new tightly packed [`Pixmap`] padded on each side with `fill`.
-pub(crate) fn padded(
+fn padded(
     src: PixmapRef<'_>,
     top: u16,
     right: u16,
@@ -311,13 +512,7 @@ pub(crate) fn padded(
 ///
 /// If `src` is empty (`width == 0` or `height == 0`), the returned pixmap is filled with
 /// transparent black (`[0, 0, 0, 0]`).
-pub(crate) fn padded_clamped(
-    src: PixmapRef<'_>,
-    top: u16,
-    right: u16,
-    bottom: u16,
-    left: u16,
-) -> Pixmap {
+fn padded_clamped(src: PixmapRef<'_>, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
     let (new_w, new_h) = padded_dimensions(src.width(), src.height(), top, right, bottom, left);
     if top == 0 && right == 0 && bottom == 0 && left == 0 {
         return src.to_owned();

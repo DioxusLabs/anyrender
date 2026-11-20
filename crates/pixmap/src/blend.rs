@@ -1,5 +1,6 @@
-use crate::BYTES_PER_PIXEL;
 use crate::alpha::mul_div_255;
+use crate::blit::clip_blit;
+use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, PixmapRef};
 
 /// Defines the color mixing function for a [`BlendMode`].
 ///
@@ -303,6 +304,73 @@ pub fn composite_color_rgba8(dst: &mut [u8], color: [u8; 4], blend_mode: BlendMo
         composite_color_normal(blend_mode.compose, dst_pixels, color);
     } else {
         composite_color_mixed(blend_mode.mix, blend_mode.compose, dst_pixels, color);
+    }
+}
+
+impl Pixmap {
+    /// Composites `src` onto `self` with `src`'s top-left corner placed at `(x, y)`, using
+    /// `blend_mode` and uniform `opacity` (`0..=255`).
+    ///
+    /// Any part of `src` falling outside `self` is clipped; if there is no overlap, `self` is
+    /// left unchanged.
+    pub fn composite(
+        &mut self,
+        src: PixmapRef<'_>,
+        x: i32,
+        y: i32,
+        blend_mode: BlendMode,
+        opacity: u8,
+    ) {
+        self.as_mut().composite(src, x, y, blend_mode, opacity);
+    }
+
+    /// Composites a solid premultiplied RGBA8 `color` onto every pixel of `self` using
+    /// `blend_mode`.
+    pub fn composite_color(&mut self, color: [u8; 4], blend_mode: BlendMode) {
+        composite_color_rgba8(self.data_mut(), color, blend_mode);
+    }
+}
+
+impl PixmapMut<'_> {
+    /// Composites `src` onto `self` with `src`'s top-left corner placed at `(x, y)`, using
+    /// `blend_mode` and uniform `opacity` (`0..=255`), leaving any inter-row stride padding
+    /// untouched.
+    ///
+    /// Any part of `src` falling outside `self` is clipped; if there is no overlap, `self` is
+    /// left unchanged.
+    pub fn composite(
+        &mut self,
+        src: PixmapRef<'_>,
+        x: i32,
+        y: i32,
+        blend_mode: BlendMode,
+        opacity: u8,
+    ) {
+        let Some(rect) = clip_blit(self.width(), self.height(), src.width(), src.height(), x, y)
+        else {
+            return;
+        };
+        let src_region = src.subregion(rect.src_x, rect.src_y, rect.width, rect.height);
+        let mut dst_region = self.subregion_mut(rect.dst_x, rect.dst_y, rect.width, rect.height);
+        if let (Some(dst_data), Some(src_data)) = (dst_region.data_mut(), src_region.data()) {
+            composite_rgba8(dst_data, src_data, blend_mode, opacity);
+        } else {
+            for (dst_row, src_row) in dst_region.rows_mut().zip(src_region.rows()) {
+                composite_rgba8(dst_row, src_row, blend_mode, opacity);
+            }
+        }
+    }
+
+    /// Composites a solid premultiplied RGBA8 `color` onto every active pixel of `self` using
+    /// `blend_mode`, leaving any inter-row stride padding untouched.
+    pub fn composite_color(&mut self, color: [u8; 4], blend_mode: BlendMode) {
+        if let Some(data) = self.data_mut() {
+            composite_color_rgba8(data, color, blend_mode);
+        } else {
+            for row in self.rows_mut() {
+                composite_color_rgba8(row, color, blend_mode);
+            }
+        }
     }
 }
 
