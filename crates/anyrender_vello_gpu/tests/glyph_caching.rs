@@ -235,8 +235,8 @@ fn colr_glyphs_match() {
     assert!(has_colour(&image));
 }
 
-/// Vello can't draw a pixmap, so bitmap glyphs are drawn from the atlas with caching on or off,
-/// upright or not.
+/// Vello can't draw a pixmap, so bitmap glyphs are drawn from a texture, upright or not: the
+/// atlas with caching on, a texture of their own with caching off.
 #[test]
 fn bitmap_glyphs_are_drawn() {
     let font = font(NOTO_CBTF);

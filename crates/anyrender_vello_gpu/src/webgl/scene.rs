@@ -129,77 +129,7 @@ impl<'a> WebGlImageManager<'a> {
         &mut self,
         image: &peniko::ImageData,
     ) -> Result<Option<(TextureId, bool)>, WebGlError> {
-        if !self.cache.fits(image.width, image.height) {
-            return Ok(None);
-        }
-        let peniko_id = image.data.id();
-
-        if let Some(cached) = self.cache.get(peniko_id) {
-            return Ok(Some(cached));
-        }
-
-        let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
-            unreachable!();
-        };
-        let may_have_transparency = pixmap.may_have_transparency();
-
-        let gl = self.renderer.gl_context();
-        let texture = gl.create_texture().ok_or(WebGlError::OperationFailed {
-            operation: WebGlOperation::ResourceCreation(WebGlResourceKind::Texture),
-            message: None,
-        })?;
-        gl.active_texture(WebGl2RenderingContext::TEXTURE0);
-        gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
-        // The pixmap data is already premultiplied.
-        gl.pixel_storei(WebGl2RenderingContext::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
-        gl.pixel_storei(WebGl2RenderingContext::UNPACK_FLIP_Y_WEBGL, 0);
-        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
-            WebGl2RenderingContext::TEXTURE_2D,
-            0,
-            WebGl2RenderingContext::RGBA8 as i32,
-            i32::from(pixmap.width()),
-            i32::from(pixmap.height()),
-            0,
-            WebGl2RenderingContext::RGBA,
-            WebGl2RenderingContext::UNSIGNED_BYTE,
-            Some(pixmap.data_as_u8_slice()),
-        )
-        .map_err(|e| WebGlError::OperationFailed {
-            operation: WebGlOperation::DataTransfer(WebGlDataTransferOperation::TextureUpload),
-            message: e.as_string(),
-        })?;
-        gl.tex_parameteri(
-            WebGl2RenderingContext::TEXTURE_2D,
-            WebGl2RenderingContext::TEXTURE_MIN_FILTER,
-            WebGl2RenderingContext::LINEAR as i32,
-        );
-        gl.tex_parameteri(
-            WebGl2RenderingContext::TEXTURE_2D,
-            WebGl2RenderingContext::TEXTURE_MAG_FILTER,
-            WebGl2RenderingContext::LINEAR as i32,
-        );
-        gl.tex_parameteri(
-            WebGl2RenderingContext::TEXTURE_2D,
-            WebGl2RenderingContext::TEXTURE_WRAP_S,
-            WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameteri(
-            WebGl2RenderingContext::TEXTURE_2D,
-            WebGl2RenderingContext::TEXTURE_WRAP_T,
-            WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
-        );
-
-        let texture_id = TextureId(ResourceId::new().into_ffi());
-        self.texture_bindings
-            .insert(texture_id, texture, pixmap.width(), pixmap.height());
-        self.cache.insert(
-            &image.data,
-            texture_id,
-            may_have_transparency,
-            image.width,
-            image.height,
-        );
-        Ok(Some((texture_id, may_have_transparency)))
+        upload_image(self.renderer, self.cache, self.texture_bindings, image)
     }
 
     /// Evict unused images after rendering a frame, including skipped frames.
@@ -212,6 +142,86 @@ impl<'a> WebGlImageManager<'a> {
         self.glyphs.finish_frame();
         Ok(())
     }
+}
+
+/// Upload `image` to its own texture and bind it for rendering, returning
+/// its [`TextureId`] and transparency hint.
+fn upload_image(
+    renderer: &mut vello_gpu::WebGlRenderer,
+    cache: &mut ImageCache,
+    texture_bindings: &mut WebGlTextureBindings,
+    image: &peniko::ImageData,
+) -> Result<Option<(TextureId, bool)>, WebGlError> {
+    if !cache.fits(image.width, image.height) {
+        return Ok(None);
+    }
+    let peniko_id = image.data.id();
+
+    if let Some(cached) = cache.get(peniko_id) {
+        return Ok(Some(cached));
+    }
+
+    let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
+        unreachable!();
+    };
+    let may_have_transparency = pixmap.may_have_transparency();
+
+    let gl = renderer.gl_context();
+    let texture = gl.create_texture().ok_or(WebGlError::OperationFailed {
+        operation: WebGlOperation::ResourceCreation(WebGlResourceKind::Texture),
+        message: None,
+    })?;
+    gl.active_texture(WebGl2RenderingContext::TEXTURE0);
+    gl.bind_texture(WebGl2RenderingContext::TEXTURE_2D, Some(&texture));
+    // The pixmap data is already premultiplied.
+    gl.pixel_storei(WebGl2RenderingContext::UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
+    gl.pixel_storei(WebGl2RenderingContext::UNPACK_FLIP_Y_WEBGL, 0);
+    gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+        WebGl2RenderingContext::TEXTURE_2D,
+        0,
+        WebGl2RenderingContext::RGBA8 as i32,
+        i32::from(pixmap.width()),
+        i32::from(pixmap.height()),
+        0,
+        WebGl2RenderingContext::RGBA,
+        WebGl2RenderingContext::UNSIGNED_BYTE,
+        Some(pixmap.data_as_u8_slice()),
+    )
+    .map_err(|e| WebGlError::OperationFailed {
+        operation: WebGlOperation::DataTransfer(WebGlDataTransferOperation::TextureUpload),
+        message: e.as_string(),
+    })?;
+    gl.tex_parameteri(
+        WebGl2RenderingContext::TEXTURE_2D,
+        WebGl2RenderingContext::TEXTURE_MIN_FILTER,
+        WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        WebGl2RenderingContext::TEXTURE_2D,
+        WebGl2RenderingContext::TEXTURE_MAG_FILTER,
+        WebGl2RenderingContext::LINEAR as i32,
+    );
+    gl.tex_parameteri(
+        WebGl2RenderingContext::TEXTURE_2D,
+        WebGl2RenderingContext::TEXTURE_WRAP_S,
+        WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+    );
+    gl.tex_parameteri(
+        WebGl2RenderingContext::TEXTURE_2D,
+        WebGl2RenderingContext::TEXTURE_WRAP_T,
+        WebGl2RenderingContext::CLAMP_TO_EDGE as i32,
+    );
+
+    let texture_id = TextureId(ResourceId::new().into_ffi());
+    texture_bindings.insert(texture_id, texture, pixmap.width(), pixmap.height());
+    cache.insert(
+        &image.data,
+        texture_id,
+        may_have_transparency,
+        image.width,
+        image.height,
+    );
+    Ok(Some((texture_id, may_have_transparency)))
 }
 
 pub struct WebGlScenePainter<'s> {
@@ -243,7 +253,7 @@ impl<'s> WebGlScenePainter<'s> {
     /// Enable or disable caching of rasterized glyphs in the glyph atlas.
     ///
     /// Defaults to `true`. Turning it off is meant for debugging and tests: every outline and
-    /// COLR glyph is then drawn as paths. Bitmap glyphs are drawn from the atlas either way.
+    /// COLR glyph is then drawn as paths, and a bitmap glyph from a texture of its own.
     pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
         self.glyph_caching = enabled;
         self
@@ -510,8 +520,19 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
-        self.image_manager.glyphs.draw_glyphs(
+        let WebGlImageManager {
+            renderer,
+            cache,
+            texture_bindings,
+            glyphs: glyph_atlas,
+        } = &mut self.image_manager;
+        glyph_atlas.draw_glyphs(
             self.scene,
+            &mut |image| {
+                upload_image(renderer, cache, texture_bindings, image)
+                    .ok()
+                    .flatten()
+            },
             self.glyph_caching,
             font,
             font_size,
