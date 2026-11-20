@@ -453,7 +453,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
         let mut first_skipped = None;
         let mut skipped_count = 0;
-        // Outline glyphs whose drawing waits until the cache misses among them are rasterized.
+        // Glyphs from the run's first cache miss on, whose drawing waits until the cache misses
+        // among them are rasterized.
         let mut deferred = Vec::new();
         for (index, glyph) in self.glyph_iterator.clone().enumerate() {
             // TODO: Add a mechanism such that glyphs that are completely outside of the viewport
@@ -496,12 +497,24 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             if let Some(ref key) = outline_cache_key
                 && let Some((metrics, cached)) = cache.get(key)
             {
-                deferred.push(DeferredGlyph::Cached {
-                    cached,
-                    metrics,
-                    transform: outline_transform,
-                    glyph_type: CachedGlyphType::Outline,
-                });
+                // Nothing is waiting to be drawn before this glyph, so it is drawn right away.
+                // A run without cache misses then never allocates the list.
+                if deferred.is_empty() {
+                    render_cached_glyph(
+                        renderer,
+                        &cached,
+                        metrics,
+                        outline_transform,
+                        CachedGlyphType::Outline,
+                    );
+                } else {
+                    deferred.push(DeferredGlyph::Cached {
+                        cached,
+                        metrics,
+                        transform: outline_transform,
+                        glyph_type: CachedGlyphType::Outline,
+                    });
+                }
                 continue;
             }
 
@@ -554,12 +567,22 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                         metrics.scaled_bbox.width(),
                         metrics.scaled_bbox.height(),
                     );
-                    deferred.push(DeferredGlyph::Cached {
-                        cached,
-                        metrics: raster_metrics,
-                        transform: outline_transform,
-                        glyph_type: CachedGlyphType::Colr(area),
-                    });
+                    if deferred.is_empty() {
+                        render_cached_glyph(
+                            renderer,
+                            &cached,
+                            raster_metrics,
+                            outline_transform,
+                            CachedGlyphType::Colr(area),
+                        );
+                    } else {
+                        deferred.push(DeferredGlyph::Cached {
+                            cached,
+                            metrics: raster_metrics,
+                            transform: outline_transform,
+                            glyph_type: CachedGlyphType::Colr(area),
+                        });
+                    }
                     continue;
                 }
 
