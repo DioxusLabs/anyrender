@@ -69,4 +69,4 @@ pub use glyph::{
 };
 pub use interface::{DrawSink, GlyphCache, GlyphPaint, GlyphRenderer, NoGlyphCache};
 pub use key::GlyphCacheKey;
-pub use raster::{GlyphCacheConfig, GlyphCommands, GlyphRaster, RasterMetrics};
+pub use raster::{GlyphCacheConfig, GlyphCommands, GlyphRaster, GlyphRasterJob, RasterMetrics};

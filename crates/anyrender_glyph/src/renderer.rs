@@ -10,11 +10,16 @@ use crate::glyph::{
 };
 use crate::interface::{GlyphCache, GlyphRenderer};
 use crate::key::{GlyphCacheKey, subpixel_offset};
-use crate::raster::{GlyphCommands, GlyphCommandsInner, GlyphRaster, RasterMetrics};
+use crate::raster::{
+    DrawCommand, GlyphCommands, GlyphCommandsInner, GlyphRaster, GlyphRasterJob, JobContent,
+    RasterMetrics, replay,
+};
 use crate::util::AffineExt;
 use crate::{kurbo, peniko};
+use alloc::vec::Vec;
 #[cfg(not(feature = "std"))]
 use core_maths::CoreFloat as _;
+use hashbrown::HashMap;
 use kurbo::{Affine, BezPath, Rect, Shape};
 use peniko::ImageQuality;
 use peniko::color::{AlphaColor, Srgb};
@@ -38,12 +43,8 @@ pub(crate) fn fill_glyph<R: GlyphRenderer>(
                 return;
             }
 
-            if let Some(key) = cache_key
-                && cache_and_render_outline(renderer, cache, &glyph, transform, &key)
-            {
-                return;
-            }
-
+            // Filled outline glyphs that can be cached are deferred by the run, and drawn by
+            // `flush_deferred_glyphs`.
             fill_uncached_outline_glyph(
                 renderer,
                 &glyph.path,
@@ -103,6 +104,188 @@ pub(crate) fn stroke_glyph<R: GlyphRenderer>(
             fill_glyph(renderer, cache, prepared_glyph, outline_cache);
         }
     }
+}
+
+/// An outline glyph of a run whose drawing waits until the run's cache misses are rasterized.
+pub(crate) enum DeferredGlyph<C> {
+    /// A glyph that is in the raster cache.
+    Cached {
+        cached: C,
+        metrics: RasterMetrics,
+        transform: Affine,
+        glyph_type: CachedGlyphType,
+    },
+    /// A COLR glyph that is not in the raster cache, as its recorded drawing.
+    Colr {
+        commands: Vec<DrawCommand>,
+        metrics: RasterMetrics,
+        transform: Affine,
+        area: Rect,
+        key: GlyphCacheKey,
+    },
+    /// A glyph that is not in the raster cache, or can't be.
+    Outline {
+        glyph: GlyphOutline,
+        transform: Affine,
+        paint_transform: Affine,
+        key: Option<GlyphCacheKey>,
+    },
+}
+
+/// Rasterize the deferred glyphs that missed the raster cache as one batch, then draw all of
+/// them in order.
+pub(crate) fn flush_deferred_glyphs<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
+    deferred: &mut Vec<DeferredGlyph<R::CachedGlyph>>,
+) {
+    if deferred.is_empty() {
+        return;
+    }
+    // Taken out so that the batch can borrow the glyphs while the renderer is used.
+    let deferred = core::mem::take(deferred);
+
+    // The batch entry of each deferred glyph, if it has one. Glyphs with the same key share it.
+    let mut batch = Vec::new();
+    let mut batch_keys: HashMap<&GlyphCacheKey, usize> = HashMap::new();
+    let mut entries = Vec::with_capacity(deferred.len());
+    for deferred_glyph in deferred.iter() {
+        let entry = match deferred_glyph {
+            DeferredGlyph::Outline {
+                glyph,
+                transform,
+                key: Some(key),
+                ..
+            } => outline_raster(glyph, *transform, key).map(|(metrics, raster)| {
+                let index = *batch_keys.entry(key).or_insert_with(|| {
+                    batch.push(raster);
+                    batch.len() - 1
+                });
+                (index, metrics)
+            }),
+            DeferredGlyph::Colr {
+                commands,
+                metrics,
+                key,
+                ..
+            } => {
+                let index = *batch_keys.entry(key).or_insert_with(|| {
+                    batch.push(GlyphRasterJob {
+                        key,
+                        metrics: *metrics,
+                        content: JobContent::Recorded(commands),
+                    });
+                    batch.len() - 1
+                });
+                Some((index, *metrics))
+            }
+            _ => None,
+        };
+        entries.push(entry);
+    }
+    let rasterized = if batch.is_empty() {
+        Vec::new()
+    } else {
+        cache.store_batch(&batch)
+    };
+    debug_assert_eq!(rasterized.len(), batch.len());
+
+    for (deferred_glyph, entry) in deferred.iter().zip(entries) {
+        match deferred_glyph {
+            DeferredGlyph::Cached {
+                cached,
+                metrics,
+                transform,
+                glyph_type,
+            } => render_cached_glyph(renderer, cached, *metrics, *transform, *glyph_type),
+            DeferredGlyph::Colr {
+                commands,
+                transform,
+                area,
+                ..
+            } => {
+                let cached = entry
+                    .and_then(|(index, metrics)| Some((rasterized.get(index)?.as_ref()?, metrics)));
+                match cached {
+                    Some((cached, metrics)) => render_cached_glyph(
+                        renderer,
+                        cached,
+                        metrics,
+                        *transform,
+                        CachedGlyphType::Colr(*area),
+                    ),
+                    // Drawn uncached, as `render_uncached_colr_glyph` does.
+                    None => {
+                        let state = renderer.save_state();
+                        replay(commands, *transform, renderer);
+                        renderer.restore_state(state);
+                    }
+                }
+            }
+            DeferredGlyph::Outline {
+                glyph,
+                transform,
+                paint_transform,
+                ..
+            } => {
+                let cached = entry
+                    .and_then(|(index, metrics)| Some((rasterized.get(index)?.as_ref()?, metrics)));
+                match cached {
+                    Some((cached, metrics)) => render_cached_glyph(
+                        renderer,
+                        cached,
+                        metrics,
+                        *transform,
+                        CachedGlyphType::Outline,
+                    ),
+                    None => fill_uncached_outline_glyph(
+                        renderer,
+                        &glyph.path,
+                        glyph.scale,
+                        *transform,
+                        *paint_transform,
+                    ),
+                }
+            }
+        }
+    }
+}
+
+/// What is needed to rasterize an outline glyph into the raster cache, if it can be drawn
+/// from there.
+fn outline_raster<'a>(
+    glyph: &'a GlyphOutline,
+    outline_transform: Affine,
+    key: &'a GlyphCacheKey,
+) -> Option<(RasterMetrics, GlyphRasterJob<'a>)> {
+    if !supports_raster_caching(&outline_transform, CachedGlyphType::Outline) {
+        return None;
+    }
+
+    let bounds = glyph.bbox.scale_from_origin(glyph.scale);
+    let metrics = calculate_raster_metrics(&bounds);
+    // A renderer can't store an image without pixels, and would be asked to on every draw.
+    if metrics.width == 0 || metrics.height == 0 {
+        return None;
+    }
+    let subpixel_offset = subpixel_offset(key.subpixel_x);
+
+    let transform =
+        Affine::scale_non_uniform(glyph.scale, -glyph.scale).then_translate(kurbo::Vec2::new(
+            subpixel_offset as f64 - metrics.bearing_x as f64,
+            -(metrics.bearing_y as f64),
+        ));
+    Some((
+        metrics,
+        GlyphRasterJob {
+            key,
+            metrics,
+            content: JobContent::Outline {
+                path: &glyph.path,
+                transform,
+            },
+        },
+    ))
 }
 
 fn fill_uncached_outline_glyph(
@@ -235,52 +418,6 @@ fn render_from_cache<R: GlyphRenderer>(
     renderer.set_transform(rect_transform);
     renderer.draw_cached_glyph(cached, &area, quality, tint);
     renderer.restore_state(state);
-}
-
-/// Store an outline glyph in the raster cache and render it from there.
-///
-/// The caller is responsible for checking the cache first and only calling this on a miss.
-/// Returns `false` if the glyph has to be drawn uncached.
-fn cache_and_render_outline<R: GlyphRenderer>(
-    renderer: &mut R,
-    cache: &mut impl GlyphCache<R::CachedGlyph>,
-    glyph: &GlyphOutline,
-    outline_transform: Affine,
-    key: &GlyphCacheKey,
-) -> bool {
-    if !supports_raster_caching(&outline_transform, CachedGlyphType::Outline) {
-        return false;
-    }
-
-    let bounds = glyph.bbox.scale_from_origin(glyph.scale);
-    let metrics = calculate_raster_metrics(&bounds);
-    // A renderer can't store an image without pixels, and would be asked to on every draw.
-    if metrics.width == 0 || metrics.height == 0 {
-        return false;
-    }
-    let subpixel_offset = subpixel_offset(key.subpixel_x);
-
-    let transform =
-        Affine::scale_non_uniform(glyph.scale, -glyph.scale).then_translate(kurbo::Vec2::new(
-            subpixel_offset as f64 - metrics.bearing_x as f64,
-            -(metrics.bearing_y as f64),
-        ));
-    let raster = GlyphRaster::Commands(GlyphCommands(GlyphCommandsInner::Outline {
-        path: &glyph.path,
-        transform,
-    }));
-    let Ok(cached) = cache.store(key, metrics, raster) else {
-        return false;
-    };
-
-    render_cached_glyph(
-        renderer,
-        &cached,
-        metrics,
-        outline_transform,
-        CachedGlyphType::Outline,
-    );
-    true
 }
 
 /// Store a bitmap glyph in the raster cache and render it from there, or hand the glyph back
