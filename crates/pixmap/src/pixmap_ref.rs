@@ -7,7 +7,7 @@ use crate::util::{
     as_pixels, byte_len, is_contiguous, is_valid_packed_parts, is_valid_strided_parts, row_bytes,
     slice_is_opaque, subregion_byte_range, validate_packed_parts, validate_strided_parts,
 };
-use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut, ResampleFilter};
+use crate::{BYTES_PER_PIXEL, Pixmap, PixmapMut};
 
 /// An immutably borrowed buffer of RGBA8 pixels with rows stored top to bottom and an explicit
 /// row stride in bytes.
@@ -252,76 +252,6 @@ impl<'a> PixmapRef<'a> {
     /// Copies the active pixels into a tightly packed straight-alpha RGBA8 buffer.
     pub fn to_unpremultiplied(&self) -> Vec<u8> {
         self.to_owned().into_unpremultiplied()
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] flipped horizontally (left-to-right).
-    pub fn flipped_horizontal(&self) -> Pixmap {
-        crate::transform::flipped_horizontal(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] flipped vertically (top-to-bottom).
-    pub fn flipped_vertical(&self) -> Pixmap {
-        crate::transform::flipped_vertical(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] rotated 90 degrees clockwise
-    /// (`(x, y) -> (height - 1 - y, x)`).
-    pub fn rotated_90(&self) -> Pixmap {
-        crate::transform::rotated_90(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] rotated 180 degrees.
-    pub fn rotated_180(&self) -> Pixmap {
-        crate::transform::rotated_180(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] rotated 270 degrees clockwise (90 degrees
-    /// counter-clockwise, `(x, y) -> (y, width - 1 - x)`).
-    pub fn rotated_270(&self) -> Pixmap {
-        crate::transform::rotated_270(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] transposed across the main diagonal
-    /// (`(x, y) -> (y, x)`).
-    pub fn transposed(&self) -> Pixmap {
-        crate::transform::transposed(*self)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] padded on each side by the given pixel counts,
-    /// filling the border with `fill`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the resulting width or height overflows `u16`.
-    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Pixmap {
-        crate::transform::padded(*self, top, right, bottom, left, fill)
-    }
-
-    /// Returns a new tightly packed [`Pixmap`] padded on each side by repeating (clamping) the
-    /// outermost edge and corner pixels.
-    ///
-    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the resulting width or height overflows `u16`.
-    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Pixmap {
-        crate::transform::padded_clamped(*self, top, right, bottom, left)
-    }
-
-    /// Resamples the pixmap view to `width × height` using `filter`, returning a new tightly
-    /// packed [`Pixmap`].
-    ///
-    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
-    /// with transparent black (`[0, 0, 0, 0]`).
-    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Pixmap {
-        crate::resample::resize(*self, width, height, filter)
-    }
-
-    /// Resamples the pixmap view into `dst` using `filter`, leaving any inter-row stride padding
-    /// on `dst` untouched.
-    pub fn resize_into(&self, mut dst: PixmapMut<'_>, filter: ResampleFilter) {
-        crate::resample::resize_into(*self, &mut dst, filter);
     }
 }
 

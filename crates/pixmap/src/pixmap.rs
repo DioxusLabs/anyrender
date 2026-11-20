@@ -7,9 +7,8 @@ use crate::util::{
     slice_is_opaque, validate_packed_parts,
 };
 use crate::{
-    BYTES_PER_PIXEL, BlendMode, PixmapMut, PixmapRef, ResampleFilter, Rows, RowsMut,
-    composite_color_rgba8, multiply_alpha_rgba8, premultiply_rgba8, swap_rb_rgba8,
-    unpremultiply_rgba8,
+    BYTES_PER_PIXEL, PixmapMut, PixmapRef, Rows, RowsMut, multiply_alpha_rgba8, premultiply_rgba8,
+    swap_rb_rgba8, unpremultiply_rgba8,
 };
 
 /// An owned, tightly packed buffer of RGBA8 pixels with rows stored top to bottom.
@@ -229,111 +228,6 @@ impl Pixmap {
     /// unchanged.
     pub fn copy_from(&mut self, src: PixmapRef<'_>, x: i32, y: i32) {
         self.as_mut().copy_from(src, x, y);
-    }
-
-    /// Composites `src` onto `self` with `src`'s top-left corner placed at `(x, y)`, using
-    /// `blend_mode` and uniform `opacity` (`0..=255`).
-    ///
-    /// Any part of `src` falling outside `self` is clipped; if there is no overlap, `self` is
-    /// left unchanged.
-    pub fn composite(
-        &mut self,
-        src: PixmapRef<'_>,
-        x: i32,
-        y: i32,
-        blend_mode: BlendMode,
-        opacity: u8,
-    ) {
-        self.as_mut().composite(src, x, y, blend_mode, opacity);
-    }
-
-    /// Composites a solid premultiplied RGBA8 `color` onto every pixel of `self` using
-    /// `blend_mode`.
-    pub fn composite_color(&mut self, color: [u8; 4], blend_mode: BlendMode) {
-        composite_color_rgba8(&mut self.data, color, blend_mode);
-    }
-
-    /// Flips the pixmap horizontally (left-to-right) in place.
-    pub fn flip_horizontal(&mut self) {
-        self.as_mut().flip_horizontal();
-    }
-
-    /// Flips the pixmap vertically (top-to-bottom) in place.
-    pub fn flip_vertical(&mut self) {
-        self.as_mut().flip_vertical();
-    }
-
-    /// Rotates the pixmap 180 degrees in place.
-    pub fn rotate_180(&mut self) {
-        self.as_mut().rotate_180();
-    }
-
-    /// Returns a new pixmap flipped horizontally (left-to-right).
-    pub fn flipped_horizontal(&self) -> Self {
-        self.as_ref().flipped_horizontal()
-    }
-
-    /// Returns a new pixmap flipped vertically (top-to-bottom).
-    pub fn flipped_vertical(&self) -> Self {
-        self.as_ref().flipped_vertical()
-    }
-
-    /// Returns a new pixmap rotated 90 degrees clockwise (`(x, y) -> (height - 1 - y, x)`).
-    pub fn rotated_90(&self) -> Self {
-        self.as_ref().rotated_90()
-    }
-
-    /// Returns a new pixmap rotated 180 degrees.
-    pub fn rotated_180(&self) -> Self {
-        self.as_ref().rotated_180()
-    }
-
-    /// Returns a new pixmap rotated 270 degrees clockwise (90 degrees counter-clockwise,
-    /// `(x, y) -> (y, width - 1 - x)`).
-    pub fn rotated_270(&self) -> Self {
-        self.as_ref().rotated_270()
-    }
-
-    /// Returns a new pixmap transposed across the main diagonal (`(x, y) -> (y, x)`).
-    pub fn transposed(&self) -> Self {
-        self.as_ref().transposed()
-    }
-
-    /// Returns a new pixmap padded on each side by the given pixel counts, filling the border
-    /// with `fill`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the resulting width or height overflows `u16`.
-    pub fn padded(&self, top: u16, right: u16, bottom: u16, left: u16, fill: [u8; 4]) -> Self {
-        self.as_ref().padded(top, right, bottom, left, fill)
-    }
-
-    /// Returns a new pixmap padded on each side by repeating (clamping) the outermost edge and
-    /// corner pixels.
-    ///
-    /// If `self` is empty, the returned pixmap is filled with transparent black (`[0, 0, 0, 0]`).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the resulting width or height overflows `u16`.
-    pub fn padded_clamped(&self, top: u16, right: u16, bottom: u16, left: u16) -> Self {
-        self.as_ref().padded_clamped(top, right, bottom, left)
-    }
-
-    /// Resamples the pixmap to `width × height` using `filter`, returning a new tightly packed
-    /// [`Pixmap`].
-    ///
-    /// If `self` is empty and the target dimensions are non-zero, the returned pixmap is filled
-    /// with transparent black (`[0, 0, 0, 0]`).
-    pub fn resize(&self, width: u16, height: u16, filter: ResampleFilter) -> Self {
-        self.as_ref().resize(width, height, filter)
-    }
-
-    /// Resamples the pixmap into `dst` using `filter`, leaving any inter-row stride padding on
-    /// `dst` untouched.
-    pub fn resize_into(&self, dst: PixmapMut<'_>, filter: ResampleFilter) {
-        self.as_ref().resize_into(dst, filter);
     }
 
     /// The pixel bytes.
