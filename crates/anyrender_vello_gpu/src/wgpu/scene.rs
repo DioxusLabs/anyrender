@@ -29,7 +29,9 @@ use wgpu_context::DeviceHandle;
 /// this, stems land up to 1/2px away from native ones. Elsewhere, x is rounded to the nearest
 /// 1/4px, as Skia does for horizontal text (and so Chrome off Apple). On Apple, CoreGraphics
 /// also floors the device y of the baseline to a whole pixel (y up, so the baseline moves down
-/// in Vello's y-down device space); off Apple, y is not snapped.
+/// in Vello's y-down device space). Elsewhere, the device y of the baseline is rounded to the
+/// nearest whole pixel, as Skia's baseline snapping does, so that every line of text has the
+/// same vertical sub-pixel position and cached glyph images can be reused between lines.
 ///
 /// CoreGraphics font smoothing also dilates glyphs upwards only: stems grow by the same amount
 /// on both sides in x, but the bottom edge stays on the baseline and the top grows by twice
@@ -42,8 +44,10 @@ pub(crate) struct GlyphOriginSnap {
     positions_per_px: f64,
     /// Skia rounds to the nearest grid position; CoreGraphics floors.
     round_x: f64,
-    /// The transform's y scale and offset when device y is snapped, as on Apple.
+    /// The transform's y scale and offset when device y is snapped.
     snap_y: Option<(f64, f64)>,
+    /// Skia rounds the baseline to the nearest pixel; CoreGraphics moves it down to the next.
+    round_y: bool,
     lift_y: f64,
 }
 
@@ -57,7 +61,7 @@ impl GlyphOriginSnap {
     }
 
     fn skia(transform: Affine) -> Option<Self> {
-        let [a, b, c, _, e, _] = transform.as_coeffs();
+        let [a, b, c, d, e, f] = transform.as_coeffs();
         if b != 0.0 || c != 0.0 || a <= 0.0 {
             return None;
         }
@@ -66,7 +70,8 @@ impl GlyphOriginSnap {
             offset_x: e,
             positions_per_px: 4.0,
             round_x: 0.5,
-            snap_y: None,
+            snap_y: (d != 0.0 && d.is_finite()).then_some((d, f)),
+            round_y: true,
             lift_y: 0.0,
         })
     }
@@ -84,6 +89,7 @@ impl GlyphOriginSnap {
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
             round_x: 0.0,
             snap_y: Some((d, f)),
+            round_y: false,
             // glifo scales the embolden amount with the transform, so it is in user units.
             lift_y: embolden.y * d.signum(),
         })
@@ -99,8 +105,13 @@ impl GlyphOriginSnap {
     pub(crate) fn y(self, y: f32) -> f32 {
         let mut y = y as f64;
         if let Some((scale_y, offset_y)) = self.snap_y {
-            // CoreGraphics tolerates about 1/1000 device px before moving to the next pixel.
-            let snapped = (scale_y * y + offset_y - 1.0 / 1024.0).ceil();
+            let device_y = scale_y * y + offset_y;
+            let snapped = if self.round_y {
+                (device_y + 0.5).floor()
+            } else {
+                // CoreGraphics tolerates about 1/1000 device px before moving to the next pixel.
+                (device_y - 1.0 / 1024.0).ceil()
+            };
             y = (snapped - offset_y) / scale_y;
         }
         (y - self.lift_y) as f32
@@ -751,8 +762,25 @@ mod glyph_origin_snap_tests {
         assert!((device_y(Affine::scale(1.5), 7.0) - 11.0).abs() < 1e-6);
         let transform = Affine::translate((0.0, 0.25)) * Affine::scale(2.0);
         assert!((device_y(transform, 5.0) - 11.0).abs() < 1e-6);
-        let snap = GlyphOriginSnap::skia(Affine::IDENTITY).unwrap();
-        assert_eq!(snap.y(10.3), 10.3);
+    }
+
+    #[test]
+    fn rounds_device_y_to_whole_px_for_skia() {
+        let device_y = |transform: Affine, y: f32| {
+            let snap = GlyphOriginSnap::skia(transform).unwrap();
+            transform.as_coeffs()[3] * snap.y(y) as f64 + transform.as_coeffs()[5]
+        };
+        assert_eq!(device_y(Affine::IDENTITY, 10.0), 10.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.3), 10.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.5), 11.0);
+        assert_eq!(device_y(Affine::IDENTITY, 10.7), 11.0);
+        // At scale(1.5), a baseline at y = 7.2 is 10.8 device px down.
+        assert!((device_y(Affine::scale(1.5), 7.2) - 11.0).abs() < 1e-6);
+        let transform = Affine::translate((0.0, 0.25)) * Affine::scale(2.0);
+        assert!((device_y(transform, 5.0) - 10.0).abs() < 1e-6);
+        // A flipped y axis.
+        let transform = Affine::translate((0.0, 100.0)) * Affine::scale_non_uniform(1.0, -1.0);
+        assert!((device_y(transform, 10.3) - 90.0).abs() < 1e-6);
     }
 
     #[test]
