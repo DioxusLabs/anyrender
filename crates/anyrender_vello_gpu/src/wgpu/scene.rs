@@ -1,19 +1,18 @@
 use std::sync::Arc;
 
-use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
+use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind};
 use anyrender::{
     AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
     ResourceId,
 };
-use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef};
 use rustc_hash::FxHashSet;
 use vello_common::{
     TextureId,
     paint::{ImageSource, PaintType, TextureRegion},
 };
-use vello_gpu::{Resources, TextureBindings};
+use vello_gpu::TextureBindings;
 use wgpu::{
     Device, Extent3d, Origin3d, Queue, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
     TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
@@ -84,7 +83,7 @@ impl GlyphOriginSnap {
             positions_per_px: (100.0 / (3.0 * ppem)).ceil().min(5.0),
             round_x: 0.0,
             snap_y: Some((d, f)),
-            // glifo scales the embolden amount with the transform, so it is in user units.
+            // The embolden amount is scaled with the transform, so it is in user units.
             lift_y: embolden.y * d.signum(),
         })
     }
@@ -181,101 +180,106 @@ impl ExternalTextures {
     }
 }
 
+/// The glyph caches of a wgpu renderer, with rasterized glyphs packed into one texture.
+///
+/// Call `clear` when the device it was used with is replaced.
+pub type GlyphAtlas = crate::common::GlyphAtlas<Texture>;
+
 pub struct ImageManager<'a> {
-    pub(crate) resources: &'a mut Resources,
     pub(crate) device: &'a Device,
     pub(crate) queue: &'a Queue,
     pub(crate) cache: &'a mut ImageCache,
     pub(crate) texture_bindings: &'a mut ExternalTextures,
+    pub(crate) glyphs: &'a mut GlyphAtlas,
 }
 
 impl<'a> ImageManager<'a> {
     pub fn new(
-        resources: &'a mut Resources,
         device: &'a Device,
         queue: &'a Queue,
         cache: &'a mut ImageCache,
         texture_bindings: &'a mut ExternalTextures,
+        glyphs: &'a mut GlyphAtlas,
     ) -> Self {
         Self {
-            resources,
             device,
             queue,
             cache,
             texture_bindings,
+            glyphs,
+        }
+    }
+
+    /// Write the glyphs rasterized since the last call to the glyph atlas texture, creating
+    /// and binding the texture first if there is none.
+    fn upload_glyphs(&mut self) {
+        if !self.glyphs.has_uploads() {
+            return;
+        }
+        if self.glyphs.texture().is_none() {
+            let (width, height) = self.glyphs.texture_size();
+            let texture = self.device.create_texture(&TextureDescriptor {
+                label: Some("AnyRender glyph atlas"),
+                size: Extent3d {
+                    width: u32::from(width),
+                    height: u32::from(height),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.texture_bindings.bindings.insert(
+                self.glyphs.texture_id(),
+                texture.create_view(&TextureViewDescriptor::default()),
+            );
+            self.glyphs.set_texture(texture);
+        }
+        let uploads = self.glyphs.take_uploads();
+        let Some(texture) = self.glyphs.texture() else {
+            return;
+        };
+        for upload in uploads {
+            let size = Extent3d {
+                width: u32::from(upload.rect.width),
+                height: u32::from(upload.rect.height),
+                depth_or_array_layers: 1,
+            };
+            self.queue.write_texture(
+                TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: Origin3d {
+                        x: u32::from(upload.rect.x),
+                        y: u32::from(upload.rect.y),
+                        z: 0,
+                    },
+                    aspect: TextureAspect::All,
+                },
+                &upload.data,
+                TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4 * size.width),
+                    rows_per_image: Some(size.height),
+                },
+                size,
+            );
         }
     }
 
     /// Upload `image` to its own texture and bind it for rendering, returning
     /// its [`TextureId`] and transparency hint.
     pub(crate) fn upload_image(&mut self, image: &ImageData) -> Option<(TextureId, bool)> {
-        if !self.cache.fits(image.width, image.height) {
-            return None;
-        }
-        let peniko_id = image.data.id();
-
-        // Try to get TextureId from cache first
-        if let Some(cached) = self.cache.get(peniko_id) {
-            return Some(cached);
-        };
-
-        // Convert ImageData to Pixmap
-        let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
-            unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
-        };
-        let may_have_transparency = pixmap.may_have_transparency();
-
-        // Upload the pixmap to its own texture.
-        let texture = self.device.create_texture(&TextureDescriptor {
-            label: Some("AnyRender uploaded image"),
-            size: Extent3d {
-                width: u32::from(pixmap.width()),
-                height: u32::from(pixmap.height()),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: Origin3d::ZERO,
-                aspect: TextureAspect::All,
-            },
-            pixmap.data_as_u8_slice(),
-            TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * u32::from(pixmap.width())),
-                rows_per_image: Some(u32::from(pixmap.height())),
-            },
-            Extent3d {
-                width: u32::from(pixmap.width()),
-                height: u32::from(pixmap.height()),
-                depth_or_array_layers: 1,
-            },
-        );
-
-        // Bind the texture and remember the TextureId in the cache.
-        let resource_id = ResourceId::new();
-        self.texture_bindings.insert(
-            resource_id,
-            texture.create_view(&TextureViewDescriptor::default()),
-        );
-        let texture_id = TextureId(resource_id.into_ffi());
-        self.cache.insert(
-            &image.data,
-            texture_id,
-            may_have_transparency,
-            image.width,
-            image.height,
-        );
-
-        Some((texture_id, may_have_transparency))
+        upload_image(
+            self.device,
+            self.queue,
+            self.cache,
+            self.texture_bindings,
+            image,
+        )
     }
 
     /// Evict unused images after encoding the frame's rendering.
@@ -284,7 +288,86 @@ impl<'a> ImageManager<'a> {
             // Dropping the binding drops the last handle to the texture.
             self.texture_bindings.remove(ResourceId::from_ffi(id.0));
         }
+        self.glyphs.finish_frame();
     }
+}
+
+/// Upload `image` to its own texture and bind it for rendering, returning
+/// its [`TextureId`] and transparency hint.
+fn upload_image(
+    device: &Device,
+    queue: &Queue,
+    cache: &mut ImageCache,
+    texture_bindings: &mut ExternalTextures,
+    image: &ImageData,
+) -> Option<(TextureId, bool)> {
+    if !cache.fits(image.width, image.height) {
+        return None;
+    }
+    let peniko_id = image.data.id();
+
+    // Try to get TextureId from cache first
+    if let Some(cached) = cache.get(peniko_id) {
+        return Some(cached);
+    };
+
+    // Convert ImageData to Pixmap
+    let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
+        unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
+    };
+    let may_have_transparency = pixmap.may_have_transparency();
+
+    // Upload the pixmap to its own texture.
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some("AnyRender uploaded image"),
+        size: Extent3d {
+            width: u32::from(pixmap.width()),
+            height: u32::from(pixmap.height()),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        pixmap.data_as_u8_slice(),
+        TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * u32::from(pixmap.width())),
+            rows_per_image: Some(u32::from(pixmap.height())),
+        },
+        Extent3d {
+            width: u32::from(pixmap.width()),
+            height: u32::from(pixmap.height()),
+            depth_or_array_layers: 1,
+        },
+    );
+
+    // Bind the texture and remember the TextureId in the cache.
+    let resource_id = ResourceId::new();
+    texture_bindings.insert(
+        resource_id,
+        texture.create_view(&TextureViewDescriptor::default()),
+    );
+    let texture_id = TextureId(resource_id.into_ffi());
+    cache.insert(
+        &image.data,
+        texture_id,
+        may_have_transparency,
+        image.width,
+        image.height,
+    );
+
+    Some((texture_id, may_have_transparency))
 }
 
 pub struct VelloGpuScenePainter<'s> {
@@ -315,15 +398,14 @@ impl VelloGpuScenePainter<'_> {
             layer_stack: Vec::with_capacity(16),
             image_manager,
             device_handle,
-            glyph_caching: false,
+            glyph_caching: true,
         }
     }
 
-    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    /// Enable or disable caching of rasterized glyphs in the glyph atlas.
     ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
+    /// Defaults to `true`. Turning it off is meant for debugging and tests: every outline and
+    /// COLR glyph is then drawn as paths, and a bitmap glyph from a texture of its own.
     pub fn with_glyph_caching(mut self, enabled: bool) -> Self {
         self.glyph_caching = enabled;
         self
@@ -600,52 +682,34 @@ impl PaintScene for VelloGpuScenePainter<'_> {
         }
         let paint = self.convert_paint(paint);
         self.scene.set_paint(paint);
-        self.scene.reset_paint_transform();
-        self.scene.set_transform(transform);
-
-        self.scene
-            .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
-        let glyph_caching = anti_aliasing.is_enabled()
-            && self.glyph_caching
-            && supports_glyph_caching(transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
-        let style: StyleRef<'a> = style.into();
-        match style {
-            StyleRef::Fill(fill) => {
-                self.scene.set_fill_rule(fill);
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
-            }
-            StyleRef::Stroke(stroke) => {
-                self.scene.set_stroke(stroke.clone());
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
-            }
-        }
-        self.scene.set_aliasing_threshold(None);
+        let ImageManager {
+            device,
+            queue,
+            cache,
+            texture_bindings,
+            glyphs: glyph_atlas,
+        } = &mut self.image_manager;
+        glyph_atlas.draw_glyphs(
+            self.scene,
+            &mut |image| upload_image(device, queue, cache, texture_bindings, image),
+            self.glyph_caching,
+            font,
+            font_size,
+            hint,
+            normalized_coords,
+            embolden,
+            style.into(),
+            transform,
+            glyph_transform,
+            glyphs.map(|g| anyrender_glyph::Glyph {
+                id: g.id,
+                x: snap.map_or(g.x, |snap| snap.x(g.x)),
+                y: snap.map_or(g.y, |snap| snap.y(g.y)),
+            }),
+            anti_aliasing,
+        );
+        self.image_manager.upload_glyphs();
     }
     fn draw_box_shadow(
         &mut self,
