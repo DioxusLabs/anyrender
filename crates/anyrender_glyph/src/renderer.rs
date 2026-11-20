@@ -8,7 +8,7 @@ use crate::glyph::{
     CachedGlyphType, GlyphBitmap, GlyphColr, GlyphOutline, GlyphType, OutlineCacheSession,
     PreparedGlyph,
 };
-use crate::interface::GlyphRenderer;
+use crate::interface::{GlyphCache, GlyphRenderer};
 use crate::key::{GlyphCacheKey, subpixel_offset};
 use crate::raster::{GlyphCommands, GlyphCommandsInner, GlyphRaster, RasterMetrics};
 use crate::util::AffineExt;
@@ -19,10 +19,11 @@ use kurbo::{Affine, BezPath, Rect, Shape};
 use peniko::ImageQuality;
 use peniko::color::{AlphaColor, Srgb};
 
-/// Fill a prepared glyph, using the renderer's raster cache when possible and falling
+/// Fill a prepared glyph, using the raster cache when possible and falling
 /// back to direct rendering otherwise.
-pub(crate) fn fill_glyph(
-    renderer: &mut impl GlyphRenderer,
+pub(crate) fn fill_glyph<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
     prepared_glyph: PreparedGlyph<'_>,
     outline_cache: &mut OutlineCacheSession<'_>,
 ) {
@@ -38,7 +39,7 @@ pub(crate) fn fill_glyph(
             }
 
             if let Some(key) = cache_key
-                && cache_and_render_outline(renderer, &glyph, transform, &key)
+                && cache_and_render_outline(renderer, cache, &glyph, transform, &key)
             {
                 return;
             }
@@ -53,7 +54,8 @@ pub(crate) fn fill_glyph(
         }
         GlyphType::Bitmap(glyph) => {
             let glyph = match cache_key {
-                Some(key) => match cache_and_render_bitmap(renderer, glyph, transform, &key) {
+                Some(key) => match cache_and_render_bitmap(renderer, cache, glyph, transform, &key)
+                {
                     Ok(()) => return,
                     Err(glyph) => glyph,
                 },
@@ -64,7 +66,7 @@ pub(crate) fn fill_glyph(
         }
         GlyphType::Colr(glyph) => {
             if let Some(key) = cache_key
-                && cache_and_render_colr(renderer, &glyph, transform, &key, outline_cache)
+                && cache_and_render_colr(renderer, cache, &glyph, transform, &key, outline_cache)
             {
                 return;
             }
@@ -77,8 +79,9 @@ pub(crate) fn fill_glyph(
 
 /// Stroke a prepared glyph. Stroked outlines are never cached; bitmap and COLR glyphs are
 /// always filled.
-pub(crate) fn stroke_glyph(
-    renderer: &mut impl GlyphRenderer,
+pub(crate) fn stroke_glyph<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
     prepared_glyph: PreparedGlyph<'_>,
     outline_cache: &mut OutlineCacheSession<'_>,
 ) {
@@ -97,7 +100,7 @@ pub(crate) fn stroke_glyph(
             );
         }
         GlyphType::Bitmap(_) | GlyphType::Colr(_) => {
-            fill_glyph(renderer, prepared_glyph, outline_cache);
+            fill_glyph(renderer, cache, prepared_glyph, outline_cache);
         }
     }
 }
@@ -137,7 +140,7 @@ fn render_uncached_bitmap_glyph(
 ) {
     let state = renderer.save_state();
     renderer.set_transform(outline_transform);
-    renderer.draw_pixmap(&glyph.key, glyph.pixmap, &glyph.area);
+    renderer.draw_pixmap(glyph.pixmap, &glyph.area);
     renderer.restore_state(state);
 }
 
@@ -238,8 +241,9 @@ fn render_from_cache<R: GlyphRenderer>(
 ///
 /// The caller is responsible for checking the cache first and only calling this on a miss.
 /// Returns `false` if the glyph has to be drawn uncached.
-fn cache_and_render_outline(
-    renderer: &mut impl GlyphRenderer,
+fn cache_and_render_outline<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
     glyph: &GlyphOutline,
     outline_transform: Affine,
     key: &GlyphCacheKey,
@@ -265,7 +269,7 @@ fn cache_and_render_outline(
         path: &glyph.path,
         transform,
     }));
-    let Ok(cached) = renderer.cache_glyph(key, metrics, raster) else {
+    let Ok(cached) = cache.store(key, metrics, raster) else {
         return false;
     };
 
@@ -285,8 +289,9 @@ fn cache_and_render_outline(
     clippy::result_large_err,
     reason = "the glyph is handed back by value so its pixmap is not copied; not large on 32-bit targets"
 )]
-fn cache_and_render_bitmap(
-    renderer: &mut impl GlyphRenderer,
+fn cache_and_render_bitmap<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
     glyph: GlyphBitmap,
     transform: Affine,
     key: &GlyphCacheKey,
@@ -301,13 +306,9 @@ fn cache_and_render_bitmap(
         bearing_x: 0,
         bearing_y: 0,
     };
-    let GlyphBitmap {
-        pixmap,
-        area,
-        key: bitmap_key,
-    } = glyph;
+    let GlyphBitmap { pixmap, area } = glyph;
 
-    match renderer.cache_glyph(key, metrics, GlyphRaster::Pixmap(pixmap)) {
+    match cache.store(key, metrics, GlyphRaster::Pixmap(pixmap)) {
         Ok(cached) => {
             render_from_cache(
                 renderer,
@@ -319,13 +320,9 @@ fn cache_and_render_bitmap(
             );
             Ok(())
         }
-        Err(GlyphRaster::Pixmap(pixmap)) => Err(GlyphBitmap {
-            pixmap,
-            area,
-            key: bitmap_key,
-        }),
+        Err(GlyphRaster::Pixmap(pixmap)) => Err(GlyphBitmap { pixmap, area }),
         Err(GlyphRaster::Commands(_)) => {
-            unreachable!("a renderer must hand back the raster it was given")
+            unreachable!("a cache must hand back the raster it was given")
         }
     }
 }
@@ -333,8 +330,9 @@ fn cache_and_render_bitmap(
 /// Store a COLR glyph in the raster cache and render it from there.
 ///
 /// Returns `false` if the glyph has to be drawn uncached.
-fn cache_and_render_colr(
-    renderer: &mut impl GlyphRenderer,
+fn cache_and_render_colr<R: GlyphRenderer>(
+    renderer: &mut R,
+    cache: &mut impl GlyphCache<R::CachedGlyph>,
     glyph: &GlyphColr<'_>,
     outline_transform: Affine,
     key: &GlyphCacheKey,
@@ -355,7 +353,7 @@ fn cache_and_render_colr(
         context_color: key.context_color,
         outline_cache,
     }));
-    let Ok(cached) = renderer.cache_glyph(key, metrics, raster) else {
+    let Ok(cached) = cache.store(key, metrics, raster) else {
         return false;
     };
 

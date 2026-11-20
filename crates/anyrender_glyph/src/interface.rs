@@ -81,23 +81,17 @@ pub trait DrawSink {
     fn height(&self) -> u16;
 }
 
-/// A stateful renderer that can draw sequences of cached and uncached glyphs.
+/// A stateful renderer that can draw sequences of glyphs.
 ///
-/// The raster cache methods have default implementations that disable caching. A renderer that
-/// caches glyphs overrides all four of [`glyph_cache_config`](Self::glyph_cache_config),
-/// [`cached_glyph`](Self::cached_glyph), [`cache_glyph`](Self::cache_glyph) and
-/// [`draw_cached_glyph`](Self::draw_cached_glyph). It owns the storage; this crate decides which
-/// glyphs are cacheable and under which [`GlyphCacheKey`].
-///
-/// The cache is asked for a glyph once per draw: looking a glyph up or storing it returns a
-/// [`CachedGlyph`](Self::CachedGlyph), which is all the renderer gets to draw it.
+/// It draws glyphs; it does not store them. Rasterized glyphs are kept by a [`GlyphCache`],
+/// which hands out [`CachedGlyph`](Self::CachedGlyph)s for the renderer to draw.
 pub trait GlyphRenderer: DrawSink {
     /// The type of state used by the renderer.
     type SavedState;
 
-    /// What the renderer needs to draw a glyph from its raster cache without looking it up
-    /// again, such as a handle to its image or its place in an atlas. `()` for a renderer
-    /// that does not cache glyphs.
+    /// What the renderer needs to draw a glyph that was rasterized earlier, such as a handle
+    /// to its image or its place in an atlas. `()` for a renderer that can't draw cached
+    /// glyphs.
     type CachedGlyph;
 
     /// Save the current state.
@@ -118,52 +112,74 @@ pub trait GlyphRenderer: DrawSink {
     /// Cached outline glyphs are coloured by tinting, which only works for solid colours.
     fn has_solid_paint(&self) -> bool;
 
-    /// Draw a bitmap glyph that was not served from the raster cache.
+    /// Draw a bitmap glyph that is not in a [`GlyphCache`].
     ///
     /// The pixmap's top-left corner is at the origin of the current transform, with one pixel
-    /// per unit, and only `area` is filled. `key` identifies the bitmap, so that a renderer which
-    /// has to upload pixels before it can draw them can reuse an earlier upload.
-    fn draw_pixmap(&mut self, key: &GlyphCacheKey, pixmap: Pixmap, area: &Rect);
+    /// per unit, and only `area` is filled.
+    fn draw_pixmap(&mut self, pixmap: Pixmap, area: &Rect);
 
-    /// The raster cache settings, or `None` if this renderer does not cache glyphs.
-    fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
-        None
-    }
-
-    /// Look up a glyph in the raster cache, marking it as used.
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, Self::CachedGlyph)> {
-        let _ = key;
-        None
-    }
-
-    /// Rasterize a glyph and store it in the raster cache under `key`.
+    /// Draw a glyph that a [`GlyphCache`] holds.
     ///
-    /// `metrics` gives the size of the image. Returns the raster back if the glyph can't be
-    /// drawn from an image (for example because the cache is full and the renderer can only
-    /// draw images that are in it), in which case it is drawn uncached.
-    fn cache_glyph<'a>(
-        &mut self,
-        key: &GlyphCacheKey,
-        metrics: RasterMetrics,
-        raster: GlyphRaster<'a>,
-    ) -> Result<Self::CachedGlyph, GlyphRaster<'a>> {
-        let _ = (key, metrics);
-        Err(raster)
-    }
-
-    /// Draw a glyph from the raster cache.
-    ///
-    /// Only called with what [`cached_glyph`](Self::cached_glyph) or
-    /// [`cache_glyph`](Self::cache_glyph) just returned. The cached image's top-left
-    /// corner is at the origin of the current transform, with one pixel per unit, and only
-    /// `area` is filled. With a `tint`, the image is an alpha mask to be drawn in that colour.
+    /// Only called with what [`GlyphCache::get`] or [`GlyphCache::store`] just returned. The
+    /// cached image's top-left corner is at the origin of the current transform, with one
+    /// pixel per unit, and only `area` is filled. With a `tint`, the image is an alpha mask to
+    /// be drawn in that colour.
     fn draw_cached_glyph(
         &mut self,
         glyph: &Self::CachedGlyph,
         area: &Rect,
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
-    ) {
-        let _ = (glyph, area, quality, tint);
+    );
+}
+
+/// A store of rasterized glyphs.
+///
+/// The store owns the images and rasterizes the glyphs it is given; this crate decides which
+/// glyphs are cacheable and under which [`GlyphCacheKey`]. `G` is what a renderer needs to
+/// draw a stored glyph: [`GlyphRenderer::CachedGlyph`].
+///
+/// The cache is asked for a glyph once per draw: looking a glyph up or storing it returns a
+/// `G`, which is all the renderer gets to draw it.
+pub trait GlyphCache<G> {
+    /// The raster cache settings, or `None` if glyphs are not to be cached.
+    fn config(&self) -> Option<GlyphCacheConfig>;
+
+    /// Look up a glyph, marking it as used.
+    fn get(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, G)>;
+
+    /// Rasterize a glyph and store it under `key`.
+    ///
+    /// `metrics` gives the size of the image. Returns the raster back if the glyph can't be
+    /// drawn from an image (for example because the cache is full and the renderer can only
+    /// draw images that are in it), in which case it is drawn uncached.
+    fn store<'a>(
+        &mut self,
+        key: &GlyphCacheKey,
+        metrics: RasterMetrics,
+        raster: GlyphRaster<'a>,
+    ) -> Result<G, GlyphRaster<'a>>;
+}
+
+/// A [`GlyphCache`] that caches nothing: every glyph is drawn uncached.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoGlyphCache;
+
+impl<G> GlyphCache<G> for NoGlyphCache {
+    fn config(&self) -> Option<GlyphCacheConfig> {
+        None
+    }
+
+    fn get(&mut self, _: &GlyphCacheKey) -> Option<(RasterMetrics, G)> {
+        None
+    }
+
+    fn store<'a>(
+        &mut self,
+        _: &GlyphCacheKey,
+        _: RasterMetrics,
+        raster: GlyphRaster<'a>,
+    ) -> Result<G, GlyphRaster<'a>> {
+        Err(raster)
     }
 }

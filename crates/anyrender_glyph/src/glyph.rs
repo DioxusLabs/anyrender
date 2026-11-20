@@ -228,8 +228,6 @@ pub(crate) struct GlyphBitmap {
     pub(crate) pixmap: Pixmap,
     /// The rectangular area that should be filled with the bitmap when painting.
     pub(crate) area: Rect,
-    /// Identifies the bitmap, whether or not it is eligible for the raster cache.
-    pub(crate) key: GlyphCacheKey,
 }
 
 /// Basic metadata about a font.
@@ -371,22 +369,24 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
     ///
     /// Returns an error if at least one glyph failed to render properly. All
     /// unaffected glyphs are still rendered when an error is returned.
-    pub fn fill_glyphs(
+    pub fn fill_glyphs<R: crate::GlyphRenderer>(
         &mut self,
-        renderer: &mut impl crate::GlyphRenderer,
+        renderer: &mut R,
+        cache: &mut impl crate::GlyphCache<R::CachedGlyph>,
     ) -> Result<(), GlyphRenderError> {
-        self.draw_glyphs(Style::Fill, renderer)
+        self.draw_glyphs(Style::Fill, renderer, cache)
     }
 
     /// Strokes the glyphs with the current configuration.
     ///
     /// Returns an error if at least one glyph failed to render properly. All
     /// unaffected glyphs are still rendered when an error is returned.
-    pub fn stroke_glyphs(
+    pub fn stroke_glyphs<R: crate::GlyphRenderer>(
         &mut self,
-        renderer: &mut impl crate::GlyphRenderer,
+        renderer: &mut R,
+        cache: &mut impl crate::GlyphCache<R::CachedGlyph>,
     ) -> Result<(), GlyphRenderError> {
-        self.draw_glyphs(Style::Stroke, renderer)
+        self.draw_glyphs(Style::Stroke, renderer, cache)
     }
 
     /// Core rendering loop shared by [`fill_glyphs`](Self::fill_glyphs) and
@@ -396,10 +396,11 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
     /// The first matching representation wins. Within each branch the raster cache
     /// is checked before falling through to the slow path (rasterization / path
     /// construction).
-    fn draw_glyphs(
+    fn draw_glyphs<R: crate::GlyphRenderer>(
         &mut self,
         style: Style,
-        renderer: &mut impl crate::GlyphRenderer,
+        renderer: &mut R,
+        cache: &mut impl crate::GlyphCache<R::CachedGlyph>,
     ) -> Result<(), GlyphRenderError> {
         let font_ref = self.prepared_run.font.as_skrifa();
 
@@ -428,8 +429,8 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
         let hinted = hinting_instance.is_some();
 
-        let colr_bitmap_cache_enabled = renderer
-            .glyph_cache_config()
+        let colr_bitmap_cache_enabled = cache
+            .config()
             .is_some_and(|config| draw_props.font_size <= config.max_cached_font_size);
         let outline_cache_enabled = colr_bitmap_cache_enabled
             // Due to the various parameters that would need to be considered in the cache key,
@@ -487,7 +488,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 )
             });
             if let Some(ref key) = outline_cache_key
-                && let Some((metrics, cached)) = renderer.cached_glyph(key)
+                && let Some((metrics, cached)) = cache.get(key)
             {
                 render_cached_glyph(
                     renderer,
@@ -539,7 +540,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 });
 
                 if let Some(ref key) = cache_key
-                    && let Some((raster_metrics, cached)) = renderer.cached_glyph(key)
+                    && let Some((raster_metrics, cached)) = cache.get(key)
                 {
                     // Use fractional scaled_bbox dimensions to preserve sub-pixel accuracy.
                     let area = Rect::new(
@@ -575,10 +576,10 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 };
                 match style {
                     Style::Fill => {
-                        fill_glyph(renderer, prepared_glyph, &mut outline_cache_session);
+                        fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
                     }
                     Style::Stroke => {
-                        stroke_glyph(renderer, prepared_glyph, &mut outline_cache_session);
+                        stroke_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
                     }
                 }
                 continue;
@@ -626,7 +627,9 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
                 // Bitmaps are not hinted and have no sub-pixel offset or
                 // context color; variation coords are irrelevant for fixed strikes.
-                let bitmap_key = GlyphCacheKey {
+                let cache_key = (colr_bitmap_cache_enabled
+                    && supports_raster_caching(&outline_transform, CachedGlyphType::Bitmap))
+                .then(|| GlyphCacheKey {
                     font_id: font_info.id,
                     font_index: font_info.index,
                     glyph_id: glyph.id,
@@ -641,13 +644,10 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                     embolden_miter_limit_bits: 4.0_f32.to_bits(),
                     embolden_tolerance_bits: 0.1_f32.to_bits(),
                     var_coords: SmallVec::new(),
-                };
-                let cache_key = (colr_bitmap_cache_enabled
-                    && supports_raster_caching(&outline_transform, CachedGlyphType::Bitmap))
-                .then(|| bitmap_key.clone());
+                });
 
                 if let Some(ref key) = cache_key
-                    && let Some((metrics, cached)) = renderer.cached_glyph(key)
+                    && let Some((metrics, cached)) = cache.get(key)
                 {
                     render_cached_glyph(
                         renderer,
@@ -660,7 +660,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 }
 
                 // Cache miss — wrap the decoded pixmap for rendering.
-                let glyph_type = create_bitmap_glyph(pixmap, bitmap_key);
+                let glyph_type = create_bitmap_glyph(pixmap);
 
                 let prepared_glyph = PreparedGlyph {
                     glyph_type,
@@ -670,10 +670,10 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 };
                 match style {
                     Style::Fill => {
-                        fill_glyph(renderer, prepared_glyph, &mut outline_cache_session);
+                        fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
                     }
                     Style::Stroke => {
-                        stroke_glyph(renderer, prepared_glyph, &mut outline_cache_session);
+                        stroke_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
                     }
                 }
                 continue;
@@ -718,9 +718,11 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
                 cache_key: outline_cache_key,
             };
             match style {
-                Style::Fill => fill_glyph(renderer, prepared_glyph, &mut outline_cache_session),
+                Style::Fill => {
+                    fill_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session)
+                }
                 Style::Stroke => {
-                    stroke_glyph(renderer, prepared_glyph, &mut outline_cache_session);
+                    stroke_glyph(renderer, cache, prepared_glyph, &mut outline_cache_session);
                 }
             }
         }
@@ -1262,7 +1264,7 @@ fn calculate_outline_transform(
 ///
 /// This wraps the pixmap in a `GlyphType::Bitmap` with its display area,
 /// without any positioning information.
-fn create_bitmap_glyph(pixmap: Pixmap, key: GlyphCacheKey) -> GlyphType<'static> {
+fn create_bitmap_glyph(pixmap: Pixmap) -> GlyphType<'static> {
     // Scale factor already accounts for ppem, so we can just draw in the size of the
     // actual image
     let area = Rect::new(
@@ -1272,7 +1274,7 @@ fn create_bitmap_glyph(pixmap: Pixmap, key: GlyphCacheKey) -> GlyphType<'static>
         f64::from(pixmap.height()),
     );
 
-    GlyphType::Bitmap(GlyphBitmap { pixmap, area, key })
+    GlyphType::Bitmap(GlyphBitmap { pixmap, area })
 }
 
 /// Decode a PNG into a premultiplied RGBA8 pixmap.
@@ -2276,7 +2278,7 @@ fn x_y_advances(transform: &Affine) -> (Vec2, Vec2) {
 mod tests {
     use super::*;
     use crate::cache::GlyphRasterCache;
-    use crate::interface::{DrawSink, GlyphPaint, GlyphRenderer};
+    use crate::interface::{DrawSink, GlyphCache, GlyphPaint, GlyphRenderer};
     use crate::peniko::color::{AlphaColor, Srgb};
     use crate::peniko::{BlendMode, Blob, ImageQuality};
     use crate::raster::{GlyphCacheConfig, GlyphRaster, RasterMetrics};
@@ -2298,24 +2300,28 @@ mod tests {
         Bitmap,
     }
 
-    /// A renderer that draws nothing, but keeps a raster cache and counts what it is asked to do.
+    /// A renderer that draws nothing, but counts what it is asked to do.
     #[derive(Default)]
     struct TestRenderer {
-        cache_enabled: bool,
-        cache: GlyphRasterCache<()>,
         /// Number of fills, strokes and pixmap draws that did not come from the cache.
         uncached_draws: usize,
         /// Number of draws from the cache.
         cached_draws: usize,
-        /// Number of raster cache lookups.
-        cache_lookups: usize,
-        /// Whether a glyph is currently being rasterized into the cache.
-        rasterizing: bool,
+    }
+
+    /// A raster cache that stores no pixels, but counts what it is asked to do.
+    #[derive(Default)]
+    struct TestCache {
+        enabled: bool,
+        images: GlyphRasterCache<()>,
+        /// Number of lookups.
+        lookups: usize,
     }
 
     #[derive(Default)]
     struct TestResources {
         renderer: TestRenderer,
+        cache: TestCache,
         prep_cache: GlyphPrepCache,
     }
 
@@ -2327,15 +2333,11 @@ mod tests {
         fn set_paint_transform(&mut self, _t: Affine) {}
 
         fn fill_path(&mut self, _path: &BezPath) {
-            if !self.rasterizing {
-                self.uncached_draws += 1;
-            }
+            self.uncached_draws += 1;
         }
 
         fn fill_rect(&mut self, _rect: &Rect) {
-            if !self.rasterizing {
-                self.uncached_draws += 1;
-            }
+            self.uncached_draws += 1;
         }
 
         fn push_clip_layer(&mut self, _clip: &BezPath) {}
@@ -2373,20 +2375,32 @@ mod tests {
             true
         }
 
-        fn draw_pixmap(&mut self, _key: &GlyphCacheKey, _pixmap: Pixmap, _area: &Rect) {
+        fn draw_pixmap(&mut self, _pixmap: Pixmap, _area: &Rect) {
             self.uncached_draws += 1;
         }
 
-        fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
-            self.cache_enabled.then(GlyphCacheConfig::default)
+        fn draw_cached_glyph(
+            &mut self,
+            _glyph: &(),
+            _area: &Rect,
+            _quality: ImageQuality,
+            _tint: Option<AlphaColor<Srgb>>,
+        ) {
+            self.cached_draws += 1;
+        }
+    }
+
+    impl GlyphCache<()> for TestCache {
+        fn config(&self) -> Option<GlyphCacheConfig> {
+            self.enabled.then(GlyphCacheConfig::default)
         }
 
-        fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, ())> {
-            self.cache_lookups += 1;
-            self.cache.get(key).map(|(_, metrics)| (metrics, ()))
+        fn get(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, ())> {
+            self.lookups += 1;
+            self.images.get(key).map(|(_, metrics)| (metrics, ()))
         }
 
-        fn cache_glyph<'a>(
+        fn store<'a>(
             &mut self,
             key: &GlyphCacheKey,
             metrics: RasterMetrics,
@@ -2400,26 +2414,14 @@ mod tests {
                     );
                 }
                 GlyphRaster::Commands(mut commands) => {
-                    self.rasterizing = true;
-                    commands.draw(self);
-                    self.rasterizing = false;
+                    commands.draw(&mut TestRenderer::default());
                 }
             }
             let bytes = usize::from(metrics.width) * usize::from(metrics.height) * 4;
-            self.cache
+            self.images
                 .insert(key.clone(), (), metrics, bytes)
                 .expect("the test cache is large enough");
             Ok(())
-        }
-
-        fn draw_cached_glyph(
-            &mut self,
-            _glyph: &(),
-            _area: &Rect,
-            _quality: ImageQuality,
-            _tint: Option<AlphaColor<Srgb>>,
-        ) {
-            self.cached_draws += 1;
         }
     }
 
@@ -2456,7 +2458,7 @@ mod tests {
         transform: Affine,
         resources: &mut TestResources,
     ) {
-        resources.renderer.cache_enabled = cache_enabled;
+        resources.cache.enabled = cache_enabled;
         let mut run = GlyphRun {
             font: font.clone(),
             font_size: 20.0,
@@ -2470,8 +2472,8 @@ mod tests {
         .build(core::iter::once(glyph), resources.prep_cache.as_mut());
 
         let result = match style {
-            Style::Fill => run.fill_glyphs(&mut resources.renderer),
-            Style::Stroke => run.stroke_glyphs(&mut resources.renderer),
+            Style::Fill => run.fill_glyphs(&mut resources.renderer, &mut resources.cache),
+            Style::Stroke => run.stroke_glyphs(&mut resources.renderer, &mut resources.cache),
         };
         assert_eq!(result, Ok(()));
     }
@@ -2494,15 +2496,15 @@ mod tests {
 
         draw_test_glyph(&font, glyph, true, style, &mut resources);
 
-        assert_eq!(resources.renderer.cache.len(), 1);
-        assert_eq!(resources.renderer.cache.stats().insertions, 1);
+        assert_eq!(resources.cache.images.len(), 1);
+        assert_eq!(resources.cache.images.stats().insertions, 1);
         assert_eq!(resources.renderer.cached_draws, 1);
         assert_eq!(resources.renderer.uncached_draws, 0);
 
         draw_test_glyph(&font, glyph, true, style, &mut resources);
 
-        assert_eq!(resources.renderer.cache.len(), 1);
-        assert_eq!(resources.renderer.cache.stats().insertions, 1);
+        assert_eq!(resources.cache.images.len(), 1);
+        assert_eq!(resources.cache.images.stats().insertions, 1);
         assert_eq!(resources.renderer.cached_draws, 2);
         assert_eq!(resources.renderer.uncached_draws, 0);
     }
@@ -2515,8 +2517,8 @@ mod tests {
         for _ in 0..2 {
             draw_test_glyph(&font, glyph, cache_enabled, style, &mut resources);
 
-            assert_eq!(resources.renderer.cache.len(), 0);
-            assert_eq!(resources.renderer.cache.stats().misses, 0);
+            assert_eq!(resources.cache.images.len(), 0);
+            assert_eq!(resources.cache.images.stats().misses, 0);
             assert_eq!(resources.renderer.cached_draws, 0);
             assert!(resources.renderer.uncached_draws > 0);
         }
@@ -2539,9 +2541,9 @@ mod tests {
             let mut resources = TestResources::default();
 
             draw_test_glyph(&font, glyph, true, Style::Fill, &mut resources);
-            assert_eq!(resources.renderer.cache_lookups, lookups, "miss");
+            assert_eq!(resources.cache.lookups, lookups, "miss");
             draw_test_glyph(&font, glyph, true, Style::Fill, &mut resources);
-            assert_eq!(resources.renderer.cache_lookups, 2 * lookups, "hit");
+            assert_eq!(resources.cache.lookups, 2 * lookups, "hit");
             assert_eq!(resources.renderer.cached_draws, 2);
         }
     }
@@ -2563,8 +2565,8 @@ mod tests {
                 draw_test_glyph(&font, glyph, cache_enabled, style, &mut resources);
             }
         }
-        assert_eq!(resources.renderer.cache.len(), 0);
-        assert_eq!(resources.renderer.cache.stats().insertions, 0);
+        assert_eq!(resources.cache.images.len(), 0);
+        assert_eq!(resources.cache.images.stats().insertions, 0);
         assert_eq!(resources.renderer.cached_draws, 0);
         assert_eq!(resources.renderer.uncached_draws, 0);
     }
@@ -2582,7 +2584,7 @@ mod tests {
         draw_test_glyph_with(&font, glyph, true, Style::Fill, transform, &mut resources);
         assert_eq!(resources.renderer.cached_draws, 1);
         assert!(resources.renderer.uncached_draws > 0);
-        assert_eq!(resources.renderer.cache.len(), 1);
+        assert_eq!(resources.cache.images.len(), 1);
     }
 
     #[test]
@@ -2680,7 +2682,7 @@ mod tests {
         .build(core::iter::once(glyph), resources.prep_cache.as_mut());
 
         assert_eq!(
-            run.fill_glyphs(&mut resources.renderer),
+            run.fill_glyphs(&mut resources.renderer, &mut resources.cache),
             Err(GlyphRenderError {
                 first_skipped: SkippedGlyph {
                     index: 0,

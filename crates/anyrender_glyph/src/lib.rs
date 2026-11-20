@@ -9,9 +9,10 @@
 //! glyphs) for a renderer that implements [`GlyphRenderer`].
 //!
 //! It does not rasterize and it does not store rasterized glyphs. Instead it decides which
-//! glyphs can be served from a raster cache and under which [`GlyphCacheKey`], and asks the
-//! renderer to look them up, store them and draw them. [`GlyphRasterCache`] is a ready-made
-//! store for renderers that keep one image per glyph.
+//! glyphs can be served from a raster cache and under which [`GlyphCacheKey`], asks a
+//! [`GlyphCache`] to look them up and store them, and asks the renderer to draw them.
+//! [`GlyphRasterCache`] is a ready-made store for caches that keep one image per glyph, and
+//! [`NoGlyphCache`] draws every glyph uncached.
 //!
 //! # Features
 //!
@@ -66,6 +67,6 @@ pub use glyph::{
     GlyphRunBackend, GlyphRunBuilder, GlyphRunRenderer, GlyphSkipReason, HintCache, HintKey,
     NormalizedCoord, OutlineCache, SkippedGlyph,
 };
-pub use interface::{DrawSink, GlyphPaint, GlyphRenderer};
+pub use interface::{DrawSink, GlyphCache, GlyphPaint, GlyphRenderer, NoGlyphCache};
 pub use key::GlyphCacheKey;
 pub use raster::{GlyphCacheConfig, GlyphCommands, GlyphRaster, RasterMetrics};
