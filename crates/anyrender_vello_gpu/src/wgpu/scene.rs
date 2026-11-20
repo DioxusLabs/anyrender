@@ -14,10 +14,10 @@ use vello_common::{
 };
 use vello_gpu::TextureBindings;
 use wgpu::{
-    BufferDescriptor, BufferUsages, COPY_BYTES_PER_ROW_ALIGNMENT, CommandEncoderDescriptor, Device,
-    Extent3d, Origin3d, Queue, TexelCopyBufferInfo, TexelCopyBufferLayout, TexelCopyTextureInfo,
-    Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
-    TextureView, TextureViewDescriptor,
+    Buffer, BufferDescriptor, BufferSize, BufferUsages, COPY_BYTES_PER_ROW_ALIGNMENT,
+    CommandEncoderDescriptor, Device, Extent3d, Origin3d, Queue, TexelCopyBufferInfo,
+    TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect, TextureDescriptor,
+    TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor,
 };
 use wgpu_context::DeviceHandle;
 
@@ -184,7 +184,14 @@ impl ExternalTextures {
 /// The glyph caches of a wgpu renderer, with rasterized glyphs packed into one texture.
 ///
 /// Call `clear` when the device it was used with is replaced.
-pub type GlyphAtlas = crate::common::GlyphAtlas<Texture>;
+pub type GlyphAtlas = crate::common::GlyphAtlas<AtlasTexture>;
+
+/// The texture of a [`GlyphAtlas`], and the buffer that new glyphs are copied to it from.
+pub struct AtlasTexture {
+    texture: Texture,
+    /// Kept between frames, and replaced by a larger one when a frame's glyphs don't fit.
+    upload_buffer: Option<Buffer>,
+}
 
 pub struct ImageManager<'a> {
     pub(crate) device: &'a Device,
@@ -241,7 +248,10 @@ impl<'a> ImageManager<'a> {
             self.glyphs.texture_id(),
             texture.create_view(&TextureViewDescriptor::default()),
         );
-        self.glyphs.set_texture(texture);
+        self.glyphs.set_texture(AtlasTexture {
+            texture,
+            upload_buffer: None,
+        });
     }
 
     /// Write the glyphs rasterized since the last call to the glyph atlas texture.
@@ -251,9 +261,10 @@ impl<'a> ImageManager<'a> {
     pub fn flush_glyph_uploads(&mut self) {
         self.ensure_glyph_texture();
         let uploads = self.glyphs.take_uploads();
-        let Some(texture) = self.glyphs.texture() else {
+        let Some(atlas) = self.glyphs.texture_mut() else {
             return;
         };
+        let texture = &atlas.texture;
         let destination = |upload: &crate::common::AtlasUpload| TexelCopyTextureInfo {
             texture,
             mip_level: 0,
@@ -290,6 +301,9 @@ impl<'a> ImageManager<'a> {
         // `Queue::write_texture` allocates a staging buffer per call, which costs more than
         // rasterizing a glyph. All glyphs go into one buffer and are copied from there. Rows
         // in a buffer have to be aligned, so each glyph's rows are padded.
+        //
+        // The buffer is kept between frames. A buffer that is created mapped is filled with
+        // zeros first, which `Queue::write_buffer_with` does not do.
         let row_bytes = |upload: &crate::common::AtlasUpload| {
             (4 * u32::from(upload.rect.width)).next_multiple_of(COPY_BYTES_PER_ROW_ALIGNMENT)
         };
@@ -297,22 +311,34 @@ impl<'a> ImageManager<'a> {
             .iter()
             .map(|upload| u64::from(row_bytes(upload)) * u64::from(upload.rect.height))
             .sum();
-        let buffer = self.device.create_buffer(&BufferDescriptor {
-            label: Some("AnyRender glyph atlas upload"),
-            size: buffer_size,
-            usage: BufferUsages::COPY_SRC,
-            mapped_at_creation: true,
-        });
+        let Some(write_size) = BufferSize::new(buffer_size) else {
+            return;
+        };
+        if atlas
+            .upload_buffer
+            .as_ref()
+            .is_none_or(|buffer| buffer.size() < buffer_size)
+        {
+            atlas.upload_buffer = Some(self.device.create_buffer(&BufferDescriptor {
+                label: Some("AnyRender glyph atlas upload"),
+                size: buffer_size.next_power_of_two(),
+                usage: BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }));
+        }
+        let buffer = atlas
+            .upload_buffer
+            .as_ref()
+            .expect("the buffer was just created");
+        let Some(mut mapped) = self.queue.write_buffer_with(buffer, 0, write_size) else {
+            return;
+        };
         let mut encoder = self
             .device
             .create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("AnyRender glyph atlas upload"),
             });
         {
-            let mut mapped = buffer
-                .slice(..)
-                .get_mapped_range_mut()
-                .expect("the buffer was created mapped");
             let mut offset = 0_usize;
             for upload in &uploads {
                 let source_row = 4 * usize::from(upload.rect.width);
@@ -325,7 +351,7 @@ impl<'a> ImageManager<'a> {
                 }
                 encoder.copy_buffer_to_texture(
                     TexelCopyBufferInfo {
-                        buffer: &buffer,
+                        buffer,
                         layout: TexelCopyBufferLayout {
                             offset: offset as u64,
                             bytes_per_row: Some(row as u32),
@@ -338,7 +364,8 @@ impl<'a> ImageManager<'a> {
                 offset += row * usize::from(upload.rect.height);
             }
         }
-        buffer.unmap();
+        // The write is queued when the view is dropped, ahead of the copies.
+        drop(mapped);
         self.queue.submit([encoder.finish()]);
     }
 
