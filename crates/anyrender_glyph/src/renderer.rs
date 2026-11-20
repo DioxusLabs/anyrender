@@ -134,12 +134,22 @@ pub(crate) enum DeferredGlyph<C> {
 
 /// Rasterize the deferred glyphs that missed the raster cache as one batch, then draw all of
 /// them in order.
+///
+/// Drawing a cached glyph changes the renderer's transform and paint. The state is saved once
+/// for consecutive cached glyphs, not once per glyph: `saved` holds it while such glyphs are
+/// being drawn, and is restored here before anything that needs the state, and at the end.
+/// `context_color` is the colour of the run's paint.
 pub(crate) fn flush_deferred_glyphs<R: GlyphRenderer>(
     renderer: &mut R,
     cache: &mut impl GlyphCache<R::CachedGlyph>,
     deferred: &mut Vec<DeferredGlyph<R::CachedGlyph>>,
+    saved: &mut Option<R::SavedState>,
+    context_color: AlphaColor<Srgb>,
 ) {
     if deferred.is_empty() {
+        if let Some(state) = saved.take() {
+            renderer.restore_state(state);
+        }
         return;
     }
     // Taken out so that the batch can borrow the glyphs while the renderer is used.
@@ -197,7 +207,17 @@ pub(crate) fn flush_deferred_glyphs<R: GlyphRenderer>(
                 metrics,
                 transform,
                 glyph_type,
-            } => render_cached_glyph(renderer, cached, *metrics, *transform, *glyph_type),
+            } => {
+                saved.get_or_insert_with(|| renderer.save_state());
+                draw_cached_glyph_in_run(
+                    renderer,
+                    cached,
+                    *metrics,
+                    *transform,
+                    *glyph_type,
+                    context_color,
+                );
+            }
             DeferredGlyph::Colr {
                 commands,
                 transform,
@@ -207,15 +227,22 @@ pub(crate) fn flush_deferred_glyphs<R: GlyphRenderer>(
                 let cached = entry
                     .and_then(|(index, metrics)| Some((rasterized.get(index)?.as_ref()?, metrics)));
                 match cached {
-                    Some((cached, metrics)) => render_cached_glyph(
-                        renderer,
-                        cached,
-                        metrics,
-                        *transform,
-                        CachedGlyphType::Colr(*area),
-                    ),
+                    Some((cached, metrics)) => {
+                        saved.get_or_insert_with(|| renderer.save_state());
+                        draw_cached_glyph_in_run(
+                            renderer,
+                            cached,
+                            metrics,
+                            *transform,
+                            CachedGlyphType::Colr(*area),
+                            context_color,
+                        );
+                    }
                     // Drawn uncached, as `render_uncached_colr_glyph` does.
                     None => {
+                        if let Some(state) = saved.take() {
+                            renderer.restore_state(state);
+                        }
                         let state = renderer.save_state();
                         replay(commands, *transform, renderer);
                         renderer.restore_state(state);
@@ -231,23 +258,35 @@ pub(crate) fn flush_deferred_glyphs<R: GlyphRenderer>(
                 let cached = entry
                     .and_then(|(index, metrics)| Some((rasterized.get(index)?.as_ref()?, metrics)));
                 match cached {
-                    Some((cached, metrics)) => render_cached_glyph(
-                        renderer,
-                        cached,
-                        metrics,
-                        *transform,
-                        CachedGlyphType::Outline,
-                    ),
-                    None => fill_uncached_outline_glyph(
-                        renderer,
-                        &glyph.path,
-                        glyph.scale,
-                        *transform,
-                        *paint_transform,
-                    ),
+                    Some((cached, metrics)) => {
+                        saved.get_or_insert_with(|| renderer.save_state());
+                        draw_cached_glyph_in_run(
+                            renderer,
+                            cached,
+                            metrics,
+                            *transform,
+                            CachedGlyphType::Outline,
+                            context_color,
+                        );
+                    }
+                    None => {
+                        if let Some(state) = saved.take() {
+                            renderer.restore_state(state);
+                        }
+                        fill_uncached_outline_glyph(
+                            renderer,
+                            &glyph.path,
+                            glyph.scale,
+                            *transform,
+                            *paint_transform,
+                        );
+                    }
                 }
             }
         }
+    }
+    if let Some(state) = saved.take() {
+        renderer.restore_state(state);
     }
 }
 
@@ -361,6 +400,52 @@ fn render_uncached_colr_glyph(
     renderer.restore_state(state);
 }
 
+/// Draw a glyph from the raster cache as [`render_cached_glyph`] does, but without saving and
+/// restoring the renderer's state. `context_color` is the colour of the run's paint.
+pub(crate) fn draw_cached_glyph_in_run<R: GlyphRenderer>(
+    renderer: &mut R,
+    cached: &R::CachedGlyph,
+    metrics: RasterMetrics,
+    transform: Affine,
+    glyph_type: CachedGlyphType,
+    context_color: AlphaColor<Srgb>,
+) {
+    match glyph_type {
+        CachedGlyphType::Outline => {
+            let [_, _, _, _, tx, ty] = transform.as_coeffs();
+            let rect_transform = Affine::translate((
+                tx.floor() + metrics.bearing_x as f64,
+                ty.floor() + metrics.bearing_y as f64,
+            ));
+            let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
+            let tint = Some(context_color);
+            draw_from_cache(
+                renderer,
+                cached,
+                rect_transform,
+                area,
+                ImageQuality::Low,
+                tint,
+            );
+        }
+        CachedGlyphType::Bitmap => {
+            let area = Rect::new(0.0, 0.0, metrics.width as f64, metrics.height as f64);
+            draw_from_cache(
+                renderer,
+                cached,
+                transform,
+                area,
+                ImageQuality::Medium,
+                None,
+            );
+        }
+        CachedGlyphType::Colr(area) => {
+            let quality = quality_for_skew(&transform);
+            draw_from_cache(renderer, cached, transform, area, quality, None);
+        }
+    }
+}
+
 /// Render a glyph that is present in the renderer's raster cache.
 pub(crate) fn render_cached_glyph<R: GlyphRenderer>(
     renderer: &mut R,
@@ -415,9 +500,21 @@ fn render_from_cache<R: GlyphRenderer>(
     tint: Option<AlphaColor<Srgb>>,
 ) {
     let state = renderer.save_state();
+    draw_from_cache(renderer, cached, rect_transform, area, quality, tint);
+    renderer.restore_state(state);
+}
+
+/// Like [`render_from_cache`], but leaves the renderer's transform and paint changed.
+fn draw_from_cache<R: GlyphRenderer>(
+    renderer: &mut R,
+    cached: &R::CachedGlyph,
+    rect_transform: Affine,
+    area: Rect,
+    quality: ImageQuality,
+    tint: Option<AlphaColor<Srgb>>,
+) {
     renderer.set_transform(rect_transform);
     renderer.draw_cached_glyph(cached, &area, quality, tint);
-    renderer.restore_state(state);
 }
 
 /// Store a bitmap glyph in the raster cache and render it from there, or hand the glyph back
