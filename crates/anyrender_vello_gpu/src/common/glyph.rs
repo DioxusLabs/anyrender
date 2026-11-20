@@ -2,21 +2,26 @@
 //!
 //! This joins the glyph crate and the atlas crate: glyphs that miss the atlas are rasterized on
 //! the CPU with `vello_cpu` and queued for upload, and are drawn as a region of the atlas
-//! texture. Glyphs that can't be cached are drawn as paths by Vello.
+//! texture. Glyphs that can't be cached are drawn by Vello: outline and COLR glyphs as paths,
+//! bitmap glyphs as images in a texture of their own.
 
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use anyrender::{AntiAliasing, NormalizedCoord, ResourceId};
 use anyrender_atlas::{Atlas, AtlasConfig, AtlasStorage, PixelRect};
 use anyrender_glyph::{
-    DrawSink, FontEmbolden, Glyph, GlyphCacheConfig, GlyphCacheKey, GlyphPaint, GlyphPrepCache,
-    GlyphRaster, GlyphRenderError, GlyphRenderer, GlyphRun, GlyphRunBackend, GlyphRunBuilder,
-    RasterMetrics,
+    DrawSink, FontEmbolden, Glyph, GlyphCache, GlyphCacheConfig, GlyphCacheKey, GlyphPaint,
+    GlyphPrepCache, GlyphRaster, GlyphRenderError, GlyphRenderer, GlyphRun, GlyphRunBackend,
+    GlyphRunBuilder, NoGlyphCache, RasterMetrics,
 };
 use kurbo::{Affine, BezPath, Diagonal2, Rect};
 use peniko::color::palette::css::BLACK;
 use peniko::color::{AlphaColor, Srgb};
-use peniko::{BlendMode, FontData, ImageBrush, ImageQuality, ImageSampler, StyleRef};
+use peniko::{
+    BlendMode, Blob, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat, ImageQuality,
+    ImageSampler, StyleRef,
+};
 use pixmap::Pixmap;
 use vello_common::TextureId;
 use vello_common::geometry::RectU16;
@@ -170,35 +175,6 @@ impl Rasters {
         self.atlas
             .insert(&mut self.uploads, key.clone(), image, metrics)
     }
-
-    /// Draw the atlas region `rect` into `area` of `scene`.
-    fn draw(
-        &self,
-        scene: &mut Scene,
-        rect: PixelRect,
-        area: &Rect,
-        quality: ImageQuality,
-        tint: Option<AlphaColor<Srgb>>,
-    ) {
-        if rect.width == 0 || rect.height == 0 {
-            return;
-        }
-        let region = RectU16::new(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
-        scene.set_paint(PaintType::Image(ImageBrush {
-            image: ImageSource::external_texture(
-                self.texture_id,
-                TextureRegion::Rect(region),
-                true,
-            ),
-            sampler: ImageSampler::new().with_quality(quality),
-        }));
-        scene.set_paint_transform(Affine::IDENTITY);
-        scene.set_tint(tint.map(|color| Tint {
-            color,
-            mode: TintMode::AlphaMask,
-        }));
-        scene.fill_rect(area);
-    }
 }
 
 /// Draws glyph commands into a `vello_cpu` context.
@@ -265,11 +241,13 @@ impl<T> GlyphAtlas<T> {
     /// Draw a glyph run into `scene` with the scene's current paint.
     ///
     /// With `caching`, upright and uniformly scaled glyphs with a solid paint are drawn from
-    /// the atlas. Bitmap glyphs always are, because Vello can only draw them from a texture.
+    /// the atlas. A bitmap glyph that is not drawn from the atlas is drawn from a texture of
+    /// its own, which `upload_image` creates.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_glyphs<'a>(
         &'a mut self,
         scene: &'a mut Scene,
+        upload_image: &'a mut UploadImage<'a>,
         caching: bool,
         font: &'a FontData,
         font_size: f32,
@@ -297,6 +275,7 @@ impl<T> GlyphAtlas<T> {
         };
         let backend = GlyphBackend {
             scene: &mut *scene,
+            upload_image,
             prep: &mut self.prep,
             rasters: &mut self.rasters,
             // Cached glyphs are anti-aliased.
@@ -319,24 +298,18 @@ impl<T> GlyphAtlas<T> {
     }
 }
 
+/// Uploads an image to a texture of its own and binds it, returning the id it is bound under
+/// and whether it may have transparency. `None` if the image can't be uploaded.
+pub(crate) type UploadImage<'a> = dyn FnMut(&ImageData) -> Option<(TextureId, bool)> + 'a;
+
 /// Draws glyph runs into a scene.
 struct GlyphBackend<'a> {
     scene: &'a mut Scene,
+    upload_image: &'a mut UploadImage<'a>,
     prep: &'a mut GlyphPrepCache,
     rasters: &'a mut Rasters,
-    /// Whether cacheable outline and COLR glyphs are served from the atlas. Bitmap glyphs
-    /// always are, because Vello can only draw them from a texture.
+    /// Whether cacheable glyphs are served from the atlas.
     caching: bool,
-}
-
-impl GlyphBackend<'_> {
-    fn sink<'b>(scene: &'b mut Scene, rasters: &'b mut Rasters, caching: bool) -> GlyphSink<'b> {
-        GlyphSink {
-            scene,
-            rasters,
-            caching,
-        }
-    }
 }
 
 impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
@@ -345,7 +318,16 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
         Glyphs: Iterator<Item = Glyph> + Clone,
     {
         let mut run = run.build(glyphs, self.prep.as_mut());
-        run.fill_glyphs(&mut Self::sink(self.scene, self.rasters, self.caching))
+        let mut sink = GlyphSink {
+            scene: self.scene,
+            upload_image: self.upload_image,
+            atlas_texture: self.rasters.texture_id,
+        };
+        if self.caching {
+            run.fill_glyphs(&mut sink, self.rasters)
+        } else {
+            run.fill_glyphs(&mut sink, &mut NoGlyphCache)
+        }
     }
 
     fn stroke_glyphs<Glyphs>(
@@ -361,9 +343,18 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
         let mut stroke = self.scene.stroke().clone();
         stroke.width = width * run.stroke_adjustment();
         self.scene.set_stroke(stroke.clone());
-        let result = run.stroke_glyphs(&mut Self::sink(self.scene, self.rasters, self.caching));
+        let mut sink = GlyphSink {
+            scene: self.scene,
+            upload_image: self.upload_image,
+            atlas_texture: self.rasters.texture_id,
+        };
+        let result = if self.caching {
+            run.stroke_glyphs(&mut sink, self.rasters)
+        } else {
+            run.stroke_glyphs(&mut sink, &mut NoGlyphCache)
+        };
         stroke.width = width;
-        self.scene.set_stroke(stroke);
+        sink.scene.set_stroke(stroke);
         result
     }
 
@@ -380,16 +371,43 @@ impl<'a> GlyphRunBackend<'a> for GlyphBackend<'a> {
         Glyphs: Iterator<Item = Glyph> + Clone,
     {
         let mut run = run.build(glyphs, self.prep.as_mut());
-        let mut sink = Self::sink(self.scene, self.rasters, self.caching);
+        let mut sink = GlyphSink {
+            scene: self.scene,
+            upload_image: self.upload_image,
+            atlas_texture: self.rasters.texture_id,
+        };
         run.render_decoration(x_range, baseline_y, offset, size, buffer, &mut sink);
     }
 }
 
-/// Draws glyphs into a scene, serving cacheable ones from the atlas.
+/// Draws glyphs into a scene.
 struct GlyphSink<'a> {
     scene: &'a mut Scene,
-    rasters: &'a mut Rasters,
-    caching: bool,
+    upload_image: &'a mut UploadImage<'a>,
+    /// The id the atlas texture is bound under.
+    atlas_texture: TextureId,
+}
+
+impl GlyphSink<'_> {
+    /// Fill `area` with `image`.
+    fn draw_image(
+        &mut self,
+        image: ImageSource,
+        area: &Rect,
+        quality: ImageQuality,
+        tint: Option<AlphaColor<Srgb>>,
+    ) {
+        self.scene.set_paint(PaintType::Image(ImageBrush {
+            image,
+            sampler: ImageSampler::new().with_quality(quality),
+        }));
+        self.scene.set_paint_transform(Affine::IDENTITY);
+        self.scene.set_tint(tint.map(|color| Tint {
+            color,
+            mode: TintMode::AlphaMask,
+        }));
+        self.scene.fill_rect(area);
+    }
 }
 
 impl DrawSink for GlyphSink<'_> {
@@ -477,56 +495,26 @@ impl GlyphRenderer for GlyphSink<'_> {
         matches!(self.scene.paint(), PaintType::Solid(_))
     }
 
-    /// Vello can't draw a pixmap, so an uncached bitmap glyph goes through the atlas too. If
-    /// the atlas has no room for it, it is not drawn.
-    fn draw_pixmap(&mut self, key: &GlyphCacheKey, pixmap: Pixmap, area: &Rect) {
-        let rect = match self.rasters.atlas.get(key) {
-            Some(entry) => entry.rect,
-            None => {
-                let metrics = RasterMetrics {
-                    width: pixmap.width(),
-                    height: pixmap.height(),
-                    bearing_x: 0,
-                    bearing_y: 0,
-                };
-                let Some(rect) = self.rasters.insert(key, metrics, &pixmap) else {
-                    return;
-                };
-                rect
-            }
+    /// Vello can't draw a pixmap, so the bitmap is uploaded to a texture of its own, like any
+    /// other image. If that fails, it is not drawn.
+    fn draw_pixmap(&mut self, pixmap: Pixmap, area: &Rect) {
+        let (width, height) = (pixmap.width(), pixmap.height());
+        let image = ImageData {
+            data: Blob::new(Arc::new(pixmap.into_data())),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::AlphaPremultiplied,
+            width: u32::from(width),
+            height: u32::from(height),
         };
-        self.rasters
-            .draw(self.scene, rect, area, ImageQuality::Medium, None);
-    }
-
-    fn glyph_cache_config(&self) -> Option<GlyphCacheConfig> {
-        self.caching.then(GlyphCacheConfig::default)
-    }
-
-    fn cached_glyph(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, PixelRect)> {
-        let entry = self.rasters.atlas.get(key)?;
-        Some((*entry.data, entry.rect))
-    }
-
-    fn cache_glyph<'a>(
-        &mut self,
-        key: &GlyphCacheKey,
-        metrics: RasterMetrics,
-        raster: GlyphRaster<'a>,
-    ) -> Result<PixelRect, GlyphRaster<'a>> {
-        match raster {
-            GlyphRaster::Pixmap(pixmap) => match self.rasters.insert(key, metrics, &pixmap) {
-                Some(rect) => Ok(rect),
-                None => Err(GlyphRaster::Pixmap(pixmap)),
-            },
-            GlyphRaster::Commands(mut commands) => {
-                let pixmap = self.rasters.rasterize(metrics, &mut commands);
-                match self.rasters.insert(key, metrics, &pixmap) {
-                    Some(rect) => Ok(rect),
-                    None => Err(GlyphRaster::Commands(commands)),
-                }
-            }
-        }
+        let Some((texture, may_have_transparency)) = (self.upload_image)(&image) else {
+            return;
+        };
+        self.draw_image(
+            ImageSource::external_texture(texture, TextureRegion::Full, may_have_transparency),
+            area,
+            ImageQuality::Medium,
+            None,
+        );
     }
 
     fn draw_cached_glyph(
@@ -536,6 +524,47 @@ impl GlyphRenderer for GlyphSink<'_> {
         quality: ImageQuality,
         tint: Option<AlphaColor<Srgb>>,
     ) {
-        self.rasters.draw(self.scene, *rect, area, quality, tint);
+        if rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        let region = RectU16::new(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+        self.draw_image(
+            ImageSource::external_texture(self.atlas_texture, TextureRegion::Rect(region), true),
+            area,
+            quality,
+            tint,
+        );
+    }
+}
+
+impl GlyphCache<PixelRect> for Rasters {
+    fn config(&self) -> Option<GlyphCacheConfig> {
+        Some(GlyphCacheConfig::default())
+    }
+
+    fn get(&mut self, key: &GlyphCacheKey) -> Option<(RasterMetrics, PixelRect)> {
+        let entry = self.atlas.get(key)?;
+        Some((*entry.data, entry.rect))
+    }
+
+    fn store<'a>(
+        &mut self,
+        key: &GlyphCacheKey,
+        metrics: RasterMetrics,
+        raster: GlyphRaster<'a>,
+    ) -> Result<PixelRect, GlyphRaster<'a>> {
+        match raster {
+            GlyphRaster::Pixmap(pixmap) => match self.insert(key, metrics, &pixmap) {
+                Some(rect) => Ok(rect),
+                None => Err(GlyphRaster::Pixmap(pixmap)),
+            },
+            GlyphRaster::Commands(mut commands) => {
+                let pixmap = self.rasterize(metrics, &mut commands);
+                match self.insert(key, metrics, &pixmap) {
+                    Some(rect) => Ok(rect),
+                    None => Err(GlyphRaster::Commands(commands)),
+                }
+            }
+        }
     }
 }

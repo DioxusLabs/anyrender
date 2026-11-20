@@ -17,7 +17,7 @@ Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
 
 ### Fixed
 
-- Bitmap (CBDT/sbix) glyphs are drawn from the glyph atlas. They used to panic with "pixmap image sources are not supported by Vello GPU".
+- Bitmap (CBDT/sbix) glyphs are drawn from the glyph atlas, or from a texture of their own when glyph caching is off or the atlas has no room. They used to panic with "pixmap image sources are not supported by Vello GPU".
 
 ## [0.12.0] - 2026-11-16
 
