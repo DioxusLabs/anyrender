@@ -7,6 +7,7 @@ mod options;
 mod scene;
 
 pub(crate) use filters::convert_filter;
+pub(crate) use glyph::AtlasUpload;
 pub use glyph::GlyphAtlas;
 pub use image_cache::ImageCache;
 pub use options::VelloGpuRendererOptions;
