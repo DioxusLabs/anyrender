@@ -23,17 +23,25 @@ use smallvec::SmallVec;
 /// per glyph. Common values: 1 (disabled), 2, 4 (default), 8.
 pub(crate) const SUBPIXEL_BUCKETS: u8 = 4;
 
-/// Sentinel `subpixel_x` for COLR glyph cache entries.
+/// First `subpixel_x` of COLR glyph cache entries, which use
+/// `SUBPIXEL_COLR..SUBPIXEL_COLR + SUBPIXEL_BUCKETS`.
 ///
 /// `quantize_subpixel` returns values in `0..SUBPIXEL_BUCKETS`, so values
 /// above that range can never appear in an outline key. Using distinct
-/// sentinels for COLR and bitmap entries prevents cache collisions between
+/// ranges for COLR and bitmap entries prevents cache collisions between
 /// glyph types that would otherwise produce identical keys (same font, glyph
 /// id, size, and color).
 pub(crate) const SUBPIXEL_COLR: u8 = SUBPIXEL_BUCKETS;
 
 /// Sentinel `subpixel_x` for bitmap glyph cache entries. See [`SUBPIXEL_COLR`].
-pub(crate) const SUBPIXEL_BITMAP: u8 = SUBPIXEL_BUCKETS + 1;
+pub(crate) const SUBPIXEL_BITMAP: u8 = 2 * SUBPIXEL_BUCKETS;
+
+/// The `subpixel_x` of a COLR glyph whose image starts `fractional_x` pixels after a whole
+/// pixel, quantized like an outline's.
+#[inline]
+pub(crate) fn colr_subpixel(fractional_x: f32) -> u8 {
+    SUBPIXEL_COLR + quantize_subpixel(fractional_x)
+}
 
 /// Unique identifier for a cached glyph bitmap.
 ///
@@ -53,7 +61,8 @@ pub struct GlyphCacheKey {
     /// Whether hinting was applied.
     pub hinted: bool,
     /// Horizontal subpixel position (0 to SUBPIXEL_BUCKETS-1 for outlines),
-    /// or a sentinel (`SUBPIXEL_COLR` / `SUBPIXEL_BITMAP`) for non-outline glyphs.
+    /// the same offset by `SUBPIXEL_COLR` for COLR glyphs, or `SUBPIXEL_BITMAP` for bitmap
+    /// glyphs.
     pub subpixel_x: u8,
     /// Context color for COLR glyphs. Only used for rendering, not for Hash/Eq.
     pub context_color: AlphaColor<Srgb>,
