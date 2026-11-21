@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `Paint::Pattern` support. Each pattern tile is rasterized once, cached, and painted as a repeating image.
-- `push_mask_layer` support. Luminance masks are rendered as alpha masks for now.
+- `push_mask_layer` support, including luminance masks (whose content is rendered into a separate render context).
 - Filter layers are clipped to `Filter::region`.
 - Opt-in support for Vello's (experimental) glyph atlas cache, enabled at runtime via
   `VelloCpuScenePainter::set_glyph_caching` / `VelloCpuImageRenderer::set_glyph_caching`.
