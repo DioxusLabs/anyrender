@@ -11,3 +11,15 @@ pub type TinySkiaWindowRenderer = PixelsWindowRenderer<crate::TinySkiaImageRende
     not(feature = "pixels_window_renderer")
 ))]
 pub type TinySkiaWindowRenderer = SoftbufferWindowRenderer<crate::TinySkiaImageRenderer>;
+
+/// Creates [`TinySkiaWindowRenderer`]s.
+#[cfg(feature = "pixels_window_renderer")]
+pub type TinySkiaWindowRendererContext =
+    pixels_window_renderer::PixelsWindowRendererContext<crate::TinySkiaImageRenderer>;
+/// Creates [`TinySkiaWindowRenderer`]s.
+#[cfg(all(
+    feature = "softbuffer_window_renderer",
+    not(feature = "pixels_window_renderer")
+))]
+pub type TinySkiaWindowRendererContext =
+    softbuffer_window_renderer::SoftbufferWindowRendererContext<crate::TinySkiaImageRenderer>;

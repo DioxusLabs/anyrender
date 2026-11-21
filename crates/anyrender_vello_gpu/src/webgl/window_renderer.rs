@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use anyrender::{AntiAliasing, PaintScene, RenderContext, WindowHandle, WindowRenderer};
+use anyrender::{
+    AntiAliasing, PaintScene, RenderContext, WindowHandle, WindowRenderer, WindowRendererContext,
+};
 use debug_timer::debug_timer;
 use peniko::Color;
 use raw_window_handle::RawWindowHandle;
@@ -109,6 +111,29 @@ fn set_canvas_size(canvas: &HtmlCanvasElement, width: u32, height: u32) {
     }
     if canvas.height() != height {
         canvas.set_height(height);
+    }
+}
+
+/// Creates [`VelloGpuWebGlWindowRenderer`]s that all use the same options. Each window has
+/// its own WebGL context.
+#[derive(Clone, Default)]
+pub struct VelloGpuWebGlContext {
+    options: VelloGpuRendererOptions,
+}
+
+impl VelloGpuWebGlContext {
+    pub fn new(options: impl Into<VelloGpuRendererOptions>) -> Self {
+        Self {
+            options: options.into(),
+        }
+    }
+}
+
+impl WindowRendererContext for VelloGpuWebGlContext {
+    type Renderer = VelloGpuWebGlWindowRenderer;
+
+    fn create_renderer(&self) -> VelloGpuWebGlWindowRenderer {
+        VelloGpuWebGlWindowRenderer::with_options(self.options.clone())
     }
 }
 

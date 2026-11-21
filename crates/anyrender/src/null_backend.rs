@@ -2,6 +2,7 @@
 
 use crate::{
     AntiAliasing, Filter, ImageRenderer, PaintScene, RenderContext, WindowHandle, WindowRenderer,
+    WindowRendererContext,
 };
 use std::sync::Arc;
 
@@ -13,6 +14,18 @@ pub struct NullWindowRenderer {
 impl NullWindowRenderer {
     pub fn new() -> Self {
         Self::default()
+    }
+}
+
+/// Creates [`NullWindowRenderer`]s.
+#[derive(Copy, Clone, Default)]
+pub struct NullWindowRendererContext;
+
+impl WindowRendererContext for NullWindowRendererContext {
+    type Renderer = NullWindowRenderer;
+
+    fn create_renderer(&self) -> NullWindowRenderer {
+        NullWindowRenderer::new()
     }
 }
 
