@@ -2,3 +2,5 @@
 
 mod non_uniform_rounded_rect;
 pub use non_uniform_rounded_rect::*;
+mod paint_shape;
+pub use paint_shape::*;

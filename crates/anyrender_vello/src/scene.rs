@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use anyrender::{
-    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
-    ResourceId,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape,
+    RenderContext, ResourceId,
 };
-use kurbo::{Affine, Rect, Shape, Stroke};
+use kurbo::{Affine, Rect, Stroke};
 use peniko::{
     BlendMode, BrushRef, Color, Compose, Fill, FontData, ImageBrush, ImageData, Mix, StyleRef,
 };
@@ -99,29 +99,29 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         self.inner.reset();
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         _filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
-        self.inner.push_layer(fill, blend, alpha, transform, clip);
+        self.inner.push_layer(fill, blend, alpha, transform, &clip);
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
-        self.inner.push_clip_layer(fill, transform, clip);
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
+        self.inner.push_clip_layer(fill, transform, &clip);
     }
 
-    fn push_mask_layer(
+    fn push_mask_layer_shape(
         &mut self,
         fill: Fill,
         mode: MaskMode,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
     ) {
         let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
 
@@ -129,14 +129,14 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         let everything = Rect::new(-1e6, -1e6, 1e6, 1e6);
         self.inner
             .push_layer(Fill::NonZero, blend, 1.0, Affine::IDENTITY, &everything);
-        self.inner.fill(fill, transform, Color::BLACK, None, clip);
+        self.inner.fill(fill, transform, Color::BLACK, None, &clip);
         self.inner.pop_layer();
 
         match mode {
-            MaskMode::Alpha => self.inner.push_layer(fill, blend, 1.0, transform, clip),
+            MaskMode::Alpha => self.inner.push_layer(fill, blend, 1.0, transform, &clip),
             MaskMode::Luminance => {
                 self.inner
-                    .push_luminance_mask_layer(fill, 1.0, transform, clip);
+                    .push_luminance_mask_layer(fill, 1.0, transform, &clip);
             }
         }
     }
@@ -145,16 +145,15 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         self.inner.pop_layer();
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        paint_ref: impl Into<PaintRef<'a>>,
+        paint_ref: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         _anti_aliasing: AntiAliasing,
     ) {
-        let paint_ref: anyrender::PaintRef<'a> = paint_ref.into();
         if let anyrender::Paint::Pattern(pattern) = paint_ref {
             let tile_scene = self.take_pattern_scene(pattern);
             let cull_rect = self.cull_rect;
@@ -173,19 +172,18 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         }
         let brush_ref: BrushRef<'_> = paint_ref.into();
         self.inner
-            .stroke(style, transform, brush_ref, brush_transform, shape);
+            .stroke(style, transform, brush_ref, brush_transform, &shape);
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         _anti_aliasing: AntiAliasing,
     ) {
-        let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
             let tile_scene = self.take_pattern_scene(pattern);
             let cull_rect = self.cull_rect;
@@ -225,7 +223,7 @@ impl PaintScene for VelloScenePainter<'_, '_> {
         };
 
         self.inner
-            .fill(style, transform, brush_ref, brush_transform, shape);
+            .fill(style, transform, brush_ref, brush_transform, &shape);
     }
 
     fn draw_glyphs<'a, 's: 'a>(

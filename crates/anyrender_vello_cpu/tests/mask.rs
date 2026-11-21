@@ -1,4 +1,4 @@
-use anyrender::{AntiAliasing, MaskMode, PaintScene};
+use anyrender::{AntiAliasing, MaskMode, PaintScene, PaintShape};
 use anyrender_vello_cpu::VelloCpuScenePainter;
 use kurbo::{Affine, BezPath, Rect, Shape};
 use peniko::{BlendMode, Color, Fill};
@@ -26,7 +26,7 @@ fn render(scene: VelloCpuScenePainter) -> Vec<[u8; 4]> {
 
 /// Masks the left half of a red canvas with half-opaque content covering the whole canvas,
 /// clipped to the left half by `clip`.
-fn half_masked(clip: &impl Shape) -> Vec<[u8; 4]> {
+fn half_masked<'s>(clip: impl Into<PaintShape<'s>>) -> Vec<[u8; 4]> {
     let mut scene = VelloCpuScenePainter::new(16, 16);
     let canvas = Rect::new(0.0, 0.0, 16.0, 16.0);
     fill(&mut scene, Color::from_rgb8(255, 0, 0), canvas);

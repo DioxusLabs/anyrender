@@ -125,7 +125,7 @@ impl BoxShadowGeometry {
             transform,
             color,
             None,
-            &self.unblurred_path(),
+            self.unblurred_path(),
             AntiAliasing::Enabled,
         );
         if clip {
