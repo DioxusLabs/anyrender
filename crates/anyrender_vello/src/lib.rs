@@ -9,7 +9,7 @@ mod window_renderer;
 pub use image_renderer::VelloImageRenderer;
 pub use scene::VelloScenePainter;
 pub use wgpu_context::DeviceHandle;
-pub use window_renderer::{VelloRendererOptions, VelloWindowRenderer};
+pub use window_renderer::{SharedVelloContext, VelloRendererOptions, VelloWindowRenderer};
 
 pub use wgpu;
 
