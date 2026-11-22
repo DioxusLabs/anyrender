@@ -1,7 +1,7 @@
 use anyrender::{AntiAliasing, BoxShadowKind, ImageRenderer, NonUniformRoundedRect, PaintScene};
 use anyrender_tiny_skia::TinySkiaImageRenderer;
 use kurbo::{Affine, Rect, Vec2};
-use peniko::{Color, Fill, Gradient, InterpolationAlphaSpace, Mix};
+use peniko::{Color, Fill, Gradient, InterpolationAlphaSpace, Mix, color::ColorSpaceTag};
 
 const SIZE: u32 = 40;
 
@@ -172,4 +172,25 @@ fn gradient_interpolates_unpremultiplied() {
     let [r, _, b, _] = gradient_midpoint(InterpolationAlphaSpace::Unpremultiplied);
     assert!((48..80).contains(&r), "red {r}");
     assert!((48..80).contains(&b), "blue {b}");
+}
+
+#[test]
+fn gradient_interpolates_in_linear_srgb() {
+    let gradient = Gradient::new_linear((0.0, 0.0), (40.0, 0.0))
+        .with_stops([Color::from_rgb8(255, 0, 0), Color::from_rgb8(0, 255, 0)])
+        .with_interpolation_cs(ColorSpaceTag::LinearSrgb);
+    let buffer = render(|scene| {
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            &gradient,
+            None,
+            &Rect::new(0.0, 0.0, 40.0, 40.0),
+            AntiAliasing::Enabled,
+        );
+    });
+    // Half red and half green in linear light is 188 in sRGB (sRGB interpolation gives 128).
+    let [r, g, _, _] = pixel_at(&buffer, 20, 20);
+    assert!((180..196).contains(&r), "red {r}");
+    assert!((180..196).contains(&g), "green {g}");
 }
