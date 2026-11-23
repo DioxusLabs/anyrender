@@ -1097,7 +1097,7 @@ fn convert_filter_effect(
                 tile_mode,
                 !kernel.preserve_alpha,
                 input,
-                None,
+                sk_kurbo::rect_from(crop),
             )
         }
         FilterEffect::Turbulence(turbulence_filter) => {
