@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterImage, FilterInput, FilterInputs,
-    FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterImage, FilterInput,
+    FilterInputs, FilterSource,
     color_transformation::ColorMatrix,
+    convolution::ConvolutionKernel,
     lighting::{DiffuseLightingFilter, DistantLightSource, LightSource},
 };
 use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
@@ -248,4 +249,26 @@ fn image_renders_its_scene() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 2, 2), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 12, 12), [0, 0, 0, 0]);
+}
+
+#[test]
+fn convolve_matrix_bias_is_scaled_to_channel_range() {
+    let mut filter = Filter::new(FULL);
+    filter.add_with_color_space(
+        FilterEffect::ConvolveMatrix(ConvolutionKernel {
+            columns: 1,
+            rows: 1,
+            values: vec![0.0],
+            target_x: 0,
+            target_y: 0,
+            edge_mode: EdgeMode::Duplicate,
+            divisor: 1.0,
+            bias: 0.5,
+            preserve_alpha: true,
+        }),
+        FilterInputs::NONE,
+        FilterColorSpace::Srgb,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [128, 128, 128, 255]);
 }
