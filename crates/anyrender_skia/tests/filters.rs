@@ -298,3 +298,29 @@ fn convolve_matrix_edge_mode_wrap_tiles_subregion() {
     assert_close(pixel(&buffer, SIZE - 1, 8), [0, 128, 0, 128]);
     assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 0]);
 }
+
+#[test]
+fn convolve_matrix_reverses_kernel_order() {
+    let mut filter = Filter::new(FULL);
+    let stripe = green_flood(&mut filter, Rect::new(4.0, 0.0, 8.0, SIZE as f64));
+    // Under SVG convolution, `[1, 0, 0]` with `target_x = 1` samples `x + 1`, shifting left by 1px.
+    filter.add_with_subregion(
+        FilterEffect::ConvolveMatrix(ConvolutionKernel {
+            columns: 3,
+            rows: 1,
+            values: vec![1.0, 0.0, 0.0],
+            target_x: 1,
+            target_y: 0,
+            edge_mode: EdgeMode::None,
+            divisor: 1.0,
+            bias: 0.0,
+            preserve_alpha: false,
+        }),
+        FilterInputs::single(FilterInput::Result(stripe)),
+        FilterColorSpace::Srgb,
+        Some(FULL),
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 3, 8), [0, 255, 0, 255]);
+    assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 0]);
+}
