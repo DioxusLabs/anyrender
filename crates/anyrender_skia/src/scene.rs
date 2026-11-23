@@ -1091,7 +1091,8 @@ fn convert_filter_effect(
                 skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
                 &kernel.values,
                 1.0 / divisor,
-                kernel.bias,
+                // Skia adds `bias` in 0..255 channel units; `ConvolutionKernel::bias` is normalized.
+                kernel.bias * 255.0,
                 skia_safe::IPoint::new(kernel.target_x as i32, kernel.target_y as i32),
                 tile_mode,
                 !kernel.preserve_alpha,
