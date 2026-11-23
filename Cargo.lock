@@ -218,6 +218,7 @@ dependencies = [
  "raw-window-handle",
  "skia-safe",
  "skrifa",
+ "smallvec",
  "softbuffer_window_renderer",
  "tracing",
  "windows",

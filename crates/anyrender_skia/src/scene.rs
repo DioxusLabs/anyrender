@@ -1087,9 +1087,13 @@ fn convert_filter_effect(
                 EdgeMode::Mirror => skia_safe::TileMode::Mirror,
                 EdgeMode::None => skia_safe::TileMode::Decal,
             };
+            // Skia computes correlation (`kernel[y * cols + x]`), while SVG `feConvolveMatrix`
+            // computes convolution (`kernel[(rows - 1 - y) * cols + (cols - 1 - x)]`).
+            let values: smallvec::SmallVec<[f32; 25]> =
+                kernel.values.iter().rev().copied().collect();
             image_filters::matrix_convolution(
                 skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
-                &kernel.values,
+                &values,
                 1.0 / divisor,
                 // Skia adds `bias` in 0..255 channel units; `ConvolutionKernel::bias` is normalized.
                 kernel.bias * 255.0,
