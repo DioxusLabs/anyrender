@@ -21,7 +21,6 @@ resolver = "2"
 
 [workspace.package]
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/dioxuslabs/anyrender"
 repository = "https://github.com/dioxuslabs/anyrender"
 categories = ["gui"]
 edition = "2024"
