@@ -649,7 +649,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         let glyph_transform = glyph_transform.filter(|t| *t != kurbo::Affine::IDENTITY);
         let position_transform = match glyph_transform {
             Some(glyph_transform) => {
-                if glyph_transform.determinant() == 0.0 {
+                if !glyph_transform.is_finite() || glyph_transform.determinant() == 0.0 {
                     return;
                 }
                 self.concat_matrix(glyph_transform);
@@ -659,11 +659,12 @@ impl PaintScene for SkiaScenePainter<'_> {
             None => None,
         };
 
-        // Keep patterns in the run's space, not the glyphs'.
+        // Keep gradients and patterns in the run's space, not the glyphs'.
         let brush_transform = match (&brush, glyph_transform) {
-            (anyrender::Paint::Pattern(_), Some(glyph_transform)) => {
-                Some(glyph_transform.inverse())
-            }
+            (
+                anyrender::Paint::Pattern(_) | anyrender::Paint::Gradient(_),
+                Some(glyph_transform),
+            ) => Some(glyph_transform.inverse()),
             _ => None,
         };
         self.reset_paint();
