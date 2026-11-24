@@ -3,7 +3,6 @@ name = "wgpu_context"
 description = "Context for managing WGPU surfaces"
 version = "0.11.0"
 documentation = "https://docs.rs/wgpu_context"
-homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 edition.workspace = true
