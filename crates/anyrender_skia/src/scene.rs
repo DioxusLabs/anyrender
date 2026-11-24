@@ -644,15 +644,24 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.record_pattern(&brush);
         self.set_matrix(transform);
 
-        if let Some(glyph_transform) = glyph_transform {
-            self.concat_matrix(glyph_transform);
-        }
+        // The glyph transform applies to each glyph about its own origin, so positions are
+        // mapped through the inverse of its linear part to stay in the run's space.
+        let glyph_transform = glyph_transform.filter(|t| *t != kurbo::Affine::IDENTITY);
+        let position_transform = match glyph_transform {
+            Some(glyph_transform) => {
+                if glyph_transform.determinant() == 0.0 {
+                    return;
+                }
+                self.concat_matrix(glyph_transform);
+                let [a, b, c, d, _, _] = glyph_transform.as_coeffs();
+                Some(kurbo::Affine::new([a, b, c, d, 0.0, 0.0]).inverse())
+            }
+            None => None,
+        };
 
         // Keep patterns in the run's space, not the glyphs'.
         let brush_transform = match (&brush, glyph_transform) {
-            (anyrender::Paint::Pattern(_), Some(glyph_transform))
-                if glyph_transform.determinant() != 0.0 =>
-            {
+            (anyrender::Paint::Pattern(_), Some(glyph_transform)) => {
                 Some(glyph_transform.inverse())
             }
             _ => None,
@@ -683,7 +692,11 @@ impl PaintScene for SkiaScenePainter<'_> {
 
         for glyph in glyphs {
             self.cache.glyph_id_buf.push(GlyphId::from(glyph.id as u16));
-            self.cache.glyph_pos_buf.push(Point::new(glyph.x, glyph.y));
+            let pos = kurbo::Point::new(glyph.x as f64, glyph.y as f64);
+            let pos = position_transform.map_or(pos, |transform| transform * pos);
+            self.cache
+                .glyph_pos_buf
+                .push(Point::new(pos.x as f32, pos.y as f32));
         }
 
         self.inner.draw_glyphs_at(
