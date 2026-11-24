@@ -92,8 +92,14 @@ pub fn apply(kernel: &ConvolutionKernel, src: ImageRefMut) {
 
         let bounded_new_a = f32_bound(0.0, new_a, 1.0);
 
+        // With `preserve_alpha` the colors are unpremultiplied, so the bias is added as is.
+        let bias = if kernel.preserve_alpha {
+            kernel.bias
+        } else {
+            kernel.bias * new_a
+        };
         let calc = |x| {
-            let x = x / divisor + kernel.bias * new_a;
+            let x = x / divisor + bias;
 
             let x = if kernel.preserve_alpha {
                 f32_bound(0.0, x, 1.0) * bounded_new_a
@@ -139,6 +145,26 @@ mod tests {
         };
         apply(&kernel, ImageRefMut::new(3, 1, &mut pixels));
         pixels.iter().map(|p| (p.r, p.a)).collect()
+    }
+
+    #[test]
+    fn preserve_alpha_bias_is_not_scaled_by_alpha() {
+        // Unpremultiplied input, as the filter graph passes it when `preserve_alpha` is set.
+        let mut pixels = [RGBA8::new(0, 0, 0, 128)];
+        let kernel = ConvolutionKernel {
+            columns: 1,
+            rows: 1,
+            values: vec![0.0],
+            target_x: 0,
+            target_y: 0,
+            edge_mode: EdgeMode::None,
+            divisor: 1.0,
+            bias: 0.5,
+            preserve_alpha: true,
+        };
+        apply(&kernel, ImageRefMut::new(1, 1, &mut pixels));
+        // An unpremultiplied 0.5, premultiplied by alpha 128.
+        assert_eq!(pixels[0], RGBA8::new(64, 64, 64, 128));
     }
 
     #[test]
