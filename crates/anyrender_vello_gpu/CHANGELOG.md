@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Versions through 0.11.0 were published as `anyrender_vello_hybrid`.
 
+## [0.12.1] - 2026-11-24
+
+### Fixed
+
+- Honour `AntiAliasing::Disabled` on fills and strokes with pattern paints, in both the wgpu and WebGL renderers. Only the pattern's shape clip is aliased; tile content keeps its own setting ([#214](https://github.com/DioxusLabs/anyrender/pull/214)).
+
 ## [0.12.0] - 2026-11-16
 
 ### Added

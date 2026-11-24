@@ -5,6 +5,14 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-24
+
+### Fixed
+
+- `ConvolveMatrix` convolves over the primitive subregion instead of the filter region, so `edgeMode` applies at the subregion's edges ([#258](https://github.com/DioxusLabs/anyrender/pull/258)).
+- With `preserve_alpha`, `ConvolveMatrix` no longer applies the source alpha to `bias` twice ([#259](https://github.com/DioxusLabs/anyrender/pull/259)).
+- Fixed the broken `tiny_skia` link on the crate docs front page ([#211](https://github.com/DioxusLabs/anyrender/pull/211)).
+
 ## [0.1.0] - 2026-11-16
 
 ### Added

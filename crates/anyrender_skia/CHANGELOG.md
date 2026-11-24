@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-11-24
+
+### Fixed
+
+- Apply `glyph_transform` around each glyph's origin instead of to the whole positioned run, as documented in AnyRender 0.15.1. It previously also moved glyph origins: a 2x scale moved a glyph at x=50 to x=100. Degenerate transforms now draw nothing ([#215](https://github.com/DioxusLabs/anyrender/pull/215)).
+- `ConvolveMatrix` kernels are no longer flipped 180° ([#255](https://github.com/DioxusLabs/anyrender/pull/255)), `bias` is scaled to Skia's 0–255 channel units ([#254](https://github.com/DioxusLabs/anyrender/pull/254)), and `edgeMode=wrap` tiles within the primitive subregion ([#256](https://github.com/DioxusLabs/anyrender/pull/256)).
+
 ## [0.13.0] - 2026-11-16
 
 ### Added

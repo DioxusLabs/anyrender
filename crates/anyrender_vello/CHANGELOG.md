@@ -5,6 +5,16 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-11-24
+
+### Fixed
+
+- `glyph_transform` is now applied in y-down, glyph-local space for outline glyphs, as documented in AnyRender 0.15.1. It was applied in y-up space, which mirrored shears and vertical offsets ([#216](https://github.com/DioxusLabs/anyrender/pull/216)).
+
+### Known issues
+
+- For COLR glyphs, the translation part of `glyph_transform` is still applied in font units. For bitmap glyphs, the whole transform still acts in bitmap pixel space around the image origin. Outline glyphs are not affected. A fix is planned in Vello.
+
 ## [0.16.0] - 2026-11-16
 
 ### Added
