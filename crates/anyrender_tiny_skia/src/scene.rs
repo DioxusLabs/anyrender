@@ -20,7 +20,7 @@ use kurbo::{Affine, PathEl, Point, Shape, Stroke, Vec2};
 use peniko::{
     BlendMode, Color, Compose, Extend, Fill, FontData, Gradient, GradientKind, ImageAlphaType,
     ImageBrushRef, ImageData, ImageFormat, ImageQuality, InterpolationAlphaSpace, Mix, StyleRef,
-    color::{AlphaColor, Srgb},
+    color::{self, AlphaColor, ColorSpaceTag, Srgb},
 };
 use skrifa::{
     GlyphId, MetadataProvider,
@@ -1135,36 +1135,56 @@ fn gradient_shader(
     alpha: f32,
     transform: Transform,
 ) -> Option<Shader<'static>> {
-    let colors: Vec<(f32, AlphaColor<Srgb>)> = gradient
-        .stops
-        .iter()
-        .map(|stop| (stop.offset, stop.color.to_alpha_color::<Srgb>()))
-        .collect();
-    let mut stops = Vec::with_capacity(colors.len());
-    for (i, &(offset, color)) in colors.iter().enumerate() {
-        // tiny-skia interpolates unpremultiplied. For premultiplied interpolation, approximate
-        // each segment whose alpha changes with intermediate stops.
-        if gradient.interpolation_alpha_space == InterpolationAlphaSpace::Premultiplied
-            && let Some(&(prev_offset, prev)) = i.checked_sub(1).map(|i| &colors[i])
-            && prev.components[3] != color.components[3]
-        {
-            const STEPS: usize = 16;
-            let (from, to) = (prev.premultiply(), color.premultiply());
-            for step in 1..STEPS {
-                let t = step as f32 / STEPS as f32;
-                let mixed = from.lerp_rect(to, t).un_premultiply();
-                let offset = prev_offset + (offset - prev_offset) * t;
-                stops.push(GradientStop::new(offset, to_skia_color(mixed, alpha)));
+    match gradient.stops.len() {
+        0 => return None,
+        1 => return Some(Shader::SolidColor(stops_color(&gradient.stops[0], alpha))),
+        _ => {}
+    }
+    let stops = if gradient.interpolation_cs == ColorSpaceTag::Srgb
+        && gradient.interpolation_alpha_space == InterpolationAlphaSpace::Unpremultiplied
+    {
+        gradient
+            .stops
+            .iter()
+            .map(|stop| GradientStop::new(stop.offset, stops_color(stop, alpha)))
+            .collect()
+    } else {
+        // tiny-skia interpolates unpremultiplied sRGB, so approximate other interpolation spaces
+        // with intermediate stops.
+        const TOLERANCE: f32 = 0.01;
+        let (cs, hue) = (gradient.interpolation_cs, gradient.hue_direction);
+        let mut stops = vec![GradientStop::new(
+            gradient.stops[0].offset,
+            stops_color(&gradient.stops[0], alpha),
+        )];
+        for pair in gradient.stops.windows(2) {
+            let (from, to) = (&pair[0], &pair[1]);
+            let mut push = |t: f32, color: AlphaColor<Srgb>| {
+                let offset = from.offset + (to.offset - from.offset) * t;
+                stops.push(GradientStop::new(offset, to_skia_color(color, alpha)));
+            };
+            // The stops are interpolated unpremultiplied, which only matches premultiplied
+            // interpolation where alpha is constant.
+            if gradient.interpolation_alpha_space == InterpolationAlphaSpace::Premultiplied
+                && from.color.components[3] != to.color.components[3]
+            {
+                const STEPS: usize = 16;
+                let interpolator = from.color.interpolate(to.color, cs, hue);
+                for step in 1..=STEPS {
+                    let t = step as f32 / STEPS as f32;
+                    push(t, interpolator.eval(t).to_alpha_color());
+                }
+            } else {
+                for (t, color) in
+                    color::gradient_unpremultiplied(from.color, to.color, cs, hue, TOLERANCE)
+                        .skip(1)
+                {
+                    push(t, color);
+                }
             }
         }
-        stops.push(GradientStop::new(offset, to_skia_color(color, alpha)));
-    }
-    if stops.is_empty() {
-        return None;
-    }
-    if stops.len() == 1 {
-        return Some(Shader::SolidColor(stops_color(&gradient.stops[0], alpha)));
-    }
+        stops
+    };
     let mode = spread_mode(gradient.extend);
     let point = |p: Point| tiny_skia::Point::from_xy(p.x as f32, p.y as f32);
     match gradient.kind {
