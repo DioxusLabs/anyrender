@@ -301,13 +301,15 @@ name = "anyrender_vello_cpu"
 version = "0.19.0"
 dependencies = [
  "anyrender",
+ "anyrender_glyph",
  "bytemuck",
  "color",
  "debug_timer",
- "glifo",
  "kurbo",
  "peniko",
  "pixels_window_renderer",
+ "pixmap",
+ "skrifa",
  "softbuffer_window_renderer",
  "vello_common",
  "vello_cpu",

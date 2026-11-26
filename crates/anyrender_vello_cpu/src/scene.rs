@@ -4,28 +4,19 @@ use std::sync::Arc;
 use anyrender::{
     AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
 };
-use glifo::FontEmbolden;
+use anyrender_glyph::{FontEmbolden, GlyphRunBuilder};
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, ImageBrush, Mix, StyleRef};
 use vello_common::paint::ImageSource;
 use vello_cpu::{PaintType, Pixmap};
 
+use crate::glyph::{GlyphBackend, GlyphCaches};
 use crate::image_cache::{ImageCache, ImageCacheConfig};
 
 const DEFAULT_TOLERANCE: f64 = 0.1;
 
 /// Rasterized pattern tiles are evicted after going unused for this many frames.
 const PATTERN_CACHE_FRAMES: u64 = 2;
-
-/// Whether a glyph run drawn with the given transforms can use Vello's glyph atlas cache.
-///
-/// Vello only supports caching glyphs that are drawn upright with a uniform scale. It checks
-/// this itself when inserting a glyph into the atlas, but not when looking one up, so a skewed
-/// (e.g. synthetic italic) or rotated run would otherwise be drawn using upright cached glyphs.
-fn supports_glyph_caching(transform: Affine, glyph_transform: Option<Affine>) -> bool {
-    let [a, b, c, d, _, _] = (transform * glyph_transform.unwrap_or_default()).as_coeffs();
-    b == 0.0 && c == 0.0 && a == d && a > 0.0
-}
 
 /// Snaps glyph origins to the horizontal subpixel grid of the platform's native text renderer.
 ///
@@ -149,6 +140,7 @@ pub struct VelloCpuScenePainter {
     pattern_cache: HashMap<(u64, u16, u16), (Arc<Pixmap>, u64)>,
     frame: u64,
     layer_stack: Vec<LayerKind>,
+    glyph_caches: GlyphCaches,
     glyph_caching: bool,
 }
 
@@ -165,15 +157,16 @@ impl VelloCpuScenePainter {
             pattern_cache: HashMap::new(),
             frame: 0,
             layer_stack: Vec::new(),
-            glyph_caching: false,
+            glyph_caches: GlyphCaches::new(),
+            glyph_caching: true,
         }
     }
 
-    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    /// Enable or disable caching of rasterized glyphs.
     ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
+    /// Defaults to `true`. Glyphs that cannot be drawn from the cache (rotated, skewed, stroked,
+    /// not painted with a solid colour, or very large) are always drawn directly. Disabling the
+    /// cache is meant for debugging and tests.
     pub fn set_glyph_caching(&mut self, enabled: bool) {
         self.glyph_caching = enabled;
     }
@@ -300,6 +293,7 @@ impl VelloCpuScenePainter {
     /// Should be called once per frame, after rendering.
     pub fn maintain(&mut self) {
         self.image_cache.maintain();
+        self.glyph_caches.maintain();
         self.frame += 1;
         let frame = self.frame;
         self.pattern_cache
@@ -474,46 +468,41 @@ impl PaintScene for VelloCpuScenePainter {
         self.render_ctx.set_transform(transform);
         self.set_paint(paint.into(), transform, None);
 
-        let glyph_caching = anti_aliasing.is_enabled()
-            && self.glyph_caching
-            && supports_glyph_caching(transform, glyph_transform);
+        let caching = anti_aliasing.is_enabled() && self.glyph_caching;
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
+        let glyphs = glyphs.map(|g| anyrender_glyph::Glyph {
+            id: g.id,
+            x: snap.map_or(g.x, |snap| snap.x(g.x)),
+            y: snap.map_or(g.y, |snap| snap.y(g.y)),
+        });
         let style: StyleRef<'a> = style.into();
+        let font_embolden = match style {
+            StyleRef::Fill(_) => FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)),
+            StyleRef::Stroke(_) => FontEmbolden::default(),
+        };
         match style {
-            StyleRef::Fill(fill) => {
-                self.render_ctx.set_fill_rule(fill);
-                let _ = self
-                    .render_ctx
-                    .glyph_run(&mut self.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(|g| vello_cpu::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
-            }
-            StyleRef::Stroke(stroke) => {
-                self.render_ctx.set_stroke(stroke.clone());
-                let _ = self
-                    .render_ctx
-                    .glyph_run(&mut self.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(|g| vello_cpu::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
-            }
+            StyleRef::Fill(fill) => self.render_ctx.set_fill_rule(fill),
+            StyleRef::Stroke(stroke) => self.render_ctx.set_stroke(stroke.clone()),
         }
+        let paint_transform = *self.render_ctx.paint_transform();
+        let backend = GlyphBackend {
+            ctx: &mut self.render_ctx,
+            caches: &mut self.glyph_caches,
+            caching,
+        };
+        let mut run = GlyphRunBuilder::new(font.clone(), transform, paint_transform, backend)
+            .font_size(font_size)
+            .font_embolden(font_embolden)
+            .hint(hint)
+            .normalized_coords(bytemuck::cast_slice(normalized_coords));
+        if let Some(glyph_transform) = glyph_transform {
+            run = run.glyph_transform(glyph_transform);
+        }
+        // A glyph that has no drawable representation is skipped; the rest of the run is drawn.
+        let _ = match style {
+            StyleRef::Fill(_) => run.fill_glyphs(glyphs),
+            StyleRef::Stroke(_) => run.stroke_glyphs(glyphs),
+        };
         self.render_ctx.set_aliasing_threshold(None);
     }
     fn draw_box_shadow(
