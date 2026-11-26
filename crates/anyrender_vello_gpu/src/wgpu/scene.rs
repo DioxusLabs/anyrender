@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::common::{DEFAULT_TOLERANCE, ImageCache, LayerKind, supports_glyph_caching};
+use crate::common::{
+    DEFAULT_TOLERANCE, ImageCache, LayerKind, draw_glyphs_bitmap_safe, font_has_bitmaps,
+    supports_bitmap_atlas_caching, supports_glyph_caching,
+};
 use anyrender::{
     AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
     ResourceId,
@@ -223,6 +226,37 @@ impl<'a> ImageManager<'a> {
         let ImageSource::Pixmap(pixmap) = ImageSource::from_peniko_image_data(image) else {
             unreachable!(); // ImageSource::from_peniko_image_data always returns a Pixmap
         };
+        let (texture_id, may_have_transparency) = self.upload_pixmap_texture(&pixmap);
+        self.cache.insert(
+            &image.data,
+            texture_id,
+            may_have_transparency,
+            image.width,
+            image.height,
+        );
+
+        Some((texture_id, may_have_transparency))
+    }
+
+    pub(crate) fn upload_transient_pixmap(
+        &mut self,
+        pixmap: &vello_common::pixmap::Pixmap,
+    ) -> Option<(TextureId, bool)> {
+        if !self
+            .cache
+            .fits(u32::from(pixmap.width()), u32::from(pixmap.height()))
+        {
+            return None;
+        }
+        let (texture_id, may_have_transparency) = self.upload_pixmap_texture(pixmap);
+        self.cache.insert_transient(texture_id);
+        Some((texture_id, may_have_transparency))
+    }
+
+    fn upload_pixmap_texture(
+        &mut self,
+        pixmap: &vello_common::pixmap::Pixmap,
+    ) -> (TextureId, bool) {
         let may_have_transparency = pixmap.may_have_transparency();
 
         // Upload the pixmap to its own texture.
@@ -260,22 +294,13 @@ impl<'a> ImageManager<'a> {
             },
         );
 
-        // Bind the texture and remember the TextureId in the cache.
+        // Bind the texture and return its TextureId.
         let resource_id = ResourceId::new();
         self.texture_bindings.insert(
             resource_id,
             texture.create_view(&TextureViewDescriptor::default()),
         );
-        let texture_id = TextureId(resource_id.into_ffi());
-        self.cache.insert(
-            &image.data,
-            texture_id,
-            may_have_transparency,
-            image.width,
-            image.height,
-        );
-
-        Some((texture_id, may_have_transparency))
+        (TextureId(resource_id.into_ffi()), may_have_transparency)
     }
 
     /// Evict unused images after encoding the frame's rendering.
@@ -605,44 +630,71 @@ impl PaintScene for VelloGpuScenePainter<'_> {
 
         self.scene
             .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
-        let glyph_caching = anti_aliasing.is_enabled()
-            && self.glyph_caching
-            && supports_glyph_caching(transform, glyph_transform);
+        let has_bitmaps = font_has_bitmaps(font);
+        let can_use_bitmap_atlas = anti_aliasing.is_enabled()
+            && supports_bitmap_atlas_caching(font_size, transform, glyph_transform);
         let snap = GlyphOriginSnap::new(transform, font_size, embolden);
         let style: StyleRef<'a> = style.into();
-        match style {
-            StyleRef::Fill(fill) => {
-                self.scene.set_fill_rule(fill);
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .fill_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
-            }
-            StyleRef::Stroke(stroke) => {
-                self.scene.set_stroke(stroke.clone());
-                let _ = self
-                    .scene
-                    .glyph_run(self.image_manager.resources, font)
-                    .atlas_cache(glyph_caching)
-                    .font_size(font_size)
-                    .hint(hint)
-                    .normalized_coords(normalized_coords)
-                    .glyph_transform(glyph_transform.unwrap_or_default())
-                    .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
-                        id: g.id,
-                        x: snap.map_or(g.x, |snap| snap.x(g.x)),
-                        y: snap.map_or(g.y, |snap| snap.y(g.y)),
-                    }));
+        if has_bitmaps && !can_use_bitmap_atlas {
+            draw_glyphs_bitmap_safe(
+                self.scene,
+                font,
+                font_size,
+                hint,
+                normalized_coords,
+                embolden,
+                style,
+                transform,
+                glyph_transform,
+                glyphs.map(|g| glifo::Glyph {
+                    id: g.id,
+                    x: snap.map_or(g.x, |snap| snap.x(g.x)),
+                    y: snap.map_or(g.y, |snap| snap.y(g.y)),
+                }),
+                |pixmap| self.image_manager.upload_transient_pixmap(pixmap),
+            );
+        } else {
+            let glyph_caching = if has_bitmaps {
+                true
+            } else {
+                anti_aliasing.is_enabled()
+                    && self.glyph_caching
+                    && supports_glyph_caching(transform, glyph_transform)
+            };
+            match style {
+                StyleRef::Fill(fill) => {
+                    self.scene.set_fill_rule(fill);
+                    let _ = self
+                        .scene
+                        .glyph_run(self.image_manager.resources, font)
+                        .atlas_cache(glyph_caching)
+                        .font_size(font_size)
+                        .hint(hint)
+                        .normalized_coords(normalized_coords)
+                        .font_embolden(FontEmbolden::new(Diagonal2::new(embolden.x, embolden.y)))
+                        .glyph_transform(glyph_transform.unwrap_or_default())
+                        .fill_glyphs(glyphs.map(|g| glifo::Glyph {
+                            id: g.id,
+                            x: snap.map_or(g.x, |snap| snap.x(g.x)),
+                            y: snap.map_or(g.y, |snap| snap.y(g.y)),
+                        }));
+                }
+                StyleRef::Stroke(stroke) => {
+                    self.scene.set_stroke(stroke.clone());
+                    let _ = self
+                        .scene
+                        .glyph_run(self.image_manager.resources, font)
+                        .atlas_cache(glyph_caching)
+                        .font_size(font_size)
+                        .hint(hint)
+                        .normalized_coords(normalized_coords)
+                        .glyph_transform(glyph_transform.unwrap_or_default())
+                        .stroke_glyphs(glyphs.map(|g| glifo::Glyph {
+                            id: g.id,
+                            x: snap.map_or(g.x, |snap| snap.x(g.x)),
+                            y: snap.map_or(g.y, |snap| snap.y(g.y)),
+                        }));
+                }
             }
         }
         self.scene.set_aliasing_threshold(None);
