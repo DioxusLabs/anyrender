@@ -5,6 +5,12 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-11-24
+
+### Changed
+
+- Documented `glyph_transform` on `PaintScene::draw_glyphs` and `GlyphRunCommand`: it acts on each sized glyph in y-down space, around the glyph's own origin and before placement at its run position. `transform` acts on the positioned run. Vello CPU, Vello GPU and tiny-skia already behaved this way; `anyrender_vello` 0.16.1 and `anyrender_skia` 0.13.1 now match ([#216](https://github.com/DioxusLabs/anyrender/pull/216)).
+
 ## [0.15.0] - 2026-11-16
 
 ### Added

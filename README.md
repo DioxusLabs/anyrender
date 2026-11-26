@@ -50,6 +50,7 @@ These crates sit on top of the the AnyRender abstraction, and allow you render c
 - [pixels_window_renderer](https://docs.rs/pixels_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [pixels](https://docs.rs/pixels) crate.
 - [softbuffer_window_renderer](https://docs.rs/softbuffer_window_renderer) implements an AnyRender `WindowRenderer` for any AnyRenderer `ImageRenderer` using the [softbuffer](https://docs.rs/softbuffer) crate.
 - [image_filters_types](https://docs.rs/image_filters_types) defines the filter graph types (`Filter`, `FilterEffect` and the primitive parameters) that `anyrender::filters` re-exports, generic over the content of `feImage`.
+- [pixmap](https://docs.rs/pixmap) provides minimal RGBA8 pixel buffers (`Pixmap`, `PixmapRef`, `PixmapMut`) with no dependencies.
 
 
 ## Version compatibility
@@ -80,7 +81,7 @@ crates in your project.
     <tr><td><code>vello_cpu</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>0.3</td><td>0.4</td></tr>
     <tr><td><code>anyrender_vello_cpu</code></td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.14</td><td>0.15</td><td>0.16–0.17</td><td>0.18</td><td>0.19</td></tr>
     <tr><th colspan="11" align=left>Skia</th></tr>
-    <tr><td><code>skia-safe</code></td><td>0.89</td><td>0.91</td><td>0.93</td><td>0.93</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.97</td><td>0.97</td><td>0.99</td><td>0.156.0</td><td>0.157.0</td></tr>
+    <tr><td><code>skia-safe</code></td><td>0.89</td><td>0.91</td><td>0.93</td><td>0.93</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.97</td><td>0.97</td><td>0.99</td><td>0.153.3</td><td>0.157.0</td></tr>
     <tr><td><code>anyrender_skia</code></td><td>0.1</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.13</td></tr>
     <tr><th colspan="11" align=left>Tiny-skia</th></tr>
     <tr><td><code>anyrender_tiny_skia</code></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.1</td></tr>

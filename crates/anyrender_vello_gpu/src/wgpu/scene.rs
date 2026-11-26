@@ -461,6 +461,8 @@ impl PaintScene for VelloGpuScenePainter<'_> {
             self.scene
                 .push_clip_path(&clip.into_bez_path(DEFAULT_TOLERANCE));
         }
+        // Pattern antialiasing applies to this clip, not the tile content.
+        self.scene.set_aliasing_threshold(None);
     }
 
     fn pop_layer(&mut self) {
@@ -492,6 +494,8 @@ impl PaintScene for VelloGpuScenePainter<'_> {
     ) {
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
+            self.scene
+                .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
             anyrender::stroke_pattern_tiles(
                 self,
                 pattern,
@@ -501,6 +505,7 @@ impl PaintScene for VelloGpuScenePainter<'_> {
                 shape,
                 cull_rect,
             );
+            self.scene.set_aliasing_threshold(None);
             return;
         }
         self.scene.set_transform(transform);
@@ -531,6 +536,8 @@ impl PaintScene for VelloGpuScenePainter<'_> {
     ) {
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
+            self.scene
+                .set_aliasing_threshold((!anti_aliasing.is_enabled()).then_some(127));
             anyrender::fill_pattern_tiles(
                 self,
                 pattern,
@@ -540,6 +547,7 @@ impl PaintScene for VelloGpuScenePainter<'_> {
                 shape,
                 cull_rect,
             );
+            self.scene.set_aliasing_threshold(None);
             return;
         }
         self.scene.set_transform(transform);

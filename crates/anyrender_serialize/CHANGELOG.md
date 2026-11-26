@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated recorded drawing commands for AnyRender 0.15, including CSS box shadows and explicit antialiasing (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#198](https://github.com/DioxusLabs/anyrender/pull/198)).
 - Filter image content is now serialized as a recorded scene (breaking) ([#176](https://github.com/DioxusLabs/anyrender/pull/176)).
+- Upgraded `zip` to 9.6 and `sha2` to 0.11.
 
 ## [0.8.0] - 2026-10-03
 

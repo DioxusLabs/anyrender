@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-11-24
+
+### Fixed
+
+- Apply `glyph_transform` around each glyph's origin instead of to the whole positioned run, as documented in AnyRender 0.15.1. It previously also moved glyph origins: a 2x scale moved a glyph at x=50 to x=100. Degenerate transforms now draw nothing ([#215](https://github.com/DioxusLabs/anyrender/pull/215)).
+- `ConvolveMatrix` kernels are no longer flipped 180° ([#255](https://github.com/DioxusLabs/anyrender/pull/255)), `bias` is scaled to Skia's 0–255 channel units ([#254](https://github.com/DioxusLabs/anyrender/pull/254)), and `edgeMode=wrap` tiles within the primitive subregion ([#256](https://github.com/DioxusLabs/anyrender/pull/256)).
+
 ## [0.13.0] - 2026-11-16
 
 ### Added
@@ -18,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated to AnyRender 0.15, including CSS box shadows, explicit antialiasing, required filter regions and recorded-scene filter images (breaking) ([#117](https://github.com/DioxusLabs/anyrender/pull/117), [#196](https://github.com/DioxusLabs/anyrender/pull/196), [#198](https://github.com/DioxusLabs/anyrender/pull/198), [#176](https://github.com/DioxusLabs/anyrender/pull/176)).
 - Upgraded `skia-safe` to 0.157 ([#124](https://github.com/DioxusLabs/anyrender/pull/124), [#183](https://github.com/DioxusLabs/anyrender/pull/183)).
+- Upgraded `oaty` to 0.3.
 - Implemented expanded SVG filter parameters, colour spaces, tiling and lighter compositing ([#168](https://github.com/DioxusLabs/anyrender/pull/168), [#169](https://github.com/DioxusLabs/anyrender/pull/169), [#170](https://github.com/DioxusLabs/anyrender/pull/170), [#171](https://github.com/DioxusLabs/anyrender/pull/171), [#172](https://github.com/DioxusLabs/anyrender/pull/172), [#174](https://github.com/DioxusLabs/anyrender/pull/174), [#186](https://github.com/DioxusLabs/anyrender/pull/186), [#187](https://github.com/DioxusLabs/anyrender/pull/187)).
 - Use zero-copy font and image data; open Apple TTC faces through CoreText without copying ([#125](https://github.com/DioxusLabs/anyrender/pull/125), [#185](https://github.com/DioxusLabs/anyrender/pull/185)).
 - Use platform text contrast/gamma, CoreText smoothing for emboldened glyphs, and sRGB Metal layers ([#134](https://github.com/DioxusLabs/anyrender/pull/134), [#135](https://github.com/DioxusLabs/anyrender/pull/135), [#138](https://github.com/DioxusLabs/anyrender/pull/138)).

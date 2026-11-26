@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use anyrender::filters::{
-    Filter, FilterColorSpace, FilterEffect, FilterId, FilterImage, FilterInput, FilterInputs,
-    FilterSource,
+    EdgeMode, Filter, FilterColorSpace, FilterEffect, FilterId, FilterImage, FilterInput,
+    FilterInputs, FilterSource,
     color_transformation::ColorMatrix,
+    convolution::ConvolutionKernel,
     lighting::{DiffuseLightingFilter, DistantLightSource, LightSource},
 };
 use anyrender::{AntiAliasing, PaintScene, render_to_buffer};
@@ -248,4 +249,78 @@ fn image_renders_its_scene() {
     let buffer = render_filter(filter);
     assert_close(pixel(&buffer, 2, 2), [0, 255, 0, 255]);
     assert_close(pixel(&buffer, 12, 12), [0, 0, 0, 0]);
+}
+
+#[test]
+fn convolve_matrix_bias_is_scaled_to_channel_range() {
+    let mut filter = Filter::new(FULL);
+    filter.add_with_color_space(
+        FilterEffect::ConvolveMatrix(ConvolutionKernel {
+            columns: 1,
+            rows: 1,
+            values: vec![0.0],
+            target_x: 0,
+            target_y: 0,
+            edge_mode: EdgeMode::Duplicate,
+            divisor: 1.0,
+            bias: 0.5,
+            preserve_alpha: true,
+        }),
+        FilterInputs::NONE,
+        FilterColorSpace::Srgb,
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 8, 8), [128, 128, 128, 255]);
+}
+
+#[test]
+fn convolve_matrix_edge_mode_wrap_tiles_subregion() {
+    let mut filter = Filter::new(FULL);
+    let left_stripe = green_flood(&mut filter, Rect::new(0.0, 0.0, 4.0, SIZE as f64));
+    // With `edge_mode: Wrap` across `FULL`, sampling `x + 1` at `x = SIZE - 1` wraps to `x = 0`.
+    filter.add_with_subregion(
+        FilterEffect::ConvolveMatrix(ConvolutionKernel {
+            columns: 3,
+            rows: 1,
+            values: vec![0.5, 0.0, 0.5],
+            target_x: 1,
+            target_y: 0,
+            edge_mode: EdgeMode::Wrap,
+            divisor: 1.0,
+            bias: 0.0,
+            preserve_alpha: false,
+        }),
+        FilterInputs::single(FilterInput::Result(left_stripe)),
+        FilterColorSpace::Srgb,
+        Some(FULL),
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, SIZE - 1, 8), [0, 128, 0, 128]);
+    assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 0]);
+}
+
+#[test]
+fn convolve_matrix_reverses_kernel_order() {
+    let mut filter = Filter::new(FULL);
+    let stripe = green_flood(&mut filter, Rect::new(4.0, 0.0, 8.0, SIZE as f64));
+    // Under SVG convolution, `[1, 0, 0]` with `target_x = 1` samples `x + 1`, shifting left by 1px.
+    filter.add_with_subregion(
+        FilterEffect::ConvolveMatrix(ConvolutionKernel {
+            columns: 3,
+            rows: 1,
+            values: vec![1.0, 0.0, 0.0],
+            target_x: 1,
+            target_y: 0,
+            edge_mode: EdgeMode::None,
+            divisor: 1.0,
+            bias: 0.0,
+            preserve_alpha: false,
+        }),
+        FilterInputs::single(FilterInput::Result(stripe)),
+        FilterColorSpace::Srgb,
+        Some(FULL),
+    );
+    let buffer = render_filter(filter);
+    assert_close(pixel(&buffer, 3, 8), [0, 255, 0, 255]);
+    assert_close(pixel(&buffer, 8, 8), [0, 0, 0, 0]);
 }

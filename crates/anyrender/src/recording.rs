@@ -154,7 +154,9 @@ pub struct GlyphRunCommand<Font = FontData, Brush = Paint> {
     pub style: Style,
     pub brush: Brush,
     pub brush_alpha: f32,
+    /// Transform of the positioned run.
     pub transform: Affine,
+    /// Per-glyph transform in y-down space, applied after sizing and before positioning.
     pub glyph_transform: Option<Affine>,
     pub glyphs: Vec<Glyph>,
     /// Whether the edges are anti-aliased.

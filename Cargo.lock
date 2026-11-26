@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "image_filters_types",
  "kurbo",
@@ -194,7 +194,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_skia"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "anyrender",
  "ash",
@@ -218,6 +218,7 @@ dependencies = [
  "raw-window-handle",
  "skia-safe",
  "skrifa",
+ "smallvec",
  "softbuffer_window_renderer",
  "tracing",
  "windows",
@@ -239,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_tiny_skia"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyrender",
  "bytemuck",
@@ -256,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "anyrender",
  "debug_timer",
@@ -290,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello_gpu"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "anyrender",
  "debug_timer",
@@ -2937,6 +2938,13 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "pixels",
  "raw-window-handle",
+]
+
+[[package]]
+name = "pixmap"
+version = "0.1.0"
+dependencies = [
+ "png",
 ]
 
 [[package]]

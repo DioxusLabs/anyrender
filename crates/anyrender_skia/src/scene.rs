@@ -122,10 +122,6 @@ impl SkiaScenePainter<'_> {
         self.inner.set_matrix(&sk_kurbo::m44_from_affine(transform));
     }
 
-    fn concat_matrix(&self, transform: kurbo::Affine) {
-        self.inner.concat(&sk_kurbo::matrix_from_affine(transform));
-    }
-
     fn clip(&self, fill: peniko::Fill, shape: PaintShape<'_>) {
         self.clip_with_op(fill, shape, ClipOp::Intersect);
     }
@@ -365,6 +361,59 @@ impl SkiaScenePainter<'_> {
         self.cache.font.insert(cache_key, font.clone());
 
         Some(font)
+    }
+
+    /// Draws transforms that `Font` cannot express: a nonzero y-shear coefficient
+    /// (`b`, as in a rotation), or a negative y scale (`d`, as in a vertical flip).
+    fn draw_glyphs_with_canvas_transform(
+        &self,
+        font: &Font,
+        transform: kurbo::Affine,
+        glyph_transform: kurbo::Affine,
+        glyphs: impl Iterator<Item = anyrender::Glyph>,
+    ) {
+        let mut glyphs = glyphs.peekable();
+        if glyphs.peek().is_none() {
+            return;
+        }
+
+        let paint = &self.cache.paint;
+        let shader = paint.shader();
+        let mask_paint;
+        let glyph_paint = if shader.is_some() {
+            // Composite the brush in run space without transforming it with each glyph.
+            self.inner.save_layer(&SaveLayerRec::default());
+            mask_paint = {
+                let mut mask = paint.clone();
+                mask.set_shader(None).set_alpha_f(1.0);
+                mask
+            };
+            &mask_paint
+        } else {
+            paint
+        };
+        let origin = Point::new(0.0, 0.0);
+        for glyph in glyphs {
+            let placement = kurbo::Affine::translate((f64::from(glyph.x), f64::from(glyph.y)));
+            self.set_matrix(transform * placement * glyph_transform);
+            self.inner.draw_glyphs_at(
+                &[glyph.id as GlyphId],
+                GlyphPositions::Points(&[origin]),
+                origin,
+                font,
+                glyph_paint,
+            );
+        }
+        self.set_matrix(transform);
+        if let Some(shader) = shader {
+            let mut brush = Paint::default();
+            brush
+                .set_shader(shader)
+                .set_alpha_f(paint.alpha_f())
+                .set_blend_mode(SkBlendMode::SrcIn);
+            self.inner.draw_paint(&brush);
+            self.inner.restore();
+        }
     }
 
     fn get_or_cache_normalized_typeface(
@@ -639,6 +688,7 @@ impl PaintScene for SkiaScenePainter<'_> {
         self.draw_shape_with_fill(shape, style);
     }
 
+    /// Applies `glyph_transform` in y-down glyph space before placing each glyph in the run.
     fn draw_glyphs<'a, 's: 'a>(
         &'s mut self,
         #[allow(unused_mut)] mut font: &'a peniko::FontData,
@@ -654,26 +704,17 @@ impl PaintScene for SkiaScenePainter<'_> {
         glyphs: impl Iterator<Item = anyrender::Glyph>,
         anti_aliasing: AntiAliasing,
     ) {
-        let brush: anyrender::PaintRef<'a> = brush.into();
-        self.record_pattern(&brush);
         self.set_matrix(transform);
-
-        if let Some(glyph_transform) = glyph_transform {
-            self.concat_matrix(glyph_transform);
+        if glyph_transform.is_some_and(|g| !g.is_finite() || g.determinant() == 0.0) {
+            return;
         }
 
-        // Keep patterns in the run's space, not the glyphs'.
-        let brush_transform = match (&brush, glyph_transform) {
-            (anyrender::Paint::Pattern(_), Some(glyph_transform))
-                if glyph_transform.determinant() != 0.0 =>
-            {
-                Some(glyph_transform.inverse())
-            }
-            _ => None,
-        };
+        let brush: anyrender::PaintRef<'a> = brush.into();
+        self.record_pattern(&brush);
+
         self.reset_paint();
         self.cache.paint.set_anti_alias(anti_aliasing.is_enabled());
-        self.set_paint_brush(brush, brush_transform);
+        self.set_paint_brush(brush, None);
         self.set_paint_style(style);
         self.set_paint_alpha(brush_alpha);
 
@@ -691,13 +732,30 @@ impl PaintScene for SkiaScenePainter<'_> {
             font.set_edging(skia_safe::font::Edging::Alias);
         }
 
+        let mut offset = kurbo::Vec2::ZERO;
+        if let Some(glyph_transform) = glyph_transform {
+            let [a, b, c, d, x, y] = glyph_transform.as_coeffs();
+            if b == 0.0 && d > 0.0 {
+                // Skia applies size, then horizontal scale and y-down shear.
+                let size = (f64::from(font.size()) * d) as f32;
+                let scale_x = (a / d) as f32;
+                let skew_x = (c / d) as f32;
+                font.set_size(size).set_scale_x(scale_x).set_skew_x(skew_x);
+                offset = kurbo::Vec2::new(x, y);
+            } else {
+                self.draw_glyphs_with_canvas_transform(&font, transform, glyph_transform, glyphs);
+                return;
+            }
+        }
+
         let (min_size, _) = glyphs.size_hint();
         self.cache.glyph_id_buf.reserve(min_size);
         self.cache.glyph_pos_buf.reserve(min_size);
 
         for glyph in glyphs {
             self.cache.glyph_id_buf.push(GlyphId::from(glyph.id as u16));
-            self.cache.glyph_pos_buf.push(Point::new(glyph.x, glyph.y));
+            let pos = kurbo::Point::new(f64::from(glyph.x), f64::from(glyph.y)) + offset;
+            self.cache.glyph_pos_buf.push(sk_kurbo::pt_from(pos));
         }
 
         self.inner.draw_glyphs_at(
@@ -1101,16 +1159,21 @@ fn convert_filter_effect(
                 EdgeMode::Mirror => skia_safe::TileMode::Mirror,
                 EdgeMode::None => skia_safe::TileMode::Decal,
             };
+            // Skia computes correlation (`kernel[y * cols + x]`), while SVG `feConvolveMatrix`
+            // computes convolution (`kernel[(rows - 1 - y) * cols + (cols - 1 - x)]`).
+            let values: smallvec::SmallVec<[f32; 25]> =
+                kernel.values.iter().rev().copied().collect();
             image_filters::matrix_convolution(
                 skia_safe::ISize::new(kernel.columns as i32, kernel.rows as i32),
-                &kernel.values,
+                &values,
                 1.0 / divisor,
-                kernel.bias,
+                // Skia adds `bias` in 0..255 channel units; `ConvolutionKernel::bias` is normalized.
+                kernel.bias * 255.0,
                 skia_safe::IPoint::new(kernel.target_x as i32, kernel.target_y as i32),
                 tile_mode,
                 !kernel.preserve_alpha,
                 input,
-                None,
+                sk_kurbo::rect_from(crop),
             )
         }
         FilterEffect::Turbulence(turbulence_filter) => {

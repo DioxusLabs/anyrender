@@ -3,7 +3,6 @@ name = "anyrender_svg"
 description = "Render SVGs with anyrender"
 version = "0.16.0"
 documentation = "https://docs.rs/anyrender-svg"
-homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 edition.workspace = true

@@ -1,9 +1,8 @@
 [package]
 name = "anyrender"
 description = "2D Canvas abstraction"
-version = "0.15.0"
+version = "0.15.1"
 documentation = "https://docs.rs/anyrender"
-homepage.workspace = true
 repository.workspace = true
 license.workspace = true
 edition.workspace = true

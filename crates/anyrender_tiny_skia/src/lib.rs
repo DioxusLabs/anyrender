@@ -1,4 +1,4 @@
-//! A [`tiny skia`] backend for the [`anyrender`] 2D drawing abstraction
+//! A [`tiny_skia`] backend for the [`anyrender`] 2D drawing abstraction
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod filter;
