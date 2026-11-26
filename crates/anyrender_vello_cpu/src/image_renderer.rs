@@ -19,6 +19,14 @@ impl VelloCpuImageRenderer {
         }
     }
 
+    /// A renderer that renders on the calling thread even with the
+    /// `multithreading` feature, which filters need.
+    pub fn new_single_threaded(width: u32, height: u32) -> Self {
+        Self {
+            scene: VelloCpuScenePainter::new_single_threaded(width as u16, height as u16),
+        }
+    }
+
     /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
     ///
     /// Defaults to `false`.
@@ -45,7 +53,8 @@ impl ImageRenderer for VelloCpuImageRenderer {
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        self.scene.render_ctx = RenderContext::new(width as u16, height as u16);
+        let settings = *self.scene.render_ctx.render_settings();
+        self.scene.render_ctx = RenderContext::new_with(width as u16, height as u16, settings);
     }
 
     fn reset(&mut self) {
