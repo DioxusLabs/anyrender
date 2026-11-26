@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyrender::{
-    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, RenderContext,
+    AntiAliasing, Filter, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene, PaintShape,
+    RenderContext,
 };
 use glifo::FontEmbolden;
 use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
@@ -178,17 +179,17 @@ impl VelloCpuScenePainter {
         self.glyph_caching = enabled;
     }
 
-    fn push_clip(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) -> ClipKind {
+    fn push_clip(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) -> ClipKind {
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(fill);
-        if let Some(rect) = clip.as_rect() {
-            self.render_ctx.push_clip_rect(&rect);
+        if let PaintShape::Rect(rect) = clip {
+            self.render_ctx.push_clip_rect(rect);
             ClipKind::Rect
         } else {
             // An isolated layer (rather than `push_clip_path`) so that overlapping draws are
             // anti-aliased against the clip edge once, instead of once per draw.
             self.render_ctx
-                .push_clip_layer(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_layer(&clip.into_bez_path(DEFAULT_TOLERANCE));
             ClipKind::Path
         }
     }
@@ -327,13 +328,13 @@ impl PaintScene for VelloCpuScenePainter {
         self.layer_stack.clear();
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
@@ -364,8 +365,8 @@ impl PaintScene for VelloCpuScenePainter {
         }
         self.render_ctx.set_fill_rule(fill);
         self.render_ctx.push_layer(
-            Some(&clip.into_path(DEFAULT_TOLERANCE)),
-            Some(blend.into()),
+            Some(&clip.into_bez_path(DEFAULT_TOLERANCE)),
+            Some(blend),
             Some(alpha),
             None,
             filter,
@@ -380,12 +381,12 @@ impl PaintScene for VelloCpuScenePainter {
         }
     }
 
-    fn push_mask_layer(
+    fn push_mask_layer_shape(
         &mut self,
         fill: Fill,
         _mode: MaskMode,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
     ) {
         // One unclipped layer, which vello_cpu bounds by the enclosing clip, so that everything
         // outside of the clip is masked out, with the mask content clipped inside it.
@@ -401,7 +402,7 @@ impl PaintScene for VelloCpuScenePainter {
         self.layer_stack.push(LayerKind::Mask(clip));
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
         let clip = self.push_clip(fill, transform, clip);
         self.layer_stack.push(LayerKind::Clip(clip));
     }
@@ -412,44 +413,48 @@ impl PaintScene for VelloCpuScenePainter {
         }
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         anti_aliasing: AntiAliasing,
     ) {
         self.render_ctx
             .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_stroke(style.clone());
-        self.set_paint(paint.into(), transform, brush_transform);
-        self.render_ctx
-            .stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        self.set_paint(paint, transform, brush_transform);
+        if let PaintShape::Rect(rect) = shape {
+            self.render_ctx.stroke_rect(rect);
+        } else {
+            self.render_ctx
+                .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        }
         self.render_ctx.set_aliasing_threshold(None);
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         anti_aliasing: AntiAliasing,
     ) {
         self.render_ctx
             .set_aliasing_threshold(aliasing_threshold(anti_aliasing));
         self.render_ctx.set_transform(transform);
         self.render_ctx.set_fill_rule(style);
-        self.set_paint(paint.into(), transform, brush_transform);
-        if let Some(rect) = shape.as_rect() {
-            self.render_ctx.fill_rect(&rect);
+        self.set_paint(paint, transform, brush_transform);
+        if let PaintShape::Rect(rect) = shape {
+            self.render_ctx.fill_rect(rect);
         } else {
             self.render_ctx
-                .fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+                .fill_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
         self.render_ctx.set_aliasing_threshold(None);
     }

@@ -2,10 +2,10 @@
 
 use anyrender::{
     AntiAliasing, Filter, Glyph, MaskMode, NormalizedCoord, Paint, PaintRef, PaintScene,
-    RenderContext,
+    PaintShape, RenderContext,
 };
 use glifo::FontEmbolden;
-use kurbo::{Affine, Diagonal2, Rect, Shape, Stroke};
+use kurbo::{Affine, Diagonal2, Rect, Stroke};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 use vello_common::paint::PaintType;
 
@@ -208,13 +208,13 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.reset();
     }
 
-    fn push_layer(
+    fn push_layer_shape(
         &mut self,
         fill: Fill,
-        blend: impl Into<BlendMode>,
+        blend: BlendMode,
         alpha: f32,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
         filter: Option<Arc<Filter>>,
         _backdrop_filter: Option<Arc<Filter>>,
     ) {
@@ -230,14 +230,14 @@ impl PaintScene for WebGlScenePainter<'_> {
             self.scene.push_clip_rect(region);
         }
         self.scene.set_fill_rule(fill);
-        if let Some(rect) = clip.as_rect() {
-            self.scene.push_clip_rect(&rect);
+        if let PaintShape::Rect(rect) = clip {
+            self.scene.push_clip_rect(rect);
         } else {
             self.scene
-                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_path(&clip.into_bez_path(DEFAULT_TOLERANCE));
         }
         self.scene
-            .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+            .push_layer(None, Some(blend), Some(alpha), None, filter);
         match &region {
             Some(region) => {
                 self.scene.push_clip_rect(region);
@@ -247,12 +247,12 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
     }
 
-    fn push_mask_layer(
+    fn push_mask_layer_shape(
         &mut self,
         fill: Fill,
         _mode: MaskMode,
         transform: Affine,
-        clip: &impl Shape,
+        clip: PaintShape<'_>,
     ) {
         let blend = BlendMode::new(Mix::Normal, Compose::DestIn);
 
@@ -272,7 +272,7 @@ impl PaintScene for WebGlScenePainter<'_> {
             transform,
             Color::BLACK,
             None,
-            clip,
+            clip.as_ref(),
             AntiAliasing::Enabled,
         );
         self.pop_layer();
@@ -281,15 +281,15 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.push_layer(fill, blend, 1.0, transform, clip, None, None);
     }
 
-    fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {
+    fn push_clip_layer_shape(&mut self, fill: Fill, transform: Affine, clip: PaintShape<'_>) {
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Clip);
-        if let Some(rect) = clip.as_rect() {
-            self.scene.push_clip_rect(&rect);
+        if let PaintShape::Rect(rect) = clip {
+            self.scene.push_clip_rect(rect);
         } else {
             self.scene
-                .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
+                .push_clip_path(&clip.into_bez_path(DEFAULT_TOLERANCE));
         }
         // Pattern antialiasing applies to this clip, not the tile content.
         self.scene.set_aliasing_threshold(None);
@@ -313,16 +313,15 @@ impl PaintScene for WebGlScenePainter<'_> {
         }
     }
 
-    fn stroke<'a>(
+    fn stroke_shape(
         &mut self,
         style: &Stroke,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         anti_aliasing: AntiAliasing,
     ) {
-        let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
             self.scene
@@ -347,20 +346,24 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        self.scene.stroke_path(&shape.into_path(DEFAULT_TOLERANCE));
+        if let PaintShape::Rect(rect) = shape {
+            self.scene.stroke_rect(rect);
+        } else {
+            self.scene
+                .stroke_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
+        }
         self.scene.set_aliasing_threshold(None);
     }
 
-    fn fill<'a>(
+    fn fill_shape(
         &mut self,
         style: Fill,
         transform: Affine,
-        paint: impl Into<PaintRef<'a>>,
+        paint: PaintRef<'_>,
         brush_transform: Option<Affine>,
-        shape: &impl Shape,
+        shape: PaintShape<'_>,
         anti_aliasing: AntiAliasing,
     ) {
-        let paint: anyrender::PaintRef<'a> = paint.into();
         if let anyrender::Paint::Pattern(pattern) = paint {
             let cull_rect = self.cull_rect();
             self.scene
@@ -385,10 +388,11 @@ impl PaintScene for WebGlScenePainter<'_> {
         self.scene.set_paint(paint);
         self.scene
             .set_paint_transform(brush_transform.unwrap_or(Affine::IDENTITY));
-        if let Some(rect) = shape.as_rect() {
-            self.scene.fill_rect(&rect);
+        if let PaintShape::Rect(rect) = shape {
+            self.scene.fill_rect(rect);
         } else {
-            self.scene.fill_path(&shape.into_path(DEFAULT_TOLERANCE));
+            self.scene
+                .fill_path(&shape.into_bez_path(DEFAULT_TOLERANCE));
         }
         self.scene.set_aliasing_threshold(None);
     }

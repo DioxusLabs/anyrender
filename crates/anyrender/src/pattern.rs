@@ -8,7 +8,7 @@ use std::sync::{
 use kurbo::{Affine, Rect, Shape, Stroke, StrokeOpts, Vec2};
 use peniko::{BlendMode, Color, Compose, Fill, FontData, Mix, StyleRef};
 
-use crate::{AntiAliasing, Glyph, NormalizedCoord, PaintScene, Scene};
+use crate::{AntiAliasing, Glyph, NormalizedCoord, PaintScene, PaintShape, Scene};
 
 static PATTERN_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -99,13 +99,13 @@ impl PartialEq for Pattern {
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
-pub fn fill_pattern_tiles<S: PaintScene>(
+pub fn fill_pattern_tiles<'s, S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
     fill: Fill,
     transform: Affine,
     brush_transform: Option<Affine>,
-    shape: &impl Shape,
+    shape: impl Into<PaintShape<'s>>,
     cull_rect: Option<Rect>,
 ) {
     fill_pattern_tiles_with(
@@ -125,13 +125,13 @@ pub fn fill_pattern_tiles<S: PaintScene>(
 ///
 /// This is intended for use by backends.
 #[doc(hidden)]
-pub fn stroke_pattern_tiles<S: PaintScene>(
+pub fn stroke_pattern_tiles<'s, S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
     style: &Stroke,
     transform: Affine,
     brush_transform: Option<Affine>,
-    shape: &impl Shape,
+    shape: impl Into<PaintShape<'s>>,
     cull_rect: Option<Rect>,
 ) {
     stroke_pattern_tiles_with(
@@ -153,13 +153,13 @@ pub fn stroke_pattern_tiles<S: PaintScene>(
 /// This is intended for use by backends.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub fn fill_pattern_tiles_with<S: PaintScene>(
+pub fn fill_pattern_tiles_with<'s, S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
     fill: Fill,
     transform: Affine,
     brush_transform: Option<Affine>,
-    shape: &impl Shape,
+    shape: impl Into<PaintShape<'s>>,
     cull_rect: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
@@ -167,10 +167,11 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
     if brush_transform.determinant() == 0.0 {
         return;
     }
+    let shape = shape.into();
     let bounds = brush_transform
         .inverse()
         .transform_rect_bbox(shape.bounding_box());
-    painter.push_clip_layer(fill, transform, shape);
+    painter.push_clip_layer_shape(fill, transform, shape);
     draw_tiles(
         painter,
         pattern,
@@ -188,13 +189,13 @@ pub fn fill_pattern_tiles_with<S: PaintScene>(
 /// This is intended for use by backends.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub fn stroke_pattern_tiles_with<S: PaintScene>(
+pub fn stroke_pattern_tiles_with<'s, S: PaintScene>(
     painter: &mut S,
     pattern: &Pattern,
     style: &Stroke,
     transform: Affine,
     brush_transform: Option<Affine>,
-    shape: &impl Shape,
+    shape: impl Into<PaintShape<'s>>,
     cull_rect: Option<Rect>,
     draw_tile: impl FnMut(&mut S, Affine),
 ) {
@@ -206,7 +207,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
     let scale = a.hypot(b).max(c.hypot(d));
     let tolerance = if scale > 0.0 { 0.1 / scale } else { 0.1 };
     let outline = kurbo::stroke(
-        shape.path_elements(tolerance),
+        shape.into().path_elements(tolerance),
         style,
         &StrokeOpts::default(),
         tolerance,
@@ -217,7 +218,7 @@ pub fn stroke_pattern_tiles_with<S: PaintScene>(
         Fill::NonZero,
         transform,
         brush_transform,
-        &outline,
+        outline,
         cull_rect,
         draw_tile,
     );
