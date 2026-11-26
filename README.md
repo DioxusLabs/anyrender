@@ -62,36 +62,36 @@ crates in your project.
 
 <table>
   <thead>
-    <tr><th>AnyRender</th><th>0.6</th><th>0.7</th><th>0.8</th><th>0.9</th><th>0.10</th><th>0.11</th><th>0.12</th><th>0.13</th><th>0.14</th><th>0.15</th></tr>
+    <tr><th>AnyRender</th><th>0.15</th><th>0.14</th><th>0.13</th><th>0.12</th><th>0.11</th><th>0.10</th><th>0.9</th><th>0.8</th><th>0.7</th><th>0.6</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>kurbo</code></td><td>0.12</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td></tr>
-    <tr><td><code>peniko</code></td><td>0.5</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td></tr>
+    <tr><td><code>kurbo</code></td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.13</td><td>0.12</td></tr>
+    <tr><td><code>peniko</code></td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.6</td><td>0.5</td></tr>
     <tr><th colspan="11" align=left>WGPU</th></tr>
-    <tr><td><code>wgpu</code></td><td>26</td><td>27</td><td>28</td><td>28</td><td>29</td><td>29</td><td>29</td><td>29</td><td>30</td><td>30</td></tr>
-    <tr><td><code>wgpu_context</code></td><td>0.1</td><td>0.2</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.6–0.7</td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td></tr>
+    <tr><td><code>wgpu</code></td><td>30</td><td>30</td><td>29</td><td>29</td><td>29</td><td>29</td><td>28</td><td>28</td><td>27</td><td>26</td></tr>
+    <tr><td><code>wgpu_context</code></td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.8</td><td>0.6–0.7</td><td>0.6</td><td>0.5</td><td>0.4</td><td>0.2</td><td>0.1</td></tr>
     <tr><th colspan="11" align=left>Vello</th></tr>
-    <tr><td><code>anyrender_vello</code></td><td>0.6</td><td>0.7</td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11–0.12</td><td>0.13</td><td>0.14</td><td>0.15</td><td>0.16</td></tr>
-    <tr><td><code>vello</code></td><td>0.6</td><td>0.7 <sup><a href="#fn-vello-git">1</a></sup></td><td>0.8</td><td>0.8</td><td>0.9</td><td>0.9</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td></tr>
+    <tr><td><code>anyrender_vello</code></td><td>0.16</td><td>0.15</td><td>0.14</td><td>0.13</td><td>0.11–0.12</td><td>0.10</td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.6</td></tr>
+    <tr><td><code>vello</code></td><td>0.12</td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.9</td><td>0.9</td><td>0.8</td><td>0.8</td><td>0.7 <sup><a href="#fn-vello-git">1</a></sup></td><td>0.6</td></tr>
     <tr><th colspan="11" align=left>Vello GPU / Hybrid</th></tr>
-    <tr><td><code>vello_hybrid</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>—</td><td>—</td></tr>
-    <tr><td><code>vello_gpu</code></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.3</td><td>0.4</td></tr>
-    <tr><td><code>anyrender_vello_gpu</code></td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.4</td><td>0.5</td><td>0.7–0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td></tr>
+    <tr><td><code>vello_hybrid</code></td><td>—</td><td>—</td><td>0.1</td><td>0.9</td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.7</td><td>0.6</td><td>0.0.4</td></tr>
+    <tr><td><code>vello_gpu</code></td><td>0.4</td><td>0.3</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td><code>anyrender_vello_gpu</code></td><td>0.12</td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.7–0.8</td><td>0.5</td><td>0.4</td><td>0.3</td><td>0.2</td><td>0.1</td></tr>
     <tr><th colspan="11" align=left>Vello CPU</th></tr>
-    <tr><td><code>vello_cpu</code></td><td>0.0.4</td><td>0.0.6</td><td>0.0.7</td><td>0.0.7</td><td>0.0.8</td><td>0.0.9</td><td>0.0.9</td><td>0.1</td><td>0.3</td><td>0.4</td></tr>
-    <tr><td><code>anyrender_vello_cpu</code></td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.14</td><td>0.15</td><td>0.16–0.17</td><td>0.18</td><td>0.19</td></tr>
+    <tr><td><code>vello_cpu</code></td><td>0.4</td><td>0.3</td><td>0.1</td><td>0.9</td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.7</td><td>0.6</td><td>0.0.4</td></tr>
+    <tr><td><code>anyrender_vello_cpu</code></td><td>0.19</td><td>0.18</td><td>0.16–0.17</td><td>0.15</td><td>0.14</td><td>0.12</td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.8</td></tr>
     <tr><th colspan="11" align=left>Skia</th></tr>
-    <tr><td><code>skia-safe</code></td><td>0.89</td><td>0.91</td><td>0.93</td><td>0.93</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.97</td><td>0.97</td><td>0.99</td><td>0.153.3</td><td>0.157.0</td></tr>
-    <tr><td><code>anyrender_skia</code></td><td>0.1</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.13</td></tr>
+    <tr><td><code>skia-safe</code></td><td>0.157.0</td><td>0.153.3</td><td>0.99</td><td>0.97</td><td>0.97</td><td>0.93 <sup><a href="#fn-skia-097">2</a></sup></td><td>0.93</td><td>0.93</td><td>0.91</td><td>0.89</td></tr>
+    <tr><td><code>anyrender_skia</code></td><td>0.13</td><td>0.12</td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.7</td><td>0.6</td><td>0.5</td><td>0.4</td><td>0.1</td></tr>
     <tr><th colspan="11" align=left>Tiny-skia</th></tr>
-    <tr><td><code>anyrender_tiny_skia</code></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.1</td></tr>
+    <tr><td><code>anyrender_tiny_skia</code></td><td>0.1</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
     <tr><th colspan="11" align=left>Content Libs</th></tr>
-    <tr><td><code>image_filters_types</code></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>0.1</td></tr>
-    <tr><td><code>anyrender_svg</code></td><td>0.6</td><td>0.8</td><td>0.9</td><td>0.10</td><td>0.11</td><td>0.12</td><td>0.13</td><td>0.14</td><td>0.15</td><td>0.16</td></tr>
-    <tr><td><code>anyrender_serialize</code></td><td>—</td><td>—</td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.8</td><td>0.9</td></tr>
+    <tr><td><code>image_filters_types</code></td><td>0.1</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    <tr><td><code>anyrender_svg</code></td><td>0.16</td><td>0.15</td><td>0.14</td><td>0.13</td><td>0.12</td><td>0.11</td><td>0.10</td><td>0.9</td><td>0.8</td><td>0.6</td></tr>
+    <tr><td><code>anyrender_serialize</code></td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.6</td><td>0.5</td><td>0.3</td><td>0.2</td><td>0.1</td><td>—</td><td>—</td></tr>
     <tr><th colspan="11" align=left>CPU <code>WindowRenderer</code>s</th></tr>
-    <tr><td><code>pixels_window_renderer</code></td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.8</td><td>0.9</td><td>0.10</td></tr>
-    <tr><td><code>softbuffer_window_renderer</code></td><td>0.1</td><td>0.2</td><td>0.3</td><td>0.4</td><td>0.5</td><td>0.6</td><td>0.7</td><td>0.8</td><td>0.9</td><td>0.10</td></tr>
+    <tr><td><code>pixels_window_renderer</code></td><td>0.10</td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.6</td><td>0.5</td><td>0.4</td><td>0.3</td><td>0.2</td><td>0.1</td></tr>
+    <tr><td><code>softbuffer_window_renderer</code></td><td>0.10</td><td>0.9</td><td>0.8</td><td>0.7</td><td>0.6</td><td>0.5</td><td>0.4</td><td>0.3</td><td>0.2</td><td>0.1</td></tr>
   </tbody>
 </table>
 
