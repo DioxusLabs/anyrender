@@ -13,7 +13,7 @@ use vello_gpu::{
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
 
-use super::scene::{WebGlImageManager, WebGlScenePainter};
+use super::scene::{WebGlGlyphAtlas, WebGlImageManager, WebGlScenePainter};
 use crate::common::{ImageCache, VelloGpuRendererOptions};
 
 struct ActiveRenderState {
@@ -53,6 +53,7 @@ pub struct VelloGpuWebGlWindowRenderer {
     scene: Scene,
     config: VelloGpuRendererOptions,
     cached_images: ImageCache,
+    glyphs: WebGlGlyphAtlas,
     texture_bindings: WebGlTextureBindings,
 }
 
@@ -69,6 +70,7 @@ impl VelloGpuWebGlWindowRenderer {
             scene: Scene::new_with(0, 0, config.render_settings.level()),
             config,
             cached_images: ImageCache::default(),
+            glyphs: WebGlGlyphAtlas::new(),
             texture_bindings: WebGlTextureBindings::new(),
         }
     }
@@ -183,6 +185,7 @@ impl WindowRenderer for VelloGpuWebGlWindowRenderer {
                         .map(|v| v as u16)
                         .unwrap_or(2048);
                     self.cached_images.clear();
+                    self.glyphs.clear();
                     self.cached_images.set_max_image_size((max, max));
                     self.render_state = RenderState::Active(ActiveRenderState {
                         renderer,
@@ -198,6 +201,7 @@ impl WindowRenderer for VelloGpuWebGlWindowRenderer {
     fn suspend(&mut self) {
         self.render_state = RenderState::Suspended;
         self.cached_images.clear();
+        self.glyphs.clear();
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
@@ -230,9 +234,9 @@ impl WindowRenderer for VelloGpuWebGlWindowRenderer {
 
         let image_manager = WebGlImageManager::new(
             &mut state.renderer,
-            &mut state.resources,
             &mut self.cached_images,
             &mut self.texture_bindings,
+            &mut self.glyphs,
         );
         let mut scene_painter = WebGlScenePainter::new(&mut self.scene, image_manager)
             .with_glyph_caching(self.config.glyph_caching);
@@ -263,9 +267,9 @@ impl WindowRenderer for VelloGpuWebGlWindowRenderer {
             .expect("failed to render to canvas");
         WebGlImageManager::new(
             &mut state.renderer,
-            &mut state.resources,
             &mut self.cached_images,
             &mut self.texture_bindings,
+            &mut self.glyphs,
         )
         .finish_frame()
         .expect("failed to evict images");

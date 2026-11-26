@@ -16,11 +16,9 @@ pub struct VelloGpuRendererOptions {
     /// lower values reduce memory usage and input latency at the cost of less
     /// buffering to absorb slow frames.
     pub desired_maximum_frame_latency: u32,
-    /// Whether to cache rasterized glyphs in Vello's glyph atlas.
+    /// Whether to cache rasterized glyphs in the glyph atlas.
     ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
+    /// Defaults to `true`. Turning it off is meant for debugging and tests.
     pub glyph_caching: bool,
 }
 
@@ -33,7 +31,7 @@ impl Default for VelloGpuRendererOptions {
             base_color: Color::WHITE,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             desired_maximum_frame_latency: 1,
-            glyph_caching: false,
+            glyph_caching: true,
         }
     }
 }
@@ -83,11 +81,9 @@ impl VelloGpuRendererOptions {
         }
     }
 
-    /// Enable or disable caching of rasterized glyphs in Vello's glyph atlas.
+    /// Enable or disable caching of rasterized glyphs in the glyph atlas.
     ///
-    /// Defaults to `false`.
-    ///
-    /// Note: Vello considers atlas-backed glyph caching experimental.
+    /// Defaults to `true`. Turning it off is meant for debugging and tests.
     pub fn glyph_caching(self, glyph_caching: bool) -> Self {
         Self {
             glyph_caching,
