@@ -2837,6 +2837,8 @@ mod tests {
         let (entries, shifted) = draw(10.75, 20.0);
         assert_eq!(entries, 2);
         assert!((shifted - first - Vec2::new(0.5, 0.0)).hypot() < 1e-6);
+        // Both images were rasterized through the batch path, from the glyph's recording.
+        assert_eq!(resources.cache.batches, [1, 1]);
     }
 
     #[test]
