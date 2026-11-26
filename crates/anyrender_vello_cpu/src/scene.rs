@@ -227,10 +227,41 @@ impl VelloCpuScenePainter {
         let paint = match paint {
             Paint::Solid(alpha_color) => PaintType::Solid(alpha_color),
             Paint::Gradient(gradient) => PaintType::Gradient(gradient.clone()),
-            Paint::Image(image) => PaintType::Image(ImageBrush {
-                image: self.image_cache.get_or_register(image.image),
-                sampler: image.sampler,
-            }),
+            Paint::Image(image) => {
+                let scale = (transform * brush_transform).spectral_norm();
+                // The resampler uses finite-image edge extension. Repeating or
+                // reflecting tiles need periodic prefiltering instead.
+                if image.sampler.x_extend == peniko::Extend::Pad
+                    && image.sampler.y_extend == peniko::Extend::Pad
+                    && image.sampler.quality != peniko::ImageQuality::Low
+                    && image.image.width > 0
+                    && image.image.height > 0
+                    && scale.is_finite()
+                    && scale > 0.0
+                    && scale < 0.5
+                {
+                    let width = (image.image.width as f64 * scale).ceil().max(1.0) as u32;
+                    let height = (image.image.height as f64 * scale).ceil().max(1.0) as u32;
+                    let source = self
+                        .image_cache
+                        .get_or_register_sized(image.image, width, height);
+                    let correction = Affine::scale_non_uniform(
+                        image.image.width as f64 / width as f64,
+                        image.image.height as f64 / height as f64,
+                    );
+                    return (
+                        PaintType::Image(ImageBrush {
+                            image: source,
+                            sampler: image.sampler,
+                        }),
+                        brush_transform * correction,
+                    );
+                }
+                PaintType::Image(ImageBrush {
+                    image: self.image_cache.get_or_register(image.image),
+                    sampler: image.sampler,
+                })
+            }
             Paint::Pattern(pattern) => {
                 match self.pattern_pixmap(pattern, transform * brush_transform) {
                     Some((pixmap, pixel_transform)) => {

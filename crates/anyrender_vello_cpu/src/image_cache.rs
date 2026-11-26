@@ -46,7 +46,7 @@ struct Entry {
 /// Caches image conversions, keyed on the source blob's unique id.
 #[derive(Default)]
 pub(crate) struct ImageCache {
-    entries: HashMap<u64, Entry>,
+    entries: HashMap<(u64, u32, u32), Entry>,
     serial: u64,
     total_bytes: usize,
     config: ImageCacheConfig,
@@ -62,19 +62,35 @@ impl ImageCache {
 
     /// Look up the converted image for `image`, converting it on a cache miss.
     pub(crate) fn get_or_register(&mut self, image: &peniko::ImageData) -> ImageSource {
+        self.get_or_register_sized(image, image.width, image.height)
+    }
+
+    pub(crate) fn get_or_register_sized(
+        &mut self,
+        image: &peniko::ImageData,
+        width: u32,
+        height: u32,
+    ) -> ImageSource {
         let serial = self.serial;
         let total_bytes = &mut self.total_bytes;
-        let entry = self.entries.entry(image.data.id()).or_insert_with(|| {
-            let pixmap = convert_image(image);
-            let bytes = pixmap.data().len() * 4;
-            *total_bytes += bytes;
-            Entry {
-                pixmap,
-                bytes,
-                last_used: serial,
-                source: image.data.downgrade(),
-            }
-        });
+        let entry = self
+            .entries
+            .entry((image.data.id(), width, height))
+            .or_insert_with(|| {
+                let pixmap = if width == image.width && height == image.height {
+                    convert_image(image)
+                } else {
+                    crate::image_convert::minify_image(image, width, height)
+                };
+                let bytes = pixmap.data().len() * 4;
+                *total_bytes += bytes;
+                Entry {
+                    pixmap,
+                    bytes,
+                    last_used: serial,
+                    source: image.data.downgrade(),
+                }
+            });
         entry.last_used = serial;
         ImageSource::Pixmap(entry.pixmap.clone())
     }
@@ -142,6 +158,50 @@ mod tests {
     }
 
     #[test]
+    fn zoom_variants_respect_budget_after_frames_retire() {
+        let mut cache = ImageCache::new(ImageCacheConfig {
+            max_bytes: 128,
+            prune_interval: 1,
+            ..Default::default()
+        });
+        let img = image(&[[100, 50, 25, 128]; 256]);
+        for width in (1..64).cycle().take(256) {
+            cache.get_or_register_sized(&img, width, 1);
+            cache.maintain();
+            // Existing policy permits the current frame alone to exceed the
+            // soft cap, but must not accumulate older resized variants.
+            assert!(cache.total_bytes <= 128.max(width as usize * 4));
+        }
+        drop(img);
+        cache.maintain();
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.total_bytes, 0);
+    }
+
+    #[test]
+    fn minified_variants_reuse_pixmaps_and_expire_with_source() {
+        let mut cache = ImageCache::new(ImageCacheConfig {
+            prune_interval: 1,
+            ..Default::default()
+        });
+        let img = image(&[[100, 50, 25, 128]; 64]);
+        let first = cache.get_or_register_sized(&img, 8, 1);
+        let again = cache.get_or_register_sized(&img, 8, 1);
+        let (ImageSource::Pixmap(a), ImageSource::Pixmap(b)) = (first, again) else {
+            panic!("cached pixmaps")
+        };
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.total_bytes, 32);
+        cache.get_or_register_sized(&img, 16, 1);
+        assert_eq!(cache.entries.len(), 2);
+        drop(img);
+        cache.maintain();
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.total_bytes, 0);
+    }
+
+    #[test]
     fn cache_hit_reuses_converted_image() {
         let mut cache = ImageCache::new(ImageCacheConfig::default());
         let img = image(&[[0, 0, 0, 255]]);
@@ -201,7 +261,11 @@ mod tests {
         cache.get_or_register(&new);
         cache.maintain();
         assert_eq!(cache.entries.len(), 1);
-        assert!(cache.entries.contains_key(&new.data.id()));
+        assert!(
+            cache
+                .entries
+                .contains_key(&(new.data.id(), new.width, new.height))
+        );
     }
 
     #[test]

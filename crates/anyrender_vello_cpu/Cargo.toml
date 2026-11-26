@@ -25,6 +25,7 @@ color = { version = "0.3", features = ["bytemuck"] }
 debug_timer = { workspace = true }
 kurbo = { workspace = true }
 peniko = { workspace = true }
+image = { workspace = true }
 glifo = { workspace = true }
 
 # WindowRenderer backends
