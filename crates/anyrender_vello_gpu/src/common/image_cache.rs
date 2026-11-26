@@ -17,6 +17,7 @@ struct CachedImage {
 #[derive(Debug)]
 pub struct ImageCache {
     entries: FxHashMap<u64, CachedImage>,
+    transient: Vec<TextureId>,
     frame: u64,
     max_image_size: (u16, u16),
 }
@@ -25,6 +26,7 @@ impl Default for ImageCache {
     fn default() -> Self {
         Self {
             entries: FxHashMap::default(),
+            transient: Vec::new(),
             frame: 0,
             max_image_size: vello_common::multi_atlas::AtlasConfig::default().atlas_size,
         }
@@ -46,6 +48,7 @@ impl ImageCache {
     /// Discard identities when their renderer resources are replaced.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.transient.clear();
         self.frame = 0;
     }
 
@@ -76,8 +79,14 @@ impl ImageCache {
         );
     }
 
+    pub(crate) fn insert_transient(&mut self, texture_id: TextureId) {
+        self.transient.push(texture_id);
+    }
+
     pub(crate) fn finish_frame(&mut self) -> Vec<TextureId> {
-        self.evict(UNUSED_IMAGE_BUDGET)
+        let mut evicted = self.evict(UNUSED_IMAGE_BUDGET);
+        evicted.append(&mut self.transient);
+        evicted
     }
 
     fn evict(&mut self, budget: u64) -> Vec<TextureId> {
@@ -247,5 +256,13 @@ mod tests {
         assert_eq!(cache.get(clone.id()), Some((TextureId(1), true)));
         drop(clone);
         assert_eq!(cache.finish_frame(), vec![TextureId(1)]);
+    }
+
+    #[test]
+    fn transient_textures_are_evicted_at_frame_end() {
+        let mut cache = ImageCache::default();
+        cache.insert_transient(TextureId(42));
+        assert_eq!(cache.finish_frame(), vec![TextureId(42)]);
+        assert!(cache.finish_frame().is_empty());
     }
 }

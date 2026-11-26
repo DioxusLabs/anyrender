@@ -302,6 +302,7 @@ dependencies = [
  "pollster 1.0.1",
  "raw-window-handle",
  "rustc-hash 2.1.3",
+ "skrifa",
  "vello_common",
  "vello_gpu",
  "wasm-bindgen",
